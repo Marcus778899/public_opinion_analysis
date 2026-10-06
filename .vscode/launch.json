@@ -1,0 +1,52 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "api (uvicorn --reload)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["radar.api.main:app", "--reload", "--port", "8000"],
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": true
+    },
+    {
+      "name": "scheduler",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "radar.collector.scheduler",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "crawler",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "radar.collector.crawler",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "ingest",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "radar.ingest.main",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "目前檔案",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "pytest：目前檔案",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["${file}", "-x", "-vv"],
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": false
+    }
+  ]
+}

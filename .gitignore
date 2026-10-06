@@ -1,0 +1,76 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# ---------- 工具快取 ----------
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# ---------- 設定與機密 ----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---------- Log ----------
+log/
+logs/
+*.log
+
+# ---------- 資料與 ML 產物 ----------
+# 爬下來的 PTT 內容、標註結果、回放錄製檔都不進 repo（版權與檔案大小）
+/data/
+/recordings/
+/labels_export/
+/models/
+*.parquet
+*.pkl
+*.joblib
+*.onnx
+*.pt
+*.safetensors
+.ipynb_checkpoints/
+
+# 測試用 PTT HTML fixture 例外，需要進 repo
+!tests/fixtures/**
+
+# ---------- 本地 docker volume ----------
+infra/**/volumes/
+
+# ---------- Terraform ----------
+# .terraform.lock.hcl 要進 repo
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# ---------- 編輯器與系統 ----------
+.idea/
+# .vscode 只共享這三個檔，其他個人設定不進 repo
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---------- Claude Code 本地設定 ----------
+.claude/settings.local.json
