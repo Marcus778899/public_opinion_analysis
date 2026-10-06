@@ -73,7 +73,7 @@ pre-commit run --all-files
 - ruff 設定見 `pyproject.toml`（行寬 100），提交前必須通過
 - 全部使用 type hints；不用 `Any`，除非接外部無型別資料
 - 設定從環境變數讀，不寫死；新增的環境變數同步加到 `.env.example`
-- Log 一律用 `from loggerhelper import log`，不用 `print` 或標準 `logging`；服務入口的 `main()` 加 `@log.catch(level="CRITICAL")`
+- Log 一律用 `from radar.common.log import log`（包裝 loggerhelper），不用 `print`、標準 `logging` 或直接 import loggerhelper；服務入口的 `main()` 第一行呼叫 `setup_logging("<服務名>")`，並加上 `@log.catch(level="CRITICAL")`
 - 不新增相依套件，除非先問過我
 
 ### 資料與架構約定（違反會造成資料錯誤）

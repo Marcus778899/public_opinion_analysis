@@ -240,8 +240,8 @@
 
 | 層級 | 範圍 | 工具 | 執行時機 |
 |---|---|---|---|
-| 單元 | parser、upsert SQL 組裝、熱度計算、年齡分級 | pytest | 每次 commit（CI） |
-| 整合 | 單一服務 + 真實 Kafka / PG | testcontainers | PR（CI） |
+| 單元 | parser、upsert SQL 組裝、熱度計算、年齡分級 | pytest | 本地每次 commit；CI 於合併到 `develop` / `main` 時 |
+| 整合 | 單一服務 + 真實 Kafka / PG（單節點即可） | testcontainers | CI 於合併到 `develop` / `main` 時 |
 | 端到端 | 整個 compose，用假 PTT 伺服器 | 本地 `make e2e` | 每階段驗收 |
 | 回放 | 把錄下來的 topic 資料重送，驗證熱度偵測 | 腳本 | 第 5 階段起 |
 
@@ -261,7 +261,7 @@
 | ID | 任務 |
 |---|---|
 | S0-01 | `pyproject.toml`、uv、ruff 設定；修正 pre-commit（見 8.2） |
-| S0-02 | docker-compose：Kafka（KRaft 單 broker）、PostgreSQL、Kafka UI（profile `debug`） |
+| S0-02 | docker-compose：Kafka（KRaft 3 節點，副本數 3、`min.insync.replicas=2`）、PostgreSQL、Kafka UI（profile `debug`） |
 | S0-03 | `common/`：settings、logging、Kafka producer/consumer 包裝（含 DLQ、優雅關閉）、PG 連線池 |
 | S0-04 | `infra/kafka/topics.yaml` + `scripts/create_topics.py`（冪等） |
 | S0-05 | 共用 Dockerfile（一個 image，靠 `command` 區分服務） |
@@ -310,7 +310,7 @@
 |---|---|
 | S2-01 | **Spike**：驗證 ClickHouse `AvroConfluent` 能讀 Apicurio 序列化的訊息（見 8.1），結論寫回設計文件 |
 | S2-02 | PG：`wal_level=logical`、只包含 `posts`、`comments` 的 publication |
-| S2-03 | Kafka Connect + Debezium + Apicurio 加入 compose；connector 設定存在 `infra/debezium/`，用腳本註冊 |
+| S2-03 | Kafka Connect + Debezium + Apicurio 加入 compose（參照 `kafka_tutorial/deployment` 的寫法）；connector 設定存在 `infra/debezium/`，用腳本註冊；**Apicurio 使用獨立的 database**，不可和 `radar` 共用，否則 Alembic autogenerate 會把 Apicurio 的表當成要刪除的表 |
 | S2-04 | Debezium 設定：`table.include.list`、heartbeat、`ExtractNewRecordState`（保留 `op`、`ts_ms`，刪除改寫為 `__deleted`） |
 | S2-05 | ClickHouse：Kafka engine 表 + materialized view → `posts_latest`、`posts_history`、`comments` |
 | S2-06 | ClickHouse：`labels`、`predictions`、`alerts` 的 JSON topic 接入（`JSONEachRow`） |
@@ -458,7 +458,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | PTT 封鎖 IP | 資料中斷 | 請求速率預算（≤ 1 次/秒）、隨機間隔、7.2 的重爬門檻 |
 | PTT 版面改版 | parser 失效 | `raw.html` 保留 3 天可重新解析；parser 失敗進 DLQ，`/status` 可看到 DLQ 數量暴增 |
 | Gemini 免費額度政策改變 | 標註成本上升 | 標註腳本抽象化 LLM 呼叫，可切換付費 API 的 Batch 模式 |
-| 單機記憶體不足（設計估 5.5～6.5GB） | 服務被 OOM kill | JVM heap 上限；階段 2 完成時實測記憶體 |
+| 單機記憶體不足（設計估 6～7GB） | 服務被 OOM kill | JVM heap 上限；階段 2 完成時實測記憶體 |
 
 ### 8.2 現有 repo 設定問題
 
