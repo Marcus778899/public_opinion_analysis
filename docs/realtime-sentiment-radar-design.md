@@ -550,14 +550,14 @@ services:
 
 | 服務 | 占用 |
 |---|---|
-| Kafka（KRaft，單 broker） | ~1GB |
+| Kafka（KRaft，3 節點） | ~1～1.5GB（實測閒置約 0.9GB） |
 | Kafka Connect + Debezium | ~1GB |
 | Apicurio | ~0.5GB |
 | ClickHouse | ~1GB+ |
 | PostgreSQL | ~0.3GB |
 | Kafka UI | ~0.3GB |
 | 自寫 Python 服務 | ~1～1.5GB |
-| **合計** | **約 5.5～6.5GB** |
+| **合計** | **約 6～7GB** |
 
 ### 11.2 吞吐量
 
