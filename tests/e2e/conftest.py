@@ -1,4 +1,4 @@
-"""端到端測試：需先 make e2e-up && make migrate topics（整套 compose 加上假 PTT 伺服器）。"""
+"""端到端測試：需先 make e2e-up（整套 compose 加上假 PTT；init 會建表、topic 與 connector）。"""
 
 import time
 import uuid
@@ -9,8 +9,9 @@ import httpx2
 import pytest
 from sqlalchemy import text
 
+from radar.common.clickhouse import ClickHouseClient, ClickHouseError
 from radar.common.db.session import make_engine
-from radar.common.settings import PostgresSettings
+from radar.common.settings import ClickHouseSettings, PostgresSettings
 
 E2E_DIR = Path(__file__).resolve().parent
 API_URL = "http://localhost:8000"
@@ -80,3 +81,18 @@ def post_row(db, post_id: str):
             text("SELECT push_count, boo_count, is_deleted FROM posts WHERE post_id = :id"),
             {"id": post_id},
         ).one_or_none()
+
+
+@pytest.fixture(scope="session")
+def clickhouse():
+    client = ClickHouseClient(ClickHouseSettings())
+    try:
+        client.execute("SELECT 1")
+    except (ClickHouseError, httpx2.HTTPError):
+        pytest.skip("ClickHouse 未啟動，請先 make e2e-up")
+    yield client
+    client.close()
+
+
+def clickhouse_rows(clickhouse, sql: str) -> list[list[str]]:
+    return [line.split("\t") for line in clickhouse.execute(f"{sql} FORMAT TSV").splitlines()]

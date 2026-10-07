@@ -36,3 +36,7 @@ topics:
   - name: dlq
     partitions: 1
     retention_hours: 720
+  # 系統 topic：broker 不自動建立 topic，Debezium heartbeat 需要先建好（設計文件 3.3、6.1）
+  - name: __debezium-heartbeat.cdc
+    partitions: 1
+    retention_hours: 24

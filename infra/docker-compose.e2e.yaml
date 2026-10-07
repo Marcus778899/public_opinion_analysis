@@ -16,6 +16,9 @@ services:
   kafka_3:
     volumes:
       - e2e_kafka_3_data:/var/lib/kafka/data
+  clickhouse:
+    volumes:
+      - e2e_clickhouse_data:/var/lib/clickhouse
 
   fake-ptt:
     image: radar-app:latest
@@ -46,3 +49,4 @@ volumes:
   e2e_kafka_1_data:
   e2e_kafka_2_data:
   e2e_kafka_3_data:
+  e2e_clickhouse_data:

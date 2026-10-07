@@ -68,6 +68,23 @@ class CrawlerSettings(BaseSettings):
     jitter_s: float = 2.0
 
 
+class ConnectSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="CONNECT_")
+
+    url: str = "http://localhost:8083"
+    # Kafka Connect 啟動要載入 plugin，冷啟動常需 1 分鐘以上
+    ready_timeout_s: float = 180.0
+
+
+class ClickHouseSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="CLICKHOUSE_")
+
+    url: str = "http://localhost:8123"
+    db: str = "radar"
+    user: str
+    password: SecretStr
+
+
 @lru_cache
 def get_postgres_settings() -> PostgresSettings:
     return PostgresSettings()
