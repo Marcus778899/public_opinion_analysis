@@ -44,6 +44,9 @@
 | HTML 解析 | selectolax（lexbor 後端） | 1.0 已移除舊的 `selectolax.parser` |
 | PG 存取 | SQLAlchemy 2.0（driver 用 psycopg 3） | 用法分工見 2.4 |
 | DB migration | Alembic | 由 ORM model 自動產生，再人工檢查 |
+| ML | scikit-learn（含 joblib） | 階段 3 baseline；階段 4 推論也在同一個 image 內使用 |
+| LLM 標註 | Gemini REST API（httpx2 直接呼叫） | 不用官方 SDK；包在 `Labeler` 介面後，換付費 API 只換實作（7.11） |
+| CDC Avro 解碼 | `confluent-kafka[avro]` | Python 端讀 `cdc.public.*`（S3-08、階段 4） |
 | Log | loggerhelper 2.0.0（`lib/` 內的 wheel） | `LOG_NAME` 設成服務名稱；訊息中帶 `post_id`（如有）；錯誤可選擇送 Slack |
 
 ### 1.2 Repo 結構
@@ -78,6 +81,9 @@
 | `make migrate` | `alembic upgrade head` |
 | `make topics` | 依 `topics.yaml` 建立或更新 topic（冪等） |
 | `make connector` | 註冊或更新 Debezium connector（冪等） |
+| `make up-labeling` | 啟動串流抽樣標註（S3-08，會持續呼叫 LLM API） |
+| `make testset` | 抽出 300 篇人工測試集（只能抽一次） |
+| `make human-label` | 本機人工標註頁（http://127.0.0.1:8090） |
 | `make ch-migrate` | 套用 ClickHouse 尚未執行的 migration |
 | `make api` | 本機啟動管理 API（http://localhost:8000/docs） |
 | `make seed` | 透過 API 建立初始看板（冪等，需先 `make api`） |
@@ -292,7 +298,9 @@
 | S1-06 Scheduler、S1-07 假 PTT 伺服器與端到端測試 | ✅ 完成 | #7 |
 | 階段 1 驗收（24 小時實際運作） | ⬜ 待執行 | — |
 | S2-01 Spike：ClickHouse 讀 Apicurio Avro | ✅ 完成（結論見設計文件 6.2；已改用 Debezium 3.7 / Apicurio 3.3 / ClickHouse 26.8 重新驗證） | — |
-| S2-02～S2-06 | 🚧 實作完成，待端到端測試（`tests/e2e/test_cdc.py`）與階段 2 驗收；階段 1 驗收期間不能啟動 e2e 環境 | — |
+| S2-02～S2-06 | 🚧 實作完成，待端到端測試（`tests/e2e/test_cdc.py`）與階段 2 驗收；階段 1 驗收期間不能啟動 e2e 環境 | #8 |
+| 列表任務 partition 修正（7.10） | ✅ 合併；develop → main 前重跑「停掉爬蟲 10 分鐘」 | #9 |
+| S3-01～S3-08 | 🚧 程式完成；待階段 2 運作累積資料後執行標註、人工測試集、訓練（驗收需 ≥ 3,000 篇） | — |
 
 階段 1 拆成 5 個 PR；全部完成後依下方「驗收」逐項驗證，通過才把 `develop` 合進 `main` 並打 `stage-1` tag。
 
@@ -461,7 +469,7 @@
 
 ## 7. 設計補充
 
-寫規格與實作時發現設計文件沒說清楚的地方，以下是決定。**7.1～7.8 皆已回寫設計文件（2026-10-07）；7.9 待階段 2 完成時回寫；7.10 已回寫設計文件 3.1**，本章保留決策理由。
+寫規格與實作時發現設計文件沒說清楚的地方，以下是決定。**7.1～7.8 皆已回寫設計文件（2026-10-07）；7.9 待階段 2 完成時回寫；7.10 已回寫設計文件 3.1；7.11 待階段 3 完成時回寫**，本章保留決策理由。
 
 ### 7.1 爬蟲如何判斷「推文數沒變就不抓內頁」
 
@@ -524,6 +532,37 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - 新增或停用看板會讓部分看板換 partition，只造成一次列表快取失效（7.1），結果仍正確
 - partition 數向 broker 查詢，不寫死；查詢失敗同樣退回 key hash，不讓任務停送（`resolve_list_partition`）
 
+### 7.11 LLM 標註與 baseline 的實作選擇（S3-01～S3-08）
+
+- **呼叫方式**：httpx2 直接呼叫 Gemini REST `generateContent`，以 `responseSchema` 要求固定 JSON；`Labeler` 介面隔離實作
+- **標註者來源**（皆實作 `Labeler`，產出相同的 `Label`，以 `labeler` 欄位區分）：
+  - Gemini REST（`GeminiLabeler`）
+  - OpenAI 相容 API（`OpenAICompatibleLabeler`）：Groq、OpenRouter 共用一個實作，只換 base URL、key、模型
+  - Claude（手動）：`export` 匯出一批文章 → 在 Claude Code 執行 skill `/label-posts` 標註 → `import` 驗證後送 Kafka；`labeler` 記為 `claude-sonnet-manual`。使用訂閱額度、由人觸發；需要全自動時改走 Anthropic API
+- **主要標註者**：固定一個模型跑完整個 backfill，不混用（系統性偏差不會因資料量變多而抵銷，反而被學得更確定）。人選由同一批文章比較後決定；`gemini-3.5-flash` 免費額度實測只有 20 次/天，不適合當主力
+- **第二標註者**：Claude Sonnet（手動 skill），與 Gemini 不同家族，錯誤較不相關，交叉比對才有意義；量約 1,000～1,500 篇
+- **額度以「專案 × 模型」計算**（Gemini 429 的 quotaId 為 `...PerProjectPerModel`）：同一專案輪流使用不同模型屬正常使用，多開專案或帳號湊同一模型的額度則可能違反條款
+- **限速**：免費額度以每分鐘、每日請求數計，`GEMINI_MIN_INTERVAL_S` 控制間隔；3,000 篇可能要分數天跑，backfill 必須可中斷續跑
+- **寫入**：標註結果送 Kafka `labels`（3.4），經 S2-06 進 ClickHouse；**不寫 PG**
+- **續跑**：抽樣時排除 ClickHouse `labels` 已有相同 `labeler` + `version` 的文章
+- **抽樣**：`posts_latest FINAL`，排除刪除文與空內文，依看板分層，以 `cityHash64(post_id, seed)` 排序取前 N 篇（同一個 seed 重跑結果一致）
+- **送給模型的文字**：標題 + 內文，內文超過 `LABEL_MAX_CHARS`（預設 2,000 字）截斷，控制 token
+- **人工測試集**：先抽 300 篇，`post_id` 清單存 `data/testset/post_ids.txt`，人工標註存 `data/testset/human_labels.jsonl`（`data/` 不進 repo）；訓練匯出一律排除這些文章
+- **人工標註頁**：`python -m radar.ml.labeling.human_app`，只綁 `127.0.0.1`，一篇一頁、鍵盤選情緒，可補對象
+- **訓練資料**：每篇取主要標註者的整篇情緒（`target IS NULL`）；兩個標註者整篇情緒不一致的文章不進訓練集，改列入 S3-03 的人工檢查 CSV
+- **模型產物**：`models/<model_version>/model.joblib` 與 `model_card.json`（`models/` 不進 repo）；`model_version` = `tfidf-lr-<UTC 日期時間>`
+- **S3-08 串流標註**用 `confluent-kafka[avro]` 解 Apicurio 序列化的 Avro（schema registry client 打 Apicurio 的 ccompat API）；階段 4 推論沿用同一套
+- **服務商輪替**：`FallbackLabeler` 依序嘗試多個 `Labeler`，遇到每日額度用完換下一個；只用在串流標註（S3-08）。backfill 固定主要標註者，額度用完就停、隔天續跑
+- **新聞文的標註準則**（prompt-v2）：
+  - 標題為 `[新聞]` 的文章只看作者的「心得/評論」段落；沒有或空白 → 整篇 neutral
+  - 心得只是重述新聞、沒有表態 → 整篇 neutral；但用了帶評價的字眼（例如「慘敗」「被打爆」）描述某個對象 → 該**對象**依字眼判斷
+  - LLM 與人工測試集使用同一份準則（`docs/labeling-guideline.md`），prompt 與 skill 都引用它
+- **調 prompt 的資料**（S3-01）：10～20 篇直接從 PG 取，不必等 ClickHouse
+- **限速器**：`RateLimiter` 從 `collector/` 搬到 `common/rate_limit.py`，爬蟲與標註共用
+- **模型實測**（2026-10-07，prompt 調整用的 15 篇）：主要標註者 `groq: qwen/qwen3.8-27b`；`gemini-3.1-flash-lite` 當串流備援；`gemini-3.5-flash` 免費 20 次/天、`gemini-3.1-pro` 免費額度為 0、`gemma-4` 在 Gemini 回 500、OpenRouter 免費模型全部被限速
+- **錯誤分類**：每分鐘限速、5xx、連線錯誤可重試；每日額度用完停止（backfill）或換下一個（串流）；輸出格式不符重送一次（qwen 偶爾漏掉整篇那一筆）；API key、模型名稱錯誤直接中止，不逐篇略過
+- **串流標註**：`FallbackLabeler` 依 `LABEL_PRIMARY`、`LABEL_FALLBACKS` 順序嘗試，額度用完的冷卻 1 小時；`Label.labeler` 記錄實際使用的模型。Schema registry 連不上時服務停止、由 docker 重啟，不送 DLQ（否則暫時故障會讓所有訊息進 DLQ）
+
 ### 7.7 `/status` 顯示最後變化時間（S1-03）
 
 
@@ -544,6 +583,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | PTT 恢復伺服器端的 over18 檢查 | 列表頁變成確認頁 | 2026-10 實測伺服器端已不檢查（只在瀏覽器以 JS 導向）；爬蟲仍帶 `over18=1` cookie，parser 遇到確認頁會拋 `ParseError` |
 | Gemini 免費額度政策改變 | 標註成本上升 | 標註腳本抽象化 LLM 呼叫，可切換付費 API 的 Batch 模式 |
 | 單機記憶體不足（設計估 6～7GB） | 服務被 OOM kill | JVM heap 上限；階段 2 完成時實測記憶體 |
+| Python 端讀不了 CDC 的 Avro | S3-08 串流標註、階段 4 推論卡住 | 採用 `confluent-kafka[avro]`（fastavro + 官方 schema registry client，打 Apicurio 的 ccompat API）；S3-08 以實際 CDC 訊息驗證 |
 
 ### 8.2 現有 repo 設定問題
 
