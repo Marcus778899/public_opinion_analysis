@@ -1,9 +1,9 @@
 # 即時輿情雷達：開發流程規格
 
-> 狀態：v0.1，對應設計文件 [realtime-sentiment-radar-design.md](realtime-sentiment-radar-design.md)
-> 最後更新：2026-10-06
+> 狀態：v0.2，對應設計文件 [realtime-sentiment-radar-design.md](realtime-sentiment-radar-design.md)
+> 最後更新：2026-10-07
 
-設計文件回答「要做什麼、為什麼」；本文件回答「怎麼做、做到什麼程度算完成」。兩者衝突時，先修設計文件再改本文件。
+設計文件回答「要做什麼、為什麼」；本文件回答「怎麼做、做到什麼程度算完成」。兩者衝突時，先修設計文件再改本文件。**文件必須與程式同步**：行為、格式、相依套件有變動時，同一個 PR 內一併更新。
 
 ## 架構圖
 
@@ -39,6 +39,9 @@
 | 測試 | pytest、pytest-asyncio、testcontainers | |
 | 設定 | pydantic-settings | 全部從環境變數讀，提供 `.env.example` |
 | Kafka client | confluent-kafka | |
+| Web API | FastAPI + uvicorn | 依賴以 `Annotated` 注入，測試以 `dependency_overrides` 換成 fake |
+| HTTP client | httpx2 | 爬蟲對 PTT 發請求；測試用 `MockTransport`，Starlette 的 TestClient 也使用它 |
+| HTML 解析 | selectolax（lexbor 後端） | 1.0 已移除舊的 `selectolax.parser` |
 | PG 存取 | SQLAlchemy 2.0（driver 用 psycopg 3） | 用法分工見 2.4 |
 | DB migration | Alembic | 由 ORM model 自動產生，再人工檢查 |
 | Log | loggerhelper 2.0.0（`lib/` 內的 wheel） | `LOG_NAME` 設成服務名稱；訊息中帶 `post_id`（如有）；錯誤可選擇送 Slack |
@@ -72,6 +75,8 @@
 | `make up` / `make down` | 啟動 / 關閉 docker-compose |
 | `make migrate` | `alembic upgrade head` |
 | `make topics` | 依 `topics.yaml` 建立或更新 topic（冪等） |
+| `make api` | 本機啟動管理 API（http://localhost:8000/docs） |
+| `make seed` | 透過 API 建立初始看板（冪等，需先 `make api`） |
 | `make lint` | ruff + bandit |
 | `make test` | 單元測試 |
 | `make test-int` | 整合測試（需要 Docker） |
@@ -101,7 +106,7 @@
 | 序列化 | 自寫 topic 用 JSON（pydantic model 定義在 `common/schemas.py`）；CDC topic 用 Avro + Apicurio |
 | 版本 | 每則 JSON 訊息帶 `schema_version`，只做向後相容的變更（加欄位） |
 | Key | 依設計文件：`post_id`；`crawl.tasks` 的列表任務例外，用 `board`（見 7.1） |
-| Producer | `acks=all`、`enable.idempotence=true`、`compression.type=zstd` |
+| Producer | `acks=all`、`enable.idempotence=true`、`compression.type=zstd`、`message.max.bytes=5MB`（`raw.html` 爆文可能超過預設 1MB） |
 | Consumer | 關閉 auto commit，處理完（含寫入下游）才 commit，at-least-once |
 | 錯誤處理 | 暫時性錯誤（網路、DB 斷線）：指數退避重試，不 commit；資料錯誤（解析、驗證失敗）：寫入 `dlq` 後 commit |
 | 優雅關閉 | 收到 SIGTERM 先處理完當前批次、commit、再關閉 |
@@ -153,6 +158,9 @@
 }
 ```
 
+- `type=post` 必須帶屬於 `board` 的 `post_id`；`type=list` 不可帶
+- Kafka key：list 任務用 `board`、post 任務用 `post_id`（`CrawlTask.kafka_key()`，見 7.1）
+
 ### 3.2 `raw.posts`
 
 ```json
@@ -169,6 +177,11 @@
 ```
 
 - `push_count` / `boo_count` 由內頁推文計算，不用列表頁的數字（列表頁有「爆」「X1」等非數值）
+- 驗證規則（不符合即 `ValidationError`，由 consumer 送 `dlq`）：
+  - 所有時間必須帶時區，統一轉成 UTC
+  - `post_id` 必須屬於 `board`；`floor` 從 1 開始且不重複
+  - `push_count` / `boo_count` 必須等於推文中 push / boo 的數量，對不上代表 parser 有 bug
+- **刪除快照**：文章頁 404 時送出 `is_deleted=true`、推噓數 0、沒有推文、`created_at` 由檔名 epoch 推算；Ingest 只據此標記刪除
 
 ### 3.3 `raw.html`
 
@@ -253,6 +266,19 @@
 ## 6. 階段規格
 
 規模估計：S = 1～3 天、M = 1 週、L = 2 週以上（以業餘時間計）。
+
+### 進度
+
+| 任務 | 狀態 | PR |
+|---|---|---|
+| 階段 0（S0-01～S0-06） | ✅ 完成 | #1 |
+| S1-01 資料表與訊息格式 | ✅ 完成 | #2 |
+| S1-02 PTT parser | ✅ 完成 | #4 |
+| S1-03 看板管理 API、S1-08 初始看板 | ✅ 完成 | #5 |
+| S1-04 爬蟲、S1-05 Ingest | ✅ 完成 | #6 |
+| S1-06 Scheduler、S1-07 端到端驗收 | ⬜ 未開始 | — |
+
+階段 1 拆成 5 個 PR；最後一個 PR 完成後依下方「驗收」逐項驗證。
 
 ### 階段 0：專案骨架（S）
 
@@ -416,9 +442,9 @@
 
 ---
 
-## 7. 設計補充（需回寫設計文件）
+## 7. 設計補充
 
-寫規格時發現設計文件沒說清楚的地方，以下是決定。
+寫規格與實作時發現設計文件沒說清楚的地方，以下是決定。**7.1～7.7 皆已回寫設計文件（2026-10-07）**，本章保留決策理由。
 
 ### 7.1 爬蟲如何判斷「推文數沒變就不抓內頁」
 
@@ -446,6 +472,18 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 
 `floor` 是推文在頁面中的順序。作者編輯文章時可能刪改推文，導致樓層位移、新舊推文對不上。MVP 接受此誤差；若實測影響明顯，再改用 `(user_id, commented_at, content)` 的 hash 當推文識別。
 
+### 7.5 刪除文的處理（S1-04、S1-05）
+
+文章頁 404 時，爬蟲送出刪除快照；若 Ingest 直接 upsert，推噓數會被清成 0、內文會被清空。因此 Ingest 只把既有文章的 `is_deleted` 設為 true，保留刪除前的內容；從未見過的文章略過。
+
+### 7.6 標題列入變化判斷（S1-05）
+
+設計原本只比對推噓數與內文。作者有時會改標題，不比對的話 `posts.title` 永遠停在第一次爬到的版本，所以 upsert 也比對並更新標題。
+
+### 7.7 `/status` 顯示最後變化時間（S1-03）
+
+設計原本寫「各看板最後爬取時間」，但 Ingest 只在內容有變化時寫入 `posts`，從 PG 拿不到真正的爬取時間。先回傳 `last_changed_at`（最後一次有變化），足以判斷資料是否持續流入；真正的爬取時間待爬蟲有記錄後再補。
+
 ---
 
 ## 8. 風險清單
@@ -456,7 +494,8 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 |---|---|---|
 | ClickHouse 讀不了 Apicurio 的 Avro 格式 | 階段 2 卡住 | S2-01 先做 spike；Apicurio 提供 Confluent 相容 API，Debezium 改用 Confluent 格式序列化；不行就讓 ClickHouse 改由小型 Python consumer 寫入 |
 | PTT 封鎖 IP | 資料中斷 | 請求速率預算（≤ 1 次/秒）、隨機間隔、7.2 的重爬門檻 |
-| PTT 版面改版 | parser 失效 | `raw.html` 保留 3 天可重新解析；parser 失敗進 DLQ，`/status` 可看到 DLQ 數量暴增 |
+| PTT 版面改版 | parser 失效 | `raw.html` 保留 3 天可重新解析；parser 失敗記 ERROR（可送 Slack），驗證失敗的訊息進 DLQ，`/status` 可看到 DLQ 數量 |
+| PTT 恢復伺服器端的 over18 檢查 | 列表頁變成確認頁 | 2026-10 實測伺服器端已不檢查（只在瀏覽器以 JS 導向）；爬蟲仍帶 `over18=1` cookie，parser 遇到確認頁會拋 `ParseError` |
 | Gemini 免費額度政策改變 | 標註成本上升 | 標註腳本抽象化 LLM 呼叫，可切換付費 API 的 Batch 模式 |
 | 單機記憶體不足（設計估 6～7GB） | 服務被 OOM kill | JVM heap 上限；階段 2 完成時實測記憶體 |
 
