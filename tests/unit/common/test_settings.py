@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from radar.common.settings import KafkaSettings, PostgresSettings
+from radar.common.settings import ApiSettings, KafkaSettings, PostgresSettings
 
 PG_ENV = {
     "POSTGRES_HOST": "db",
@@ -52,3 +52,21 @@ def test_kafka_settings_default_client_id(monkeypatch):
 
     assert s.bootstrap_servers == "a:9092,b:9094"
     assert s.client_id == "radar"
+
+
+def test_api_settings_cors_origins_default_empty(monkeypatch):
+    monkeypatch.delenv("API_CORS_ORIGINS", raising=False)
+
+    assert ApiSettings().cors_origins == []
+
+
+def test_api_settings_cors_origins_split_by_comma(monkeypatch):
+    monkeypatch.setenv("API_CORS_ORIGINS", " https://a.example.com/ , http://localhost:3000,, ")
+
+    assert ApiSettings().cors_origins == ["https://a.example.com", "http://localhost:3000"]
+
+
+def test_api_settings_cors_origins_empty_string(monkeypatch):
+    monkeypatch.setenv("API_CORS_ORIGINS", "")
+
+    assert ApiSettings().cors_origins == []
