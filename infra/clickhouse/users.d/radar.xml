@@ -1,0 +1,9 @@
+<!-- 使用者本身由 image 依 CLICKHOUSE_USER / CLICKHOUSE_PASSWORD 建立；這裡只補 named collection 權限 -->
+<clickhouse>
+  <users>
+    <radar>
+      <named_collection_control>1</named_collection_control>
+      <show_named_collections>1</show_named_collections>
+    </radar>
+  </users>
+</clickhouse>
