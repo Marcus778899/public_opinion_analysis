@@ -3,6 +3,8 @@ from pydantic import ValidationError
 
 from radar.common.settings import (
     ApiSettings,
+    ClickHouseSettings,
+    ConnectSettings,
     CrawlerSettings,
     KafkaSettings,
     PostgresSettings,
@@ -99,3 +101,36 @@ def test_scheduler_settings_from_env(monkeypatch):
     settings = SchedulerSettings()
 
     assert (settings.time_scale, settings.api_url) == (0.05, "http://api:8000")
+
+
+def test_connect_settings_defaults_to_localhost(monkeypatch):
+    monkeypatch.delenv("CONNECT_URL", raising=False)
+
+    assert ConnectSettings().url == "http://localhost:8083"
+
+
+def test_clickhouse_settings_reads_prefixed_env(monkeypatch):
+    for k, v in {
+        "CLICKHOUSE_URL": "http://ch:8123",
+        "CLICKHOUSE_DB": "radar",
+        "CLICKHOUSE_USER": "radar",
+        "CLICKHOUSE_PASSWORD": "secret",
+    }.items():
+        monkeypatch.setenv(k, v)
+
+    s = ClickHouseSettings()
+
+    assert (s.url, s.db, s.user, s.password.get_secret_value()) == (
+        "http://ch:8123",
+        "radar",
+        "radar",
+        "secret",
+    )
+
+
+def test_clickhouse_settings_missing_password_raises(monkeypatch):
+    monkeypatch.setenv("CLICKHOUSE_USER", "radar")
+    monkeypatch.delenv("CLICKHOUSE_PASSWORD", raising=False)
+
+    with pytest.raises(ValidationError):
+        ClickHouseSettings()

@@ -60,7 +60,9 @@
 ├── .env.example
 ├── infra/
 │   ├── postgres/migrations/ # Alembic（alembic.ini 放在根目錄）
-│   └── kafka/topics.yaml    # topic 定義，由 scripts/create_topics.py 套用
+│   ├── kafka/topics.yaml    # topic 定義，由 scripts/create_topics.py 套用
+│   ├── debezium/            # Connect image（含 Apicurio converter）、connector 設定
+│   └── clickhouse/          # config.d、users.d、migrations/（編號 SQL）
 ├── scripts/
 └── tests/
     ├── unit/
@@ -75,6 +77,8 @@
 | `make up` / `make down` | 啟動 / 關閉 docker-compose |
 | `make migrate` | `alembic upgrade head` |
 | `make topics` | 依 `topics.yaml` 建立或更新 topic（冪等） |
+| `make connector` | 註冊或更新 Debezium connector（冪等） |
+| `make ch-migrate` | 套用 ClickHouse 尚未執行的 migration |
 | `make api` | 本機啟動管理 API（http://localhost:8000/docs） |
 | `make seed` | 透過 API 建立初始看板（冪等，需先 `make api`） |
 | `make up-app` | 整套服務（含 api、scheduler、crawler ×3、ingest）以 compose 啟動，自動建表與 topic |
@@ -287,6 +291,8 @@
 | S1-04 爬蟲、S1-05 Ingest | ✅ 完成 | #6 |
 | S1-06 Scheduler、S1-07 假 PTT 伺服器與端到端測試 | ✅ 完成 | #7 |
 | 階段 1 驗收（24 小時實際運作） | ⬜ 待執行 | — |
+| S2-01 Spike：ClickHouse 讀 Apicurio Avro | ✅ 完成（結論見設計文件 6.2；已改用 Debezium 3.7 / Apicurio 3.3 / ClickHouse 26.8 重新驗證） | — |
+| S2-02～S2-06 | 🚧 實作完成，待端到端測試（`tests/e2e/test_cdc.py`）與階段 2 驗收；階段 1 驗收期間不能啟動 e2e 環境 | — |
 
 階段 1 拆成 5 個 PR；全部完成後依下方「驗收」逐項驗證，通過才把 `develop` 合進 `main` 並打 `stage-1` tag。
 
@@ -297,7 +303,7 @@
 | ID | 任務 |
 |---|---|
 | S0-01 | `pyproject.toml`、uv、ruff 設定；修正 pre-commit（見 8.2） |
-| S0-02 | docker-compose：Kafka（KRaft 3 節點，副本數 3、`min.insync.replicas=2`）、PostgreSQL、Kafka UI（profile `debug`） |
+| S0-02 | docker-compose：Kafka（KRaft 3 節點，副本數 3、`min.insync.replicas=2`）、PostgreSQL、Kafka UI（profile `debug`；階段 2 起改為預設啟動，部署前移除，見 S8-06） |
 | S0-03 | `common/`：settings、logging、Kafka producer/consumer 包裝（含 DLQ、優雅關閉）、PG 連線池 |
 | S0-04 | `infra/kafka/topics.yaml` + `scripts/create_topics.py`（冪等） |
 | S0-05 | 共用 Dockerfile（一個 image，靠 `command` 區分服務） |
@@ -439,6 +445,7 @@
 | S8-03 | Secrets 不進 repo（`.env` 由部署流程注入） |
 | S8-04 | PG 每日備份到另一個磁碟或物件儲存 |
 | S8-05 | 磁碟使用量監控：Kafka log、PG WAL、ClickHouse |
+| S8-06 | 移除 Kafka UI（開發期間預設啟動，沒有身分驗證） |
 
 **驗收**：連續運作 7 天不需人工介入，磁碟使用量穩定。
 
@@ -454,7 +461,7 @@
 
 ## 7. 設計補充
 
-寫規格與實作時發現設計文件沒說清楚的地方，以下是決定。**7.1～7.8 皆已回寫設計文件（2026-10-07）**，本章保留決策理由。
+寫規格與實作時發現設計文件沒說清楚的地方，以下是決定。**7.1～7.8 皆已回寫設計文件（2026-10-07）；7.9 待階段 2 完成時回寫**，本章保留決策理由。
 
 ### 7.1 爬蟲如何判斷「推文數沒變就不抓內頁」
 
@@ -497,6 +504,15 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - 每輪最多派發 500 篇重爬，高峰期分散到後面幾輪，避免爬蟲任務大量積壓
 - 已刪除的文章與停用看板的文章不再重爬
 
+### 7.9 CDC 與 ClickHouse 的部署方式（S2-02～S2-06）
+
+- **Apicurio 的 database**：PG 的 init script 只在空 volume 時執行，既有環境不會跑；改由一次性服務 `apicurio-db-init` 以 `CREATE DATABASE ... WHERE NOT EXISTS` 建立（冪等），Apicurio 等它完成才啟動
+- **Publication**：Alembic migration 建立 `radar_cdc`（只含 `posts`、`comments`），schema 變更都走 migration；Debezium 設 `publication.autocreate.mode=disabled`
+- **Connector 註冊**：`infra/debezium/radar-cdc.json` 以 `${VAR}` 引用環境變數，`scripts/register_connector.py` 替換後 `PUT /connectors/<name>/config`（冪等，設定有變就更新）
+- **ClickHouse schema**：`infra/clickhouse/migrations/NNNN_<name>.sql`，`scripts/migrate_clickhouse.py` 透過 HTTP 介面依序執行，已執行的版本記在 ClickHouse 的 `schema_migrations` 表
+- **執行順序**（`init` 服務）：Alembic → topic → ClickHouse migration → 註冊 connector。ClickHouse 先建好才開始產生 CDC 事件；Kafka engine 表從最早的 offset 讀，順序顛倒也不會掉資料
+- Apicurio、Kafka Connect、ClickHouse 放在預設 profile（`make up` 就啟動），階段 2 起它們是資料流的一部分
+
 ### 7.7 `/status` 顯示最後變化時間（S1-03）
 
 設計原本寫「各看板最後爬取時間」，但 Ingest 只在內容有變化時寫入 `posts`，從 PG 拿不到真正的爬取時間。先回傳 `last_changed_at`（最後一次有變化），足以判斷資料是否持續流入；真正的爬取時間待爬蟲有記錄後再補。
@@ -509,7 +525,8 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 
 | 風險 | 影響 | 對策 |
 |---|---|---|
-| ClickHouse 讀不了 Apicurio 的 Avro 格式 | 階段 2 卡住 | S2-01 先做 spike；Apicurio 提供 Confluent 相容 API，Debezium 改用 Confluent 格式序列化；不行就讓 ClickHouse 改由小型 Python consumer 寫入 |
+| ~~ClickHouse 讀不了 Apicurio 的 Avro 格式~~ | 階段 2 卡住 | **已排除（S2-01，2026-10-07）**：可直接讀，條件見設計文件 6.2 |
+| Debezium / Apicurio 升級後行為改變 | CDC 或 ClickHouse 讀取中斷 | 版本固定在 `.env.example`；升級時重跑設計文件 6.2 的檢查（2.x → 3.x 時就發現設定名稱被移除且不報錯） |
 | PTT 封鎖 IP | 資料中斷 | 請求速率預算（≤ 1 次/秒）、隨機間隔、7.2 的重爬門檻 |
 | PTT 版面改版 | parser 失效 | `raw.html` 保留 3 天可重新解析；parser 失敗記 ERROR（可送 Slack），驗證失敗的訊息進 DLQ，`/status` 可看到 DLQ 數量 |
 | PTT 恢復伺服器端的 over18 檢查 | 列表頁變成確認頁 | 2026-10 實測伺服器端已不檢查（只在瀏覽器以 JS 導向）；爬蟲仍帶 `over18=1` cookie，parser 遇到確認頁會拋 `ParseError` |
