@@ -1,6 +1,6 @@
 import pytest
 
-from radar.common.ids import make_post_id, split_post_id
+from radar.common.ids import board_index_url, is_valid_board, make_post_id, split_post_id
 
 
 def test_make_post_id_joins_board_and_filename():
@@ -34,3 +34,27 @@ def test_split_post_id_keeps_dots_in_filename():
 def test_split_post_id_rejects_missing_separator():
     with pytest.raises(ValueError):
         split_post_id("Stock")
+
+
+@pytest.mark.parametrize(
+    ("board", "valid"),
+    [
+        ("Stock", True),
+        ("Tech_Job", True),
+        ("a-b", True),
+        ("", False),
+        ("a.b", False),
+        ("a b", False),
+    ],
+)
+def test_is_valid_board(board, valid):
+    assert is_valid_board(board) is valid
+
+
+def test_board_index_url():
+    assert board_index_url("Tech_Job") == "https://www.ptt.cc/bbs/Tech_Job/index.html"
+
+
+def test_board_index_url_rejects_invalid_board():
+    with pytest.raises(ValueError):
+        board_index_url("../etc")

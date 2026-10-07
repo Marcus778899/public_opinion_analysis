@@ -1,7 +1,8 @@
 from functools import lru_cache
+from typing import Annotated
 
-from pydantic import SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import SecretStr, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy import URL
 
 
@@ -30,6 +31,20 @@ class KafkaSettings(BaseSettings):
 
     bootstrap_servers: str
     client_id: str = "radar"
+
+
+class ApiSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="API_")
+
+    # 允許跨網域呼叫的來源，逗號分隔；預設空白代表不開放任何跨網域請求
+    cors_origins: Annotated[list[str], NoDecode] = []
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_origins(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [o.strip().rstrip("/") for o in value.split(",") if o.strip()]
+        return value
 
 
 @lru_cache

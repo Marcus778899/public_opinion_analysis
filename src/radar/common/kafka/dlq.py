@@ -3,11 +3,12 @@ from datetime import UTC, datetime
 
 from confluent_kafka import Message
 
+from radar.common.kafka import names
 from radar.common.kafka.producer import JsonProducer
 from radar.common.log import log
 from radar.common.schemas import DlqRecord
 
-DLQ_TOPIC = "dlq"
+DLQ_TOPIC = names.DLQ
 
 
 def to_dlq_record(msg: Message, consumer: str, error: Exception) -> DlqRecord:
