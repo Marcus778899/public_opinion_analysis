@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from confluent_kafka import KafkaException
 from pydantic import BaseModel
 
 from radar.common.kafka.producer import DeliveryError, JsonProducer
@@ -69,3 +70,33 @@ def test_flush_raises_timeout_when_messages_remain():
 
     with pytest.raises(TimeoutError):
         producer.flush()
+
+
+def test_send_with_partition_passes_partition_to_produce():
+    fake = FakeProducer()
+
+    make(fake).send("t", "Stock", Event(id=1, text="x"), partition=2)
+
+    assert fake.produced[0]["partition"] == 2
+
+
+def test_send_without_partition_omits_partition():
+    fake = FakeProducer()
+
+    make(fake).send("t", "Stock", Event(id=1, text="x"))
+
+    assert "partition" not in fake.produced[0]
+
+
+def test_partition_count_reads_metadata_and_caches():
+    fake = FakeProducer(topic_partitions={"crawl.tasks": 3})
+    producer = make(fake)
+
+    assert producer.partition_count("crawl.tasks") == 3
+    assert producer.partition_count("crawl.tasks") == 3
+    assert fake.metadata_calls == 1
+
+
+def test_partition_count_missing_topic_raises():
+    with pytest.raises(KafkaException):
+        make(FakeProducer()).partition_count("nope")

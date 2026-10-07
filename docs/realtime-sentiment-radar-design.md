@@ -102,6 +102,7 @@
 - **看板是訊息欄位，不是 topic**：topic 數量與看板數量無關
 - **Partition key 用 `post_id`**：用 `board` 會因 Gossiping 量大造成負載不均
 - **例外：`crawl.tasks` 的列表任務 key 用 `board`**，讓同一看板固定由同一個爬蟲處理，爬蟲才能在記憶體記住列表推文數（4.2）；文章任務仍用 `post_id`
+- 列表任務的 partition 不靠 key 的 hash，而是依啟用中看板的名稱排序**輪流指定**，避免多個看板擠在同一個 partition（開發規格 7.10）
 
 ### 3.2 業務 topic
 

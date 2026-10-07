@@ -2,20 +2,30 @@
 
 from confluent_kafka import Consumer, TopicPartition
 
-from radar.common.enums import CrawlReason
+from radar.common.enums import CrawlReason, CrawlTaskType
 from radar.common.kafka import names
 from radar.common.kafka.producer import JsonProducer
 from radar.common.schemas import CrawlTask
-from radar.common.tasks import make_list_task
+from radar.common.tasks import make_list_task, resolve_list_partition
 
 
 def make_manual_list_task(board: str) -> CrawlTask:
     return make_list_task(board, CrawlReason.MANUAL)
 
 
-def dispatch_task(producer: JsonProducer, task: CrawlTask) -> None:
-    """寫入 crawl.tasks 並 flush，讓 API 回應時任務已落地。"""
-    producer.send(names.CRAWL_TASKS, task.kafka_key(), task)
+def dispatch_task(
+    producer: JsonProducer, task: CrawlTask, enabled_boards: list[str] | None = None
+) -> None:
+    """寫入 crawl.tasks 並 flush，讓 API 回應時任務已落地。
+
+    列表任務依 enabled_boards 指定 partition（開發規格 7.10）。
+    """
+    partition = None
+    if task.type is CrawlTaskType.LIST and enabled_boards is not None:
+        partition = resolve_list_partition(
+            task.board, enabled_boards, lambda: producer.partition_count(names.CRAWL_TASKS)
+        )
+    producer.send(names.CRAWL_TASKS, task.kafka_key(), task, partition=partition)
     producer.flush()
 
 

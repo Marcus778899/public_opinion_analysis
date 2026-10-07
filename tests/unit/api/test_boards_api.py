@@ -86,3 +86,21 @@ def test_trigger_crawl_kafka_failure_returns_503(client, repo, fake_producer):
     fake_producer.fail_delivery = True
 
     assert client.post("/boards/Stock/crawl").status_code == 503
+
+
+def test_trigger_crawl_sets_partition_from_enabled_boards(client, repo, fake_producer):
+    fake_producer.topic_partitions = {names.CRAWL_TASKS: 3}
+    for name in ["Gossiping", "Stock", "Tech_Job"]:
+        repo.add(name)
+    repo.add("Aaa", enabled=False)  # 停用的看板不參與排序
+
+    client.post("/boards/Stock/crawl")
+
+    assert fake_producer.produced[0]["partition"] == 1
+
+
+def test_trigger_crawl_metadata_failure_falls_back_to_key_hash(client, repo, fake_producer):
+    repo.add("Stock")  # fake_producer 沒有 crawl.tasks 的 metadata
+
+    assert client.post("/boards/Stock/crawl").status_code == 202
+    assert "partition" not in fake_producer.produced[0]
