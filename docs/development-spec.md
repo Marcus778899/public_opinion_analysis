@@ -1,6 +1,6 @@
 # 即時輿情雷達：開發流程規格
 
-> 狀態：v0.2，對應設計文件 [realtime-sentiment-radar-design.md](realtime-sentiment-radar-design.md)
+> 狀態：v0.3，對應設計文件 [realtime-sentiment-radar-design.md](realtime-sentiment-radar-design.md)
 > 最後更新：2026-10-07
 
 設計文件回答「要做什麼、為什麼」；本文件回答「怎麼做、做到什麼程度算完成」。兩者衝突時，先修設計文件再改本文件。**文件必須與程式同步**：行為、格式、相依套件有變動時，同一個 PR 內一併更新。
@@ -45,7 +45,7 @@
 | PG 存取 | SQLAlchemy 2.0（driver 用 psycopg 3） | 用法分工見 2.4 |
 | DB migration | Alembic | 由 ORM model 自動產生，再人工檢查 |
 | ML | scikit-learn（含 joblib） | 階段 3 baseline；階段 4 推論也在同一個 image 內使用 |
-| LLM 標註 | Gemini REST API（httpx2 直接呼叫） | 不用官方 SDK；包在 `Labeler` 介面後，換付費 API 只換實作（7.11） |
+| LLM 標註 | Groq、OpenRouter（OpenAI 相容 API）、Gemini REST，皆以 httpx2 直接呼叫 | 不用官方 SDK；包在 `Labeler` 介面後，換服務商只換實作；Claude 以 skill 手動標註（7.11） |
 | CDC Avro 解碼 | `confluent-kafka[avro]` | Python 端讀 `cdc.public.*`（S3-08、階段 4） |
 | Log | loggerhelper 2.0.0（`lib/` 內的 wheel） | `LOG_NAME` 設成服務名稱；訊息中帶 `post_id`（如有）；錯誤可選擇送 Slack |
 
@@ -66,18 +66,23 @@
 │   ├── kafka/topics.yaml    # topic 定義，由 scripts/create_topics.py 套用
 │   ├── debezium/            # Connect image（含 Apicurio converter）、connector 設定
 │   └── clickhouse/          # config.d、users.d、migrations/（編號 SQL）
+├── docs/labeling-guideline.md  # 情緒標註準則（LLM、Claude、人工共用）
+├── .claude/skills/label-posts/ # Claude 手動標註的 skill
 ├── scripts/
-└── tests/
-    ├── unit/
-    ├── integration/
-    └── fixtures/ptt/        # 存下來的 PTT HTML
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   ├── e2e/                 # 假 PTT 伺服器與端到端測試
+│   └── fixtures/ptt/        # 存下來的 PTT HTML
+├── data/                    # 不進 repo：testset/、manual/、datasets/、prompt-tuning/
+└── models/                  # 不進 repo：<model_version>/model.joblib、model_card.json
 ```
 
 ### 1.3 Makefile 指令
 
 | 指令 | 動作 |
 |---|---|
-| `make up` / `make down` | 啟動 / 關閉 docker-compose |
+| `make up` / `make down` | 啟動 / 關閉基礎設施：Kafka ×3、PG、Apicurio、Kafka Connect、ClickHouse、Kafka UI |
 | `make migrate` | `alembic upgrade head` |
 | `make topics` | 依 `topics.yaml` 建立或更新 topic（冪等） |
 | `make connector` | 註冊或更新 Debezium connector（冪等） |
@@ -87,7 +92,7 @@
 | `make ch-migrate` | 套用 ClickHouse 尚未執行的 migration |
 | `make api` | 本機啟動管理 API（http://localhost:8000/docs） |
 | `make seed` | 透過 API 建立初始看板（冪等，需先 `make api`） |
-| `make up-app` | 整套服務（含 api、scheduler、crawler ×3、ingest）以 compose 啟動，自動建表與 topic |
+| `make up-app` | 基礎設施加上 api、scheduler、crawler ×3、ingest；`init` 自動建表、建 topic、ClickHouse migration、註冊 connector |
 | `make e2e-up` / `make e2e` | 啟動端到端環境（假 PTT、e2e 專用 volume）/ 執行端到端測試 |
 | `make e2e-down` | 停止端到端環境並刪除其資料 volume |
 | `make lint` | ruff + bandit |
@@ -118,7 +123,7 @@
 |---|---|
 | 序列化 | 自寫 topic 用 JSON（pydantic model 定義在 `common/schemas.py`）；CDC topic 用 Avro + Apicurio |
 | 版本 | 每則 JSON 訊息帶 `schema_version`，只做向後相容的變更（加欄位） |
-| Key | 依設計文件：`post_id`；`crawl.tasks` 的列表任務例外，用 `board`（見 7.1） |
+| Key | 依設計文件：`post_id`；`crawl.tasks` 的列表任務例外，用 `board`（見 7.1），且 partition 由送出端明確指定（見 7.10） |
 | Producer | `acks=all`、`enable.idempotence=true`、`compression.type=zstd`、`message.max.bytes=5MB`（`raw.html` 爆文可能超過預設 1MB） |
 | Consumer | 關閉 auto commit，處理完（含寫入下游）才 commit，at-least-once |
 | 錯誤處理 | 暫時性錯誤（網路、DB 斷線）：指數退避重試，不 commit；資料錯誤（解析、驗證失敗）：寫入 `dlq` 後 commit |
@@ -173,6 +178,7 @@
 
 - `type=post` 必須帶屬於 `board` 的 `post_id`；`type=list` 不可帶
 - Kafka key：list 任務用 `board`、post 任務用 `post_id`（`CrawlTask.kafka_key()`，見 7.1）
+- list 任務的 partition 依啟用中看板的名稱排序輪流指定，不靠 key hash（`resolve_list_partition`，見 7.10）
 
 ### 3.2 `raw.posts`
 
@@ -207,13 +213,18 @@
 ```json
 {
   "schema_version": 1, "post_id": "...",
-  "labeler": "gemini-flash", "version": "prompt-v1", "labeled_at": "...",
+  "labeler": "groq:qwen/qwen3.8-27b", "version": "prompt-v4", "labeled_at": "...",
   "sentiments": [
     {"target": null, "polarity": "negative"},
     {"target": "台積電", "polarity": "positive"}
   ]
 }
 ```
+
+- `labeler`：實際標註的模型，OpenAI 相容服務商寫成 `<服務商>:<模型>`；Claude 手動標註為 `claude-sonnet-manual`
+- `version`：prompt 版本（`PROMPT_VERSION`），與 `docs/labeling-guideline.md` 的版本一致
+- 驗證規則：恰好一筆 `target = null`（整篇）；對象不可空白、不可重複；`polarity` 只能是 `positive`、`negative`、`neutral`
+- 人工測試集的標註**不送這個 topic**，只存在本機 `data/testset/`，避免混進訓練資料
 
 ### 3.5 `predictions`
 
@@ -267,7 +278,7 @@
 | 層級 | 範圍 | 工具 | 執行時機 |
 |---|---|---|---|
 | 單元 | parser、upsert SQL 組裝、熱度計算、年齡分級 | pytest | 本地每次 commit；CI 於 PR 開到及合併到 `develop` / `main` 時 |
-| 整合 | 單一服務 + 真實 Kafka / PG（單節點即可） | testcontainers | CI 於 PR 開到及合併到 `develop` / `main` 時 |
+| 整合 | 單一服務 + 真實 Kafka / PG / ClickHouse（單節點即可） | testcontainers | CI 於 PR 開到及合併到 `develop` / `main` 時 |
 | 端到端 | 整個 compose，用假 PTT 伺服器 | `make e2e-up && make e2e`（約 3～4 分鐘） | 每階段驗收 |
 | 回放 | 把錄下來的 topic 資料重送，驗證熱度偵測 | 腳本 | 第 5 階段起 |
 
@@ -278,7 +289,8 @@
   - Scheduler 以 `SCHEDULER_TIME_SCALE=0.05` 縮短重爬間隔
   - Postgres 與 Kafka 改掛 e2e 專用的 volume，不碰開發資料
   - 測試標記為 `e2e`，一般 `pytest` 與 CI 預設排除
-- **端到端情境**：新看板被排程並寫入 PG、新推文在重爬後反映、刪除文被標記、停用看板後停止爬取、爬蟲停止期間的任務在重啟後接續處理
+- **端到端情境**：新看板被排程並寫入 PG、新推文在重爬後反映、刪除文被標記、停用看板後停止爬取、爬蟲停止期間的任務在重啟後接續處理；階段 2 起加上 CDC：新文章進 `posts_latest`、推文數變化進 `posts_history`、推文帶看板進 `comments`、內容沒變的重爬不產生 CDC 事件（`tests/e2e/test_cdc.py`）
+- **LLM**：單元與整合測試一律用 `MockTransport` 或 fake，不呼叫真的 LLM API；prompt 調整才實際呼叫，結果存在 `data/prompt-tuning/`
 
 ---
 
@@ -296,13 +308,16 @@
 | S1-03 看板管理 API、S1-08 初始看板 | ✅ 完成 | #5 |
 | S1-04 爬蟲、S1-05 Ingest | ✅ 完成 | #6 |
 | S1-06 Scheduler、S1-07 假 PTT 伺服器與端到端測試 | ✅ 完成 | #7 |
-| 階段 1 驗收（24 小時實際運作） | ⬜ 待執行 | — |
-| S2-01 Spike：ClickHouse 讀 Apicurio Avro | ✅ 完成（結論見設計文件 6.2；已改用 Debezium 3.7 / Apicurio 3.3 / ClickHouse 26.8 重新驗證） | — |
-| S2-02～S2-06 | 🚧 實作完成，待端到端測試（`tests/e2e/test_cdc.py`）與階段 2 驗收；階段 1 驗收期間不能啟動 e2e 環境 | #8 |
-| 列表任務 partition 修正（7.10） | ✅ 合併；develop → main 前重跑「停掉爬蟲 10 分鐘」 | #9 |
-| S3-01～S3-08 | 🚧 程式完成；待階段 2 運作累積資料後執行標註、人工測試集、訓練（驗收需 ≥ 3,000 篇） | — |
+| 階段 1 驗收（24 小時實際運作） | 🚧 進行中：2026-10-07 06:04Z 開跑，紀錄見階段 1「驗收紀錄」 | — |
+| 列表任務 partition 修正（7.10） | ✅ 完成；`develop` 合進 `main` 前重跑「停掉爬蟲 10 分鐘」 | #9 |
+| S2-01 Spike：ClickHouse 讀 Apicurio Avro | ✅ 完成（結論見設計文件 6.2；以 Debezium 3.7 / Apicurio 3.3 / ClickHouse 26.8 驗證） | #8 |
+| S2-02～S2-06 CDC 與 ClickHouse | ✅ 程式完成；端到端測試（`tests/e2e/test_cdc.py`）待階段 1 驗收結束後執行 | #8 |
+| 階段 2 驗收（24 小時運作、WAL 延遲） | ⬜ 待執行 | — |
+| S3-01 標註準則與 prompt | ✅ 完成（prompt-v4，`docs/labeling-guideline.md`；15 篇實測選定標註者） | #10 |
+| S3-02～S3-08 標註、測試集、實驗、訓練、串流標註 | ✅ 程式完成；人工標註頁已在瀏覽器實測。實際標註、人工測試集、訓練待階段 2 累積資料後執行 | #10 |
+| 階段 3 驗收（≥ 3,000 篇、人工測試集評估、推噓比結論） | ⬜ 待執行 | — |
 
-階段 1 拆成 5 個 PR；全部完成後依下方「驗收」逐項驗證，通過才把 `develop` 合進 `main` 並打 `stage-1` tag。
+階段 1 拆成 5 個 PR；全部完成後依下方「驗收」逐項驗證，通過才把 `develop` 合進 `main` 並打 `stage-1` tag。之後各階段相同：驗收通過才打 `stage-<n>` tag。
 
 ### 階段 0：專案骨架（S）
 
@@ -352,6 +367,18 @@
 - 對 PTT 的平均請求速率 ≤ 1 次/秒（由爬蟲 log 統計）
 - `GET /status` 顯示各看板最後爬取時間與 DLQ 數量
 
+**驗收紀錄**（2026-10-07 06:04Z 開跑，develop @ `1cdeb6a`；lag 每 10 分鐘記錄於 `log/acceptance/lag.log`）
+
+| 項目 | 結果 |
+|---|---|
+| 看板同步 30 秒內反映 | ✅ 停用 3 秒、重新啟用 30 秒（以 Tech_Job 停用再啟用驗證；API 沒有 DELETE，新增測試看板會留下資料） |
+| 停掉爬蟲 10 分鐘再啟動 | ⚠️ 自動接續處理，但 partition 0 積壓 64 分鐘才消化完 → 7.10 修正（#9）；`develop` 合進 `main` 前重跑 |
+| `GET /status` | ✅ 各看板 `last_changed_at`（見 7.7）與 DLQ 數量 |
+| 熱門文章 `push_count` 隨時間更新 | ✅ 開跑後 30 分鐘內，39 篇中 18 篇有更新 |
+| 24 小時三個看板都有新文章 | ⏳ 2026-10-08 06:05Z 後統計 |
+| 請求速率 ≤ 1 次/秒 | ⏳ 同上，由爬蟲 log 統計；另記錄 PTT 回 520 的次數（目前未列入重試，見 8.1） |
+| 同一批 `raw.posts` 重送兩次，PG 不變 | ⏳ 驗收期間執行 |
+
 ### 階段 2：CDC 與 ClickHouse（M）
 
 **目標**：ClickHouse 看得到推噓數變化歷程。
@@ -361,7 +388,7 @@
 | S2-01 | **Spike**：驗證 ClickHouse `AvroConfluent` 能讀 Apicurio 序列化的訊息（見 8.1），結論寫回設計文件 |
 | S2-02 | PG：`wal_level=logical`、只包含 `posts`、`comments` 的 publication |
 | S2-03 | Kafka Connect + Debezium + Apicurio 加入 compose（參照 `kafka_tutorial/deployment` 的寫法）；connector 設定存在 `infra/debezium/`，用腳本註冊；**Apicurio 使用獨立的 database**，不可和 `radar` 共用，否則 Alembic autogenerate 會把 Apicurio 的表當成要刪除的表 |
-| S2-04 | Debezium 設定：`table.include.list`、heartbeat、`ExtractNewRecordState`（保留 `op`、`ts_ms`，刪除改寫為 `__deleted`） |
+| S2-04 | Debezium 設定：`table.include.list`、heartbeat、`ExtractNewRecordState`（附加 `__op`、`__source_ts_ms`、`__source_lsn`，刪除以 `delete.tombstone.handling.mode=rewrite` 改寫為 `__deleted`） |
 | S2-05 | ClickHouse：Kafka engine 表 + materialized view → `posts_latest`、`posts_history`、`comments` |
 | S2-06 | ClickHouse：`labels`、`predictions`、`alerts` 的 JSON topic 接入（`JSONEachRow`） |
 
@@ -378,13 +405,13 @@
 | ID | 任務 |
 |---|---|
 | S3-01 | 標註 prompt 與輸出 JSON schema（3.4 格式，含對象），10～20 篇手動調整到穩定 |
-| S3-02 | `ml/labeling/backfill.py`：從 ClickHouse 依看板分層抽樣，Gemini Flash 標註，限速 |
-| S3-03 | 第二個標註者交叉標註；不一致清單輸出成 CSV 供人工檢查 |
-| S3-04 | 人工測試集：300 篇，人工標註，**不給任何模型訓練** |
+| S3-02 | `ml/labeling/backfill.py`：從 ClickHouse 依看板分層抽樣，主要標註者（`LABEL_PRIMARY`，目前 Groq qwen）標註，限速、可中斷續跑 |
+| S3-03 | 第二個標註者（Claude，skill `/label-posts`）交叉標註；`cross_check` 輸出一致率、kappa 與不一致清單 CSV |
+| S3-04 | 人工測試集：300 篇（`make testset`），以本機標註頁標註（`make human-label`），**不給任何模型訓練** |
 | S3-05 | 推噓比弱標註實驗（設計文件 15.6），結論寫成短報告 |
 | S3-06 | `ml/training/`：export → train → evaluate；TF-IDF（字元 n-gram，免斷詞）+ Logistic Regression |
 | S3-07 | 模型產物：`models/<model_version>/`，含模型檔與 `model_card.json`（訓練資料版本、指標） |
-| S3-08 | `ml/labeling/stream.py`：只處理 `op=c` 事件，用 `hash(post_id) % 100 < 5` 抽樣（重跑結果一致） |
+| S3-08 | `ml/labeling/stream.py`：只處理 `op=c` 事件，用 `crc32(post_id) % 100 < 5` 抽樣（重跑結果一致；不用內建 `hash()`，它每個 process 結果不同）；`make up-labeling` 啟動 |
 
 **驗收**
 - 標註資料 ≥ 3,000 篇，三個看板都有
@@ -469,7 +496,7 @@
 
 ## 7. 設計補充
 
-寫規格與實作時發現設計文件沒說清楚的地方，以下是決定。**7.1～7.8 皆已回寫設計文件（2026-10-07）；7.9 待階段 2 完成時回寫；7.10 已回寫設計文件 3.1；7.11 待階段 3 完成時回寫**，本章保留決策理由。
+寫規格與實作時發現設計文件沒說清楚的地方，以下是決定。**7.1～7.8 皆已回寫設計文件（2026-10-07）；7.9 部分已寫入設計文件 6.1～6.3，其餘待階段 2 驗收後回寫；7.10 已回寫設計文件 3.1；7.11 部分已寫入設計文件 7.4，其餘待階段 3 驗收後回寫**，本章保留決策理由。
 
 ### 7.1 爬蟲如何判斷「推文數沒變就不抓內頁」
 
@@ -506,6 +533,10 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 
 設計原本只比對推噓數與內文。作者有時會改標題，不比對的話 `posts.title` 永遠停在第一次爬到的版本，所以 upsert 也比對並更新標題。
 
+### 7.7 `/status` 顯示最後變化時間（S1-03）
+
+設計原本寫「各看板最後爬取時間」，但 Ingest 只在內容有變化時寫入 `posts`，從 PG 拿不到真正的爬取時間。先回傳 `last_changed_at`（最後一次有變化），足以判斷資料是否持續流入；真正的爬取時間待爬蟲有記錄後再補。
+
 ### 7.8 Scheduler 的實作選擇（S1-06）
 
 - 用 `BlockingScheduler` 而非設計範例的 `AsyncIOScheduler`：專案程式皆為同步，async 版本只會多一層事件迴圈
@@ -534,15 +565,15 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 
 ### 7.11 LLM 標註與 baseline 的實作選擇（S3-01～S3-08）
 
-- **呼叫方式**：httpx2 直接呼叫 Gemini REST `generateContent`，以 `responseSchema` 要求固定 JSON；`Labeler` 介面隔離實作
+- **呼叫方式**：httpx2 直接呼叫，不用官方 SDK；Gemini 以 `responseSchema`、OpenAI 相容 API 以 `response_format: json_schema` 要求固定 JSON；`Labeler` 介面隔離實作
 - **標註者來源**（皆實作 `Labeler`，產出相同的 `Label`，以 `labeler` 欄位區分）：
   - Gemini REST（`GeminiLabeler`）
   - OpenAI 相容 API（`OpenAICompatibleLabeler`）：Groq、OpenRouter 共用一個實作，只換 base URL、key、模型
   - Claude（手動）：`export` 匯出一批文章 → 在 Claude Code 執行 skill `/label-posts` 標註 → `import` 驗證後送 Kafka；`labeler` 記為 `claude-sonnet-manual`。使用訂閱額度、由人觸發；需要全自動時改走 Anthropic API
-- **主要標註者**：固定一個模型跑完整個 backfill，不混用（系統性偏差不會因資料量變多而抵銷，反而被學得更確定）。人選由同一批文章比較後決定；`gemini-3.5-flash` 免費額度實測只有 20 次/天，不適合當主力
-- **第二標註者**：Claude Sonnet（手動 skill），與 Gemini 不同家族，錯誤較不相關，交叉比對才有意義；量約 1,000～1,500 篇
+- **主要標註者**：固定一個模型跑完整個 backfill，不混用（系統性偏差不會因資料量變多而抵銷，反而被學得更確定）。由同一批 15 篇比較後選定 `groq: qwen/qwen3.8-27b`（見下方「模型實測」）
+- **第二標註者**：Claude Sonnet（手動 skill），與主要標註者不同家族，錯誤較不相關，交叉比對才有意義；量約 1,000～1,500 篇；只標主要標註者已標過的文章，兩邊才有重疊可比
 - **額度以「專案 × 模型」計算**（Gemini 429 的 quotaId 為 `...PerProjectPerModel`）：同一專案輪流使用不同模型屬正常使用，多開專案或帳號湊同一模型的額度則可能違反條款
-- **限速**：免費額度以每分鐘、每日請求數計，`GEMINI_MIN_INTERVAL_S` 控制間隔；3,000 篇可能要分數天跑，backfill 必須可中斷續跑
+- **限速**：免費額度以每分鐘、每日請求數計，各服務商的 `*_MIN_INTERVAL_S` 控制間隔；3,000 篇可能要分數天跑，backfill 必須可中斷續跑
 - **寫入**：標註結果送 Kafka `labels`（3.4），經 S2-06 進 ClickHouse；**不寫 PG**
 - **續跑**：抽樣時排除 ClickHouse `labels` 已有相同 `labeler` + `version` 的文章
 - **抽樣**：`posts_latest FINAL`，排除刪除文與空內文，依看板分層，以 `cityHash64(post_id, seed)` 排序取前 N 篇（同一個 seed 重跑結果一致）
@@ -553,20 +584,17 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - **模型產物**：`models/<model_version>/model.joblib` 與 `model_card.json`（`models/` 不進 repo）；`model_version` = `tfidf-lr-<UTC 日期時間>`
 - **S3-08 串流標註**用 `confluent-kafka[avro]` 解 Apicurio 序列化的 Avro（schema registry client 打 Apicurio 的 ccompat API）；階段 4 推論沿用同一套
 - **服務商輪替**：`FallbackLabeler` 依序嘗試多個 `Labeler`，遇到每日額度用完換下一個；只用在串流標註（S3-08）。backfill 固定主要標註者，額度用完就停、隔天續跑
-- **新聞文的標註準則**（prompt-v2）：
+- **標註準則**（prompt-v4，全文與修訂紀錄見 `docs/labeling-guideline.md`）：
   - 標題為 `[新聞]` 的文章只看作者的「心得/評論」段落；沒有或空白 → 整篇 neutral
-  - 心得只是重述新聞、沒有表態 → 整篇 neutral；但用了帶評價的字眼（例如「慘敗」「被打爆」）描述某個對象 → 該**對象**依字眼判斷
-  - LLM 與人工測試集使用同一份準則（`docs/labeling-guideline.md`），prompt 與 skill 都引用它
+  - 心得用了帶評價的字眼（例如「慘敗」「被打爆」「笑死」）即視為表態，整篇與該對象都依字眼的語氣判斷；只是中性摘要 → neutral。v2、v3 曾規定「整篇 neutral、對象另判」，三個模型都無法遵守，v4 改成人與模型都能一致遵守的版本
+  - 轉貼他人貼文時，被轉貼者的立場不是作者的立場；只被提及、被詢問的對象不列
+  - LLM、Claude skill、人工測試集使用同一份準則；`RULES` 與文件逐字一致由單元測試檢查
+- **人工標註頁的輔助**：心得段落加底色並可跳轉、引用他人的行變灰（對應準則規則 7、9）；新增對象的情緒預設與整篇相同，避免沒改下拉選單而默默存成中立（瀏覽器實測發現）
 - **調 prompt 的資料**（S3-01）：10～20 篇直接從 PG 取，不必等 ClickHouse
 - **限速器**：`RateLimiter` 從 `collector/` 搬到 `common/rate_limit.py`，爬蟲與標註共用
 - **模型實測**（2026-10-07，prompt 調整用的 15 篇）：主要標註者 `groq: qwen/qwen3.8-27b`；`gemini-3.1-flash-lite` 當串流備援；`gemini-3.5-flash` 免費 20 次/天、`gemini-3.1-pro` 免費額度為 0、`gemma-4` 在 Gemini 回 500、OpenRouter 免費模型全部被限速
 - **錯誤分類**：每分鐘限速、5xx、連線錯誤可重試；每日額度用完停止（backfill）或換下一個（串流）；輸出格式不符重送一次（qwen 偶爾漏掉整篇那一筆）；API key、模型名稱錯誤直接中止，不逐篇略過
 - **串流標註**：`FallbackLabeler` 依 `LABEL_PRIMARY`、`LABEL_FALLBACKS` 順序嘗試，額度用完的冷卻 1 小時；`Label.labeler` 記錄實際使用的模型。Schema registry 連不上時服務停止、由 docker 重啟，不送 DLQ（否則暫時故障會讓所有訊息進 DLQ）
-
-### 7.7 `/status` 顯示最後變化時間（S1-03）
-
-
-設計原本寫「各看板最後爬取時間」，但 Ingest 只在內容有變化時寫入 `posts`，從 PG 拿不到真正的爬取時間。先回傳 `last_changed_at`（最後一次有變化），足以判斷資料是否持續流入；真正的爬取時間待爬蟲有記錄後再補。
 
 ---
 
@@ -581,9 +609,12 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | PTT 封鎖 IP | 資料中斷 | 請求速率預算（≤ 1 次/秒）、隨機間隔、7.2 的重爬門檻 |
 | PTT 版面改版 | parser 失效 | `raw.html` 保留 3 天可重新解析；parser 失敗記 ERROR（可送 Slack），驗證失敗的訊息進 DLQ，`/status` 可看到 DLQ 數量 |
 | PTT 恢復伺服器端的 over18 檢查 | 列表頁變成確認頁 | 2026-10 實測伺服器端已不檢查（只在瀏覽器以 JS 導向）；爬蟲仍帶 `over18=1` cookie，parser 遇到確認頁會拋 `ParseError` |
-| Gemini 免費額度政策改變 | 標註成本上升 | 標註腳本抽象化 LLM 呼叫，可切換付費 API 的 Batch 模式 |
+| LLM 免費額度不足或政策改變 | 標註進度變慢或成本上升 | 實測 `gemini-3.5-flash` 免費只有 20 次/天、`gemini-3.1-pro` 為 0；`Labeler` 介面可換服務商（Groq、OpenRouter、Gemini）或改付費 Batch API；backfill 可中斷續跑 |
 | 單機記憶體不足（設計估 6～7GB） | 服務被 OOM kill | JVM heap 上限；階段 2 完成時實測記憶體 |
-| Python 端讀不了 CDC 的 Avro | S3-08 串流標註、階段 4 推論卡住 | 採用 `confluent-kafka[avro]`（fastavro + 官方 schema registry client，打 Apicurio 的 ccompat API）；S3-08 以實際 CDC 訊息驗證 |
+| PTT 回 HTTP 520（Cloudflare） | 該篇內頁本輪略過 | 驗收首日出現 2 次，之後的重爬會再抓到；24 小時統計後決定是否把 520 列入重試 |
+| 開發機休眠 | 長時間驗收中斷、數據缺一段 | 驗收期間 `caffeinate -dims` 並接電源、不闔上螢幕（闔上仍會強制睡眠）；上雲後（階段 8）不再依賴開發機 |
+| 標註的系統性偏差 | 模型學到錯誤標準，資料越多越確定 | 固定主要標註者、改 prompt 修偏差、兩個不同家族的標註者交叉比對、人工測試集裁決（7.11） |
+| Python 端讀不了 CDC 的 Avro | S3-08 串流標註、階段 4 推論卡住 | 採用 `confluent-kafka[avro]`（fastavro + 官方 schema registry client，打 Apicurio 的 ccompat API）；已用 mock schema registry 與 S2-01 實測的欄位驗證解碼，待以實際 CDC 訊息確認 |
 
 ### 8.2 現有 repo 設定問題
 
