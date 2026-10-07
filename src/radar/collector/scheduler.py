@@ -25,7 +25,7 @@ from radar.common.kafka import names
 from radar.common.kafka.producer import DeliveryError, JsonProducer
 from radar.common.log import log, setup_logging
 from radar.common.settings import SchedulerSettings, get_kafka_settings, get_postgres_settings
-from radar.common.tasks import make_list_task
+from radar.common.tasks import make_list_task, resolve_list_partition
 
 ADVISORY_LOCK_KEY = 7_200_001  # 任意固定值，只用於 Scheduler
 BOARD_JOB_PREFIX = "board:"
@@ -93,13 +93,25 @@ def sync_board_jobs(
             log.info("board timer rescheduled: %s every %ss", name, board.interval_sec)
 
 
-def make_list_task_sender(producer: JsonProducer) -> Callable[[str], None]:
-    """回傳 send_list_task(board)：送出 reason=schedule 的列表任務並 flush。"""
+def enabled_board_names(boards: list[BoardOut]) -> list[str]:
+    return [b.board for b in boards if b.enabled]
+
+
+def make_list_task_sender(
+    producer: JsonProducer, enabled_boards: Callable[[], list[str]]
+) -> Callable[[str], None]:
+    """回傳 send_list_task(board)：送出 reason=schedule 的列表任務並 flush。
+
+    enabled_boards 回傳最近一次同步到的啟用看板，用來決定 partition（開發規格 7.10）。
+    """
 
     def send_list_task(board: str) -> None:
         task = make_list_task(board, CrawlReason.SCHEDULE)
         try:
-            producer.send(names.CRAWL_TASKS, task.kafka_key(), task)
+            partition = resolve_list_partition(
+                board, enabled_boards(), lambda: producer.partition_count(names.CRAWL_TASKS)
+            )
+            producer.send(names.CRAWL_TASKS, task.kafka_key(), task, partition=partition)
             producer.flush()
         except (DeliveryError, TimeoutError, KafkaException, BufferError) as e:
             # 不讓計時器停掉；下一次觸發再送
@@ -203,7 +215,9 @@ def main() -> None:
         timezone=UTC,
         job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 30},
     )
-    sender = make_list_task_sender(producer)
+    # 最近一次同步到的啟用看板；sync_boards 更新、send_list_task 讀取，兩者都在 scheduler 執行緒
+    enabled: list[str] = []
+    sender = make_list_task_sender(producer, lambda: enabled)
     dispatcher = DuePostDispatcher(
         make_session_factory(engine),
         producer,
@@ -214,6 +228,7 @@ def main() -> None:
     def sync_boards() -> None:
         fetched = boards.fetch()
         if fetched is not None:
+            enabled[:] = enabled_board_names(fetched)
             sync_board_jobs(scheduler, fetched, sender)
 
     def lock_heartbeat() -> None:

@@ -1,4 +1,4 @@
-from confluent_kafka import KafkaError, Message, Producer
+from confluent_kafka import KafkaError, KafkaException, Message, Producer
 from pydantic import BaseModel
 
 from radar.common.kafka.config import producer_config
@@ -19,16 +19,28 @@ class JsonProducer:
         # NOTE: producer 可注入，單元測試用 fake 取代真的 confluent Producer
         self._producer = producer or Producer(producer_config(settings))
         self._errors: list[KafkaError] = []
+        self._partition_counts: dict[str, int] = {}
 
-    def send(self, topic: str, key: str, value: BaseModel) -> None:
+    def send(self, topic: str, key: str, value: BaseModel, partition: int | None = None) -> None:
+        """partition 為 None 時由 key hash 決定。"""
         payload = value.model_dump_json().encode()
         try:
-            self._produce(topic, key, payload)
+            self._produce(topic, key, payload, partition)
         except BufferError:
             # 本地佇列滿了：先讓已送出的訊息完成 delivery 再重試一次
             self._producer.poll(1.0)
-            self._produce(topic, key, payload)
+            self._produce(topic, key, payload, partition)
         self._producer.poll(0)
+
+    def partition_count(self, topic: str, timeout_s: float = 5.0) -> int:
+        """向 broker 查 topic 的 partition 數；結果快取，避免每次送出都查 metadata。"""
+        if topic not in self._partition_counts:
+            meta = self._producer.list_topics(topic, timeout=timeout_s).topics.get(topic)
+            if meta is None or meta.error is not None or not meta.partitions:
+                error = meta.error if meta is not None and meta.error is not None else None
+                raise KafkaException(error or KafkaError(KafkaError.UNKNOWN_TOPIC_OR_PART))
+            self._partition_counts[topic] = len(meta.partitions)
+        return self._partition_counts[topic]
 
     def flush(self, timeout_s: float = 10.0) -> None:
         remaining = self._producer.flush(timeout_s)
@@ -38,9 +50,11 @@ class JsonProducer:
             errors, self._errors = self._errors, []
             raise DeliveryError(errors)
 
-    def _produce(self, topic: str, key: str, payload: bytes) -> None:
+    def _produce(self, topic: str, key: str, payload: bytes, partition: int | None) -> None:
+        # NOTE: 不指定時不能傳 None，confluent 只接受 int；省略參數才會用 key hash
+        extra = {} if partition is None else {"partition": partition}
         self._producer.produce(
-            topic, key=key.encode(), value=payload, on_delivery=self._on_delivery
+            topic, key=key.encode(), value=payload, on_delivery=self._on_delivery, **extra
         )
 
     def _on_delivery(self, err: KafkaError | None, msg: Message) -> None:

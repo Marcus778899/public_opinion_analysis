@@ -46,7 +46,8 @@ def trigger_crawl(board: str, repo: Repository, producer: Producer) -> CrawlAcce
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"board {board} not found") from e
     task = make_manual_list_task(board)
     try:
-        dispatch_task(producer, task)
+        enabled = [b.board for b in repo.list_all() if b.enabled]
+        dispatch_task(producer, task, enabled_boards=enabled)
     except (DeliveryError, TimeoutError, KafkaException, BufferError) as e:
         log.error("manual crawl dispatch failed for %s: %s", board, e)
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "kafka unavailable") from e
