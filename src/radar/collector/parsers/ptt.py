@@ -15,10 +15,8 @@ from radar.collector.parsers.ptt_time import (
     parse_comment_time,
 )
 from radar.common.enums import CommentType
-from radar.common.ids import make_post_id, split_post_id
+from radar.common.ids import PTT_BASE_URL, make_post_id, split_post_id
 from radar.common.schemas import RawComment, RawPost
-
-PTT_BASE_URL = "https://www.ptt.cc"
 
 # 列表頁推文數的特殊值：「爆」代表 >= 100，「X1」～「X9」、「XX」代表噓多於推
 LIST_PUSH_BOOM = 100
