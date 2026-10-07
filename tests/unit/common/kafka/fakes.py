@@ -54,19 +54,44 @@ class FakeMessage:
 
 
 @dataclass
+class FakeTopicMetadata:
+    partitions: dict[int, object]
+    error: FakeError | None = None
+
+
+@dataclass
+class FakeClusterMetadata:
+    topics: dict[str, FakeTopicMetadata]
+
+
+@dataclass
 class FakeProducer:
     fail_delivery: bool = False
     remaining_on_flush: int = 0
     buffer_full_times: int = 0
+    # list_topics 回傳的 topic → partition 數；不在其中的 topic 視為不存在
+    topic_partitions: dict[str, int] = field(default_factory=dict)
+    metadata_calls: int = 0
     produced: list[dict[str, Any]] = field(default_factory=list)
     _pending: list[tuple[Callable[..., None], FakeMessage]] = field(default_factory=list)
 
-    def produce(self, topic: str, key: bytes, value: bytes, on_delivery: Callable) -> None:
+    def produce(
+        self, topic: str, key: bytes, value: bytes, on_delivery: Callable, **kwargs: int
+    ) -> None:
         if self.buffer_full_times:
             self.buffer_full_times -= 1
             raise BufferError("queue full")
-        self.produced.append({"topic": topic, "key": key, "value": value})
+        self.produced.append({"topic": topic, "key": key, "value": value, **kwargs})
         self._pending.append((on_delivery, FakeMessage(value, key, topic)))
+
+    def list_topics(self, topic: str, timeout: float = -1) -> FakeClusterMetadata:
+        self.metadata_calls += 1
+        if topic not in self.topic_partitions:
+            return FakeClusterMetadata(topics={})
+        count = self.topic_partitions[topic]
+        return FakeClusterMetadata(
+            topics={topic: FakeTopicMetadata(partitions=dict.fromkeys(range(count)))}
+        )
 
     def poll(self, timeout: float = 0) -> int:
         return 0

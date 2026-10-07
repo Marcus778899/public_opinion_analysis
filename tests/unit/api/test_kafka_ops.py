@@ -5,6 +5,7 @@ from radar.common.enums import CrawlReason, CrawlTaskType
 from radar.common.kafka import names
 from radar.common.kafka.producer import JsonProducer
 from radar.common.settings import KafkaSettings
+from radar.common.tasks import make_post_task
 from tests.unit.api.conftest import FakeAdminConsumer
 from tests.unit.common.kafka.fakes import FakeProducer
 
@@ -44,3 +45,32 @@ def test_count_dlq_messages_sums_watermarks():
 
 def test_count_dlq_messages_missing_topic_returns_zero():
     assert count_dlq_messages(FakeAdminConsumer({})) == 0
+
+
+def producer_with_partitions(fake: FakeProducer) -> JsonProducer:
+    fake.topic_partitions = {names.CRAWL_TASKS: 3}
+    return JsonProducer(KafkaSettings(bootstrap_servers="x"), producer=fake)
+
+
+def test_dispatch_list_task_sets_partition_from_enabled_boards():
+    fake = FakeProducer()
+
+    dispatch_task(
+        producer_with_partitions(fake),
+        make_manual_list_task("Tech_Job"),
+        enabled_boards=["Gossiping", "Stock", "Tech_Job"],
+    )
+
+    assert fake.produced[0]["partition"] == 2
+
+
+def test_dispatch_post_task_ignores_enabled_boards():
+    fake = FakeProducer()
+    post_id = "Stock.M.1759730000.A.1B2"
+    url = "https://www.ptt.cc/bbs/Stock/M.1759730000.A.1B2.html"
+    task = make_post_task(post_id, "Stock", url, CrawlReason.MANUAL)
+
+    dispatch_task(producer_with_partitions(fake), task, enabled_boards=["Stock"])
+
+    assert fake.produced[0]["key"] == post_id.encode()
+    assert "partition" not in fake.produced[0]
