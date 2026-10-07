@@ -77,6 +77,9 @@
 | `make topics` | 依 `topics.yaml` 建立或更新 topic（冪等） |
 | `make api` | 本機啟動管理 API（http://localhost:8000/docs） |
 | `make seed` | 透過 API 建立初始看板（冪等，需先 `make api`） |
+| `make up-app` | 整套服務（含 api、scheduler、crawler ×3、ingest）以 compose 啟動，自動建表與 topic |
+| `make e2e-up` / `make e2e` | 啟動端到端環境（假 PTT、e2e 專用 volume）/ 執行端到端測試 |
+| `make e2e-down` | 停止端到端環境並刪除其資料 volume |
 | `make lint` | ruff + bandit |
 | `make test` | 單元測試 |
 | `make test-int` | 整合測試（需要 Docker） |
@@ -255,11 +258,17 @@
 |---|---|---|---|
 | 單元 | parser、upsert SQL 組裝、熱度計算、年齡分級 | pytest | 本地每次 commit；CI 於 PR 開到及合併到 `develop` / `main` 時 |
 | 整合 | 單一服務 + 真實 Kafka / PG（單節點即可） | testcontainers | CI 於 PR 開到及合併到 `develop` / `main` 時 |
-| 端到端 | 整個 compose，用假 PTT 伺服器 | 本地 `make e2e` | 每階段驗收 |
+| 端到端 | 整個 compose，用假 PTT 伺服器 | `make e2e-up && make e2e`（約 3～4 分鐘） | 每階段驗收 |
 | 回放 | 把錄下來的 topic 資料重送，驗證熱度偵測 | 腳本 | 第 5 階段起 |
 
 - **PTT fixture**：每種頁面至少存一份 HTML（一般文、刪除文、爆文、含 IP 的推文、跨年推文、被編輯過的文章），parser 測試只讀 fixture
-- **假 PTT 伺服器**：一個小型 FastAPI app，回傳 fixture，並能動態增加推文，供端到端測試模擬「推文持續增加」
+- **假 PTT 伺服器**（`tests/e2e/fake_ptt.py`）：小型 FastAPI app，產生與 PTT 相同結構的頁面，並提供控制端點新增文章、推文、刪除文章；單元測試確認其頁面能被正式 parser 解析
+- **端到端環境**：
+  - 爬蟲以 `CRAWLER_PTT_BASE_URL` 改打假伺服器（只換主機，資料中的網址仍是 `www.ptt.cc`），任何請求都不會打到真的 PTT
+  - Scheduler 以 `SCHEDULER_TIME_SCALE=0.05` 縮短重爬間隔
+  - Postgres 與 Kafka 改掛 e2e 專用的 volume，不碰開發資料
+  - 測試標記為 `e2e`，一般 `pytest` 與 CI 預設排除
+- **端到端情境**：新看板被排程並寫入 PG、新推文在重爬後反映、刪除文被標記、停用看板後停止爬取、爬蟲停止期間的任務在重啟後接續處理
 
 ---
 
@@ -276,9 +285,10 @@
 | S1-02 PTT parser | ✅ 完成 | #4 |
 | S1-03 看板管理 API、S1-08 初始看板 | ✅ 完成 | #5 |
 | S1-04 爬蟲、S1-05 Ingest | ✅ 完成 | #6 |
-| S1-06 Scheduler、S1-07 端到端驗收 | ⬜ 未開始 | — |
+| S1-06 Scheduler、S1-07 假 PTT 伺服器與端到端測試 | ✅ 完成 | #7 |
+| 階段 1 驗收（24 小時實際運作） | ⬜ 待執行 | — |
 
-階段 1 拆成 5 個 PR；最後一個 PR 完成後依下方「驗收」逐項驗證。
+階段 1 拆成 5 個 PR；全部完成後依下方「驗收」逐項驗證，通過才把 `develop` 合進 `main` 並打 `stage-1` tag。
 
 ### 階段 0：專案骨架（S）
 
@@ -444,7 +454,7 @@
 
 ## 7. 設計補充
 
-寫規格與實作時發現設計文件沒說清楚的地方，以下是決定。**7.1～7.7 皆已回寫設計文件（2026-10-07）**，本章保留決策理由。
+寫規格與實作時發現設計文件沒說清楚的地方，以下是決定。**7.1～7.8 皆已回寫設計文件（2026-10-07）**，本章保留決策理由。
 
 ### 7.1 爬蟲如何判斷「推文數沒變就不抓內頁」
 
@@ -479,6 +489,13 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 ### 7.6 標題列入變化判斷（S1-05）
 
 設計原本只比對推噓數與內文。作者有時會改標題，不比對的話 `posts.title` 永遠停在第一次爬到的版本，所以 upsert 也比對並更新標題。
+
+### 7.8 Scheduler 的實作選擇（S1-06）
+
+- 用 `BlockingScheduler` 而非設計範例的 `AsyncIOScheduler`：專案程式皆為同步，async 版本只會多一層事件迴圈
+- 新看板的計時器立刻執行一次，否則 `interval_sec` 較長的看板（例如 Tech_Job 600 秒）要等很久才第一次爬
+- 每輪最多派發 500 篇重爬，高峰期分散到後面幾輪，避免爬蟲任務大量積壓
+- 已刪除的文章與停用看板的文章不再重爬
 
 ### 7.7 `/status` 顯示最後變化時間（S1-03）
 

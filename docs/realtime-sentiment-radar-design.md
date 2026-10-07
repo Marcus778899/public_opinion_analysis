@@ -190,52 +190,32 @@ Apicurio 使用 SQL 儲存，不建立 topic。PG connector 不需要 schema his
 
 ### 4.4 Scheduler
 
+實作：`src/radar/collector/scheduler.py`、`src/radar/collector/recrawl.py`
+
 #### 設計
 
-- 常駐程式，使用 APScheduler（3.x），**每個看板一個計時器**
+- 常駐程式，使用 APScheduler 3.x 的 `BlockingScheduler`（專案程式皆為同步，不需事件迴圈），**每個看板一個計時器**
 - 每 30 秒向 `GET /boards` 同步設定，有變化才新增、移除或 `reschedule` 計時器
-- API 失敗時維持現有計時器
-- `reschedule` 從重設當下重新起算；要立刻爬就用手動觸發
+  - 新增的看板計時器會**立刻執行一次**，之後依 `interval_sec`（含 5 秒 jitter）
+  - 停用、或已從 API 消失的看板 → 移除計時器
+  - `interval_sec` 改變 → `reschedule`，從當下重新起算；要立刻爬就用手動觸發
+- API 失敗（連線錯誤、非 200、格式錯誤）時維持現有計時器
+- 派發失敗只記錄 ERROR，不讓計時器停掉，下一次觸發再送
+- 計時器設定 `coalesce`、`max_instances=1`，前一次還沒做完就不會重疊執行
 
 #### 計時器
 
 | 計時器 | 頻率 | 動作 |
 |---|---|---|
-| `board:<name>` | 看板的 `interval_sec` | 派發列表頁任務 |
-| `sync_boards` | 30 秒 | 同步設定 |
-| `dispatch_due_posts` | 30 秒 | 派發到期的文章重爬任務 |
+| `board:<name>` | 看板的 `interval_sec` | 派發列表頁任務（`reason=schedule`，key=board） |
+| `sync_boards` | 30 秒（啟動時立刻執行） | 同步看板設定 |
+| `due_posts` | 30 秒 | 派發到期的文章重爬任務（4.5） |
+| `lock` | 30 秒 | 確認仍持有 advisory lock，失去就停止 |
 
-#### 範例
+#### 只能跑 1 個 instance
 
-```python
-scheduler = AsyncIOScheduler()
-
-def sync_boards():
-    try:
-        boards = requests.get("http://api/boards", timeout=5).json()
-    except Exception:
-        return
-
-    for b in boards:
-        job_id = f"board:{b['board']}"
-        job = scheduler.get_job(job_id)
-        if not b["enabled"]:
-            if job:
-                job.remove()
-        elif job is None:
-            scheduler.add_job(send_list_task, "interval", seconds=b["interval_sec"],
-                              jitter=5, id=job_id, args=[b["board"]])
-        elif job.trigger.interval.total_seconds() != b["interval_sec"]:
-            job.reschedule("interval", seconds=b["interval_sec"], jitter=5)
-
-scheduler.add_job(sync_boards, "interval", seconds=30, next_run_time=datetime.now())
-scheduler.add_job(dispatch_due_posts, "interval", seconds=30)
-scheduler.start()
-```
-
-#### 限制
-
-- 只能跑 1 個 instance（高可用可用 PG advisory lock）
+- 啟動時以 `pg_try_advisory_lock` 取得 PG session 層級的鎖，取不到就**待命**，每 10 秒重試；持有者停止（連線關閉）後由待命者接手
+- `lock` 計時器檢查鎖仍屬於自己的連線；失去鎖就停止程式，由 `restart: unless-stopped` 重啟後重新取鎖
 - 不放進 FastAPI 的 process，獨立部署
 
 ### 4.5 文章重爬排程
@@ -243,18 +223,22 @@ scheduler.start()
 #### 查詢到期文章
 
 ```sql
-SELECT p.post_id, p.url
+SELECT p.post_id, p.board, p.url, p.created_at
 FROM posts p
 JOIN boards b USING (board)
 LEFT JOIN crawl_state cs USING (post_id)
-WHERE p.created_at > now() - interval '24 hours'
+WHERE b.enabled                                          -- 停用的看板不重爬
   AND NOT p.is_deleted
+  AND p.created_at > now() - interval '24 hours'
   AND (p.created_at > now() - interval '1 hour'          -- 1 小時內一律重爬
        OR p.push_count >= b.recrawl_min_push)            -- 之後只追蹤達門檻的
-  AND (cs.next_crawl_at IS NULL OR cs.next_crawl_at <= now());
+  AND (cs.next_crawl_at IS NULL OR cs.next_crawl_at <= now())
+ORDER BY cs.next_crawl_at NULLS FIRST, p.created_at DESC  -- 沒派發過的優先
+LIMIT 500;                                               -- 其餘留到下一輪
 ```
 
-派發後依文章年齡算出新的 `next_crawl_at`，寫回 `crawl_state`。
+- 先送出任務並 flush，成功後才依文章年齡算出新的 `next_crawl_at` 寫回 `crawl_state`：送出失敗就不推進排程，下一輪重試；寫入失敗只會重複派發，無害
+- 超過 24 小時的文章把 `next_crawl_at` 設到一年後，不會再被查到
 
 #### 為什麼獨立成 `crawl_state` 表
 
@@ -537,45 +521,21 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 
 ### 10.3 docker-compose
 
-所有自寫服務共用一個 image，只有 `command` 不同：
+`infra/docker-compose.yaml`；所有自寫服務共用一個 image（`radar-app`），只有 `command` 不同。
 
-```yaml
-services:
-  api:
-    image: radar-app
-    command: uvicorn radar.api.main:app --host 0.0.0.0
-    restart: unless-stopped
-  scheduler:
-    image: radar-app
-    command: python -m radar.collector.scheduler
-    restart: unless-stopped          # 只能 1 個
-  crawler:
-    image: radar-app
-    command: python -m radar.collector.crawler
-    restart: unless-stopped
-    deploy:
-      replicas: 3
-  ingest:
-    image: radar-app
-    command: python -m radar.ingest.main
-    restart: unless-stopped
-  labeling:
-    image: radar-app
-    command: python -m radar.ml.labeling.stream
-    restart: unless-stopped
-  inference:
-    image: radar-app
-    command: python -m radar.ml.inference.main
-    restart: unless-stopped
-  heat:
-    image: radar-app
-    command: python -m radar.streaming.heat
-    restart: unless-stopped
-  bot:
-    image: radar-app
-    command: python -m radar.bot.main
-    restart: unless-stopped
-```
+| 服務 | profile | 說明 |
+|---|---|---|
+| `kafka_1`～`kafka_3`、`postgres` | （預設） | `make up` 只啟動這些，本機開發時服務直接用 `uv run` 執行 |
+| `kafka-ui` | `debug` | `make up-debug` |
+| `init` | `app` | 一次性：`alembic upgrade head` 與建立 topic（皆冪等）；唯一負責建置 image 的服務 |
+| `api` | `app` | 只綁 `127.0.0.1:8000` |
+| `scheduler` | `app` | 只能 1 個；多開時其餘的待命 |
+| `crawler` | `app` | `replicas: 3` |
+| `ingest` | `app` | |
+
+- `make up-app` 啟動整套；自寫服務等 `init` 成功結束後才啟動
+- 端到端測試另加 `infra/docker-compose.e2e.yaml`：假 PTT 伺服器、爬蟲改打它、重爬間隔縮短，並改用 e2e 專用的資料 volume，不碰開發資料
+- 所有服務 `restart: unless-stopped`（`init` 除外）
 
 ### 10.4 上雲
 
@@ -637,6 +597,8 @@ services:
 - [ ] 爬蟲自己讀設定 → 重複爬
 - [ ] Scheduler 多個 instance 或放進 FastAPI → 重複派發
 - [ ] Scheduler 拿不到設定就停止 → API 一掛資料流就斷
+- [ ] 端到端測試與開發共用資料庫 → Scheduler 對真實文章派發重爬，假伺服器回 404 被誤標為刪除
+- [ ] 服務比 topic 先啟動 → 派發逾時、consumer 訂閱不到 topic（由 `init` 先建好）
 - [ ] 看板頻率沒有下限 → IP 被封鎖
 - [ ] 每篇文章都依年齡重爬 → Gossiping 的請求量超出預算（用 `recrawl_min_push` 門檻）
 

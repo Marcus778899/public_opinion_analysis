@@ -19,6 +19,8 @@ pre-commit run --all-files
 make up && make migrate && make topics    # 啟動 Kafka（3 節點）+ Postgres，建表與 topic
 make api                                  # 本機啟動管理 API
 make seed                                 # 透過 API 建立初始看板
+make up-app                               # 整套服務以 compose 啟動（自動建表與 topic）
+make e2e-up && make e2e && make e2e-down  # 端到端測試（假 PTT，不碰開發資料）
 ```
 
 ## 目錄
@@ -96,7 +98,7 @@ make seed                                 # 透過 API 建立初始看板
 - **每個新增或修改的函式都要有單元測試**，沒有測試的實作不算完成
 - 單元測試不連網路、不連真實 Kafka / PG；需要時用 fake 或 mock
 - 整合測試用 testcontainers，放 `tests/integration/`
-- **任何測試都不可對真實 PTT 發請求**，只讀 `tests/fixtures/ptt/`
+- **任何測試都不可對真實 PTT 發請求**，只讀 `tests/fixtures/ptt/` 或使用假 PTT 伺服器（`tests/e2e/fake_ptt.py`）
 - 測試名稱描述行為：`test_<情境>_<預期結果>`
 - 至少涵蓋：正常路徑、邊界值、錯誤輸入；consumer 另需涵蓋重複訊息（冪等）與 DLQ
 - 修 bug 先寫一個會失敗的測試重現它，再修
