@@ -15,6 +15,10 @@ uv run pytest tests/unit                  # 單元測試
 uv run ruff check --fix . && uv run ruff format .
 uv run --env-file .env alembic upgrade head
 pre-commit run --all-files
+
+make up && make migrate && make topics    # 啟動 Kafka（3 節點）+ Postgres，建表與 topic
+make api                                  # 本機啟動管理 API
+make seed                                 # 透過 API 建立初始看板
 ```
 
 ## 目錄
@@ -106,5 +110,7 @@ pre-commit run --all-files
 
 ## 文件同步
 
-- 改動資料流、表、topic、訊息格式時，先更新設計文件或開發規格，再改程式
+- **文件必須與程式同步**：行為、資料流、表、topic、訊息格式、API、相依套件有變動時，在同一個 PR 內更新設計文件或開發規格
+- 先改文件再改程式；實作中做出新決定時，回寫到文件後才算完成
+- 完成任務時更新開發規格第 6 章的進度表
 - 發現文件與實作不一致時，指出來，不要自行決定以哪邊為準

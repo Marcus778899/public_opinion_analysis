@@ -1,7 +1,9 @@
 # 即時輿情雷達：設計草案
 
-> 狀態：討論階段，尚未實作（之後另開專案）
-> 最後更新：2026-10-06
+> 狀態：實作中（階段 0 完成，階段 1 進行中；進度見開發規格第 6 章）
+> 最後更新：2026-10-07
+>
+> 本文件需與程式同步：改動資料流、表、topic、訊息格式時先更新這裡（CLAUDE.md）。
 
 ## 目錄
 
@@ -99,6 +101,7 @@
 
 - **看板是訊息欄位，不是 topic**：topic 數量與看板數量無關
 - **Partition key 用 `post_id`**：用 `board` 會因 Gossiping 量大造成負載不均
+- **例外：`crawl.tasks` 的列表任務 key 用 `board`**，讓同一看板固定由同一個爬蟲處理，爬蟲才能在記憶體記住列表推文數（4.2）；文章任務仍用 `post_id`
 
 ### 3.2 業務 topic
 
@@ -144,8 +147,13 @@ Apicurio 使用 SQL 儲存，不建立 topic。PG connector 不需要 schema his
 
 #### 新文章：輪詢看板列表頁
 
-- 頻率依看板設定（熱門看板 1～3 分鐘，冷門看板 1 小時）
-- 列表頁上的推文數沒變就不抓內頁；顯示「爆」的文章仍要定期抓內頁
+- 頻率依看板設定（`boards.interval_sec`，下限 30 秒）
+- **列表推文數快取**：爬蟲在記憶體以 LRU 記住 `post_id → 列表推文數`，沒見過或推文數變了才抓內頁
+  - 「爆」固定視為 100，所以「爆 → 爆」算沒變，由 4.5 的重爬排程定期抓；「99 → 爆」算變化
+  - 被刪除的文章（列表上沒有連結）不抓
+  - 爬蟲重啟或 rebalance 後快取清空，只會多抓幾次內頁，upsert 會擋掉沒變化的寫入
+- **往前翻頁**：第一頁的文章全都沒見過、且快取不是空的，代表兩次輪詢間新文章超過一頁，再往前翻，最多 3 頁；剛啟動（快取為空）只讀一頁
+- 置底公告（`r-list-sep` 以下）不列入
 
 #### 近期文章：依年齡分級重爬
 
@@ -156,22 +164,29 @@ Apicurio 使用 SQL 儲存，不建立 topic。PG connector 不需要 schema his
 | 6～24 小時 | 每小時 |
 | > 24 小時 | 停止 |
 
+**重爬門檻**：文章滿 1 小時後，推文數低於該看板的 `boards.recrawl_min_push` 就停止重爬。依上表每篇 24 小時內約重爬 78 次，Gossiping 一天數千篇會超出請求預算，門檻用來只追蹤有在發酵的文章（Gossiping 預設 10，其餘 0）。
+
 ### 4.3 管理後端（FastAPI）
 
 #### API
 
-| API | 用途 |
-|---|---|
-| `GET /boards` | 列出看板設定（Scheduler 使用） |
-| `POST /boards` | 新增看板 |
-| `PATCH /boards/{board}` | 調整頻率、啟用或停用 |
-| `POST /boards/{board}/crawl` | 手動觸發，直接寫入 `crawl.tasks` |
-| `GET /status` | 各看板最後爬取時間、`dlq` 數量 |
+| API | 用途 | 回應 |
+|---|---|---|
+| `GET /boards` | 列出看板設定（Scheduler 使用） | 200 |
+| `POST /boards` | 新增看板 | 201；已存在 409；欄位不合法 422 |
+| `PATCH /boards/{board}` | 調整頻率、門檻、啟用或停用（只更新有給的欄位） | 200；不存在 404；沒給欄位 422 |
+| `POST /boards/{board}/crawl` | 手動觸發，直接寫入 `crawl.tasks`（列表任務，`reason=manual`） | 202；不存在 404；Kafka 失敗 503 |
+| `GET /status` | 各看板 `last_changed_at`、近 24 小時新文章數，與 `dlq` 數量 | 200；Kafka 異常時 `dlq_count=-1` |
 
 #### 規則
 
-- 看板設定存在 PG 的 `boards` 表，FastAPI 是唯一入口
-- `interval_sec` 下限 30 秒
+- 看板設定存在 PG 的 `boards` 表，FastAPI 是唯一入口；初始看板也透過 API 建立（`make seed`）
+- `interval_sec` 下限 30 秒、`recrawl_min_push` 不可為負，看板名稱只允許英數、`_`、`-`
+- 停用中的看板也允許手動觸發，方便正式啟用前測試
+- `last_changed_at` 是「最後一次有變化」的時間，不是最後爬取時間：Ingest 只在內容有變化時寫入 `posts`，從 PG 拿不到真正的爬取時間
+- `dlq` 數量為各 partition 的 high − low watermark 加總，約等於近 30 天（`dlq` 保留期）的數量
+- CORS 允許的來源由 `API_CORS_ORIGINS` 設定，預設空白（不開放跨網域）；只允許 GET / POST / PATCH
+- 沒有身分驗證，部署時只綁 `127.0.0.1`
 
 ### 4.4 Scheduler
 
@@ -230,8 +245,12 @@ scheduler.start()
 ```sql
 SELECT p.post_id, p.url
 FROM posts p
+JOIN boards b USING (board)
 LEFT JOIN crawl_state cs USING (post_id)
 WHERE p.created_at > now() - interval '24 hours'
+  AND NOT p.is_deleted
+  AND (p.created_at > now() - interval '1 hour'          -- 1 小時內一律重爬
+       OR p.push_count >= b.recrawl_min_push)            -- 之後只追蹤達門檻的
   AND (cs.next_crawl_at IS NULL OR cs.next_crawl_at <= now());
 ```
 
@@ -243,9 +262,17 @@ WHERE p.created_at > now() - interval '24 hours'
 
 ### 4.6 爬蟲
 
-- 屬於同一個 consumer group，消費 `crawl.tasks`，結果寫入 `raw.posts`
+- 屬於同一個 consumer group，消費 `crawl.tasks`，結果寫入 `raw.posts` 與 `raw.html`（皆以 `post_id` 為 key）
 - 不碰 PG、不讀設定
-- 速率限制加隨機間隔
+- 一次處理一個任務：一個列表任務可能牽動約 20 次請求，整批重試代價高
+- **速率限制**：每次請求間隔 2 秒 + 0～2 秒隨機，平均約 3 秒一次；3 個爬蟲合計約 1 次/秒
+- **HTTP 回應**：
+  - 200、404 正常處理；文章頁 404 視為被刪除，送出 `is_deleted=true` 的快照（推噓數為 0、沒有推文）
+  - 429、5xx、逾時、連線錯誤 → 整批重試，不 commit
+  - 其他狀態（403、3xx）與解析失敗 → 記錄 ERROR 後略過，不重試，避免卡住 partition
+- 文章頁先送 `raw.html` 再解析，解析失敗時仍可在修好 parser 後重新解析
+- 每批結束 flush producer，訊息落地後才 commit
+- 每次請求帶 `over18=1` cookie；2026-10 實測 PTT 伺服器端已不擋未帶 cookie 的請求（只在瀏覽器以 JS 導向），parser 仍會對 `/ask/over18` 頁面拋錯以防恢復
 
 ---
 
@@ -256,20 +283,27 @@ WHERE p.created_at > now() - interval '24 hours'
 - 消費 `raw.posts`，拆成文章與推文，在同一個 transaction 寫入
 - 批次寫入（每 500 筆或每 1 秒）
 - upsert 冪等，at-least-once 即可
+- **同批去重**：同一個 `post_id` 只留 `crawled_at` 最新的一筆；`ON CONFLICT DO UPDATE` 不能在同一個語句更新同一列兩次
+- **推文分段**：每 5000 列送一次，避開 PG 單一語句 65535 個參數的上限
+- **刪除快照**：只把既有文章的 `is_deleted` 設為 true，保留刪除前的內容；從未見過的文章略過，已標記的不重複寫
+- **錯誤處理**：DB 連線錯誤 → 整批重試；其他 DB 錯誤（例如約束違反）直接中止服務，避免資料靜默遺失；格式不合法的訊息由 consumer 送 `dlq`
 
 ### 5.2 帶條件的 upsert
 
 ```sql
-INSERT INTO posts (post_id, board, title, content, push_count, boo_count, created_at, crawled_at)
+INSERT INTO posts (post_id, board, author, title, content, url,
+                   push_count, boo_count, created_at, crawled_at)
 VALUES (...)
 ON CONFLICT (post_id) DO UPDATE SET
   push_count = EXCLUDED.push_count,
   boo_count  = EXCLUDED.boo_count,
+  title      = EXCLUDED.title,
   content    = EXCLUDED.content,
   crawled_at = EXCLUDED.crawled_at
 WHERE posts.crawled_at < EXCLUDED.crawled_at                  -- 舊快照不覆蓋新的
   AND (posts.push_count IS DISTINCT FROM EXCLUDED.push_count
     OR posts.boo_count  IS DISTINCT FROM EXCLUDED.boo_count
+    OR posts.title      IS DISTINCT FROM EXCLUDED.title       -- 作者可能改標題
     OR posts.content    IS DISTINCT FROM EXCLUDED.content);   -- 沒變化就不寫
 
 INSERT INTO comments (post_id, floor, type, user_id, content, commented_at)
@@ -281,36 +315,39 @@ ON CONFLICT (post_id, floor) DO NOTHING;
 
 ### 5.3 Schema
 
+實際定義以 `src/radar/common/db/models.py` 與 Alembic migration 為準；以下為對應的 DDL。
+
 ```sql
 CREATE TABLE posts (
-  post_id       TEXT PRIMARY KEY,
+  post_id       TEXT PRIMARY KEY,               -- <board>.<PTT 檔名>
   board         TEXT NOT NULL,
-  author        TEXT,
+  author        TEXT,                           -- 只存帳號，不含暱稱
   title         TEXT,
-  content       TEXT,
+  content       TEXT,                           -- 不含標頭、推文、簽名檔
   url           TEXT NOT NULL,
-  push_count    INT  DEFAULT 0,
-  boo_count     INT  DEFAULT 0,
+  push_count    INT  NOT NULL DEFAULT 0,        -- 由推文計算
+  boo_count     INT  NOT NULL DEFAULT 0,
   created_at    TIMESTAMPTZ NOT NULL,
   crawled_at    TIMESTAMPTZ NOT NULL,
-  is_deleted    BOOLEAN DEFAULT FALSE
+  is_deleted    BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE TABLE comments (
   post_id       TEXT NOT NULL REFERENCES posts(post_id),
-  floor         INT  NOT NULL,
-  type          TEXT NOT NULL,           -- push / boo / arrow
+  floor         INT  NOT NULL,                  -- 從 1 開始，依頁面順序
+  type          VARCHAR(8) NOT NULL CHECK (type IN ('push', 'boo', 'arrow')),
   user_id       TEXT,
   content       TEXT,
-  commented_at  TIMESTAMPTZ,
+  commented_at  TIMESTAMPTZ,                    -- 推不出時間時為 NULL
   PRIMARY KEY (post_id, floor)
 );
 
 CREATE TABLE boards (
-  board         TEXT PRIMARY KEY,
-  enabled       BOOLEAN NOT NULL DEFAULT TRUE,
-  interval_sec  INT NOT NULL CHECK (interval_sec >= 30),
-  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  board            TEXT PRIMARY KEY,
+  enabled          BOOLEAN NOT NULL DEFAULT TRUE,
+  interval_sec     INT NOT NULL CHECK (interval_sec >= 30),
+  recrawl_min_push INT NOT NULL DEFAULT 0 CHECK (recrawl_min_push >= 0),  -- 4.2 重爬門檻
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()                     -- ORM 更新時刷新
 );
 
 CREATE TABLE crawl_state (
@@ -331,7 +368,10 @@ CREATE INDEX ON crawl_state (next_crawl_at);
 | `boards` | FastAPI | ❌ |
 | `crawl_state` | Scheduler | ❌ |
 
-每張表只有一個寫入者。爬蟲不能同時寫 PG 和 Kafka（雙寫）。
+每張表只有一個寫入者。爬蟲不能同時寫 PG 和 Kafka（雙寫）。寫入者與是否被監聽也記在各表的 PG table comment。
+
+- `comments.type` 用 CHECK 約束而非 PG 原生 enum，日後加值不必 `ALTER TYPE`
+- 約束名稱依固定命名規則產生（例如 `ck_boards_interval_sec_min`），Alembic 才能穩定地修改
 
 ---
 
@@ -462,13 +502,13 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 ```
 <repo>/
 ├── src/radar/               # 所有 Python 程式碼，import 路徑為 radar.*
-│   ├── common/              # Kafka client、Avro schema、DB 連線、設定
-│   ├── api/main.py          # [常駐 ×1] FastAPI
+│   ├── common/              # 設定、log、ORM model、Kafka 訊息格式、Kafka client、topic 管理
+│   ├── api/                 # [常駐 ×1] FastAPI（main、routes、repository、seed）
 │   ├── collector/
 │   │   ├── scheduler.py     # [常駐 ×1] APScheduler
-│   │   ├── crawler.py       # [常駐 ×N]
-│   │   └── parsers/
-│   ├── ingest/main.py       # [常駐]
+│   │   ├── crawler.py       # [常駐 ×N]（http、rate_limit、list_cache）
+│   │   └── parsers/         # PTT 列表頁與文章頁解析
+│   ├── ingest/              # [常駐] main、writer
 │   ├── ml/
 │   │   ├── labeling/
 │   │   │   ├── stream.py    # [常駐] 抽樣標註
@@ -586,6 +626,9 @@ services:
 - [ ] `next_crawl_at` 放在 `posts` 表
 - [ ] upsert 沒比較 `crawled_at` → 舊快照覆蓋新資料
 - [ ] `crawled_at` 列入變化判斷 → 每次重爬都產生事件
+- [ ] 同一批有重複的 `post_id` 沒先去重 → `ON CONFLICT DO UPDATE` 直接報錯
+- [ ] 刪除快照直接 upsert → 推噓數被清成 0、內文被清空
+- [ ] 一次 INSERT 太多推文 → 超過 PG 65535 個參數上限
 - [ ] Debezium 沒開 heartbeat → WAL 塞滿硬碟
 - [ ] ClickHouse 用一般 MergeTree 存最新狀態 → 重複列
 
@@ -595,6 +638,7 @@ services:
 - [ ] Scheduler 多個 instance 或放進 FastAPI → 重複派發
 - [ ] Scheduler 拿不到設定就停止 → API 一掛資料流就斷
 - [ ] 看板頻率沒有下限 → IP 被封鎖
+- [ ] 每篇文章都依年齡重爬 → Gossiping 的請求量超出預算（用 `recrawl_min_push` 門檻）
 
 ### 12.4 ML 與資源
 
