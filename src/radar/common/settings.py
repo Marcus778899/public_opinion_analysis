@@ -47,6 +47,27 @@ class ApiSettings(BaseSettings):
         return value
 
 
+class SchedulerSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="SCHEDULER_")
+
+    api_url: str = "http://localhost:8000"
+    sync_interval_sec: int = 30
+    due_posts_interval_sec: int = 30
+    # 每輪最多派發幾篇重爬，避免一次湧入大量任務
+    due_posts_limit: int = 500
+    # 重爬間隔的倍率；只在端到端測試調小，正式環境維持 1
+    time_scale: float = 1.0
+
+
+class CrawlerSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="CRAWLER_")
+
+    # 只在端到端測試設定，把請求導向假 PTT 伺服器；資料中的網址仍是 www.ptt.cc
+    ptt_base_url: str | None = None
+    min_interval_s: float = 2.0
+    jitter_s: float = 2.0
+
+
 @lru_cache
 def get_postgres_settings() -> PostgresSettings:
     return PostgresSettings()

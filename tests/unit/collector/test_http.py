@@ -69,3 +69,34 @@ def test_fetch_timeout_raises_transient():
 
     with pytest.raises(TransientError):
         client_with(handler).fetch(URL)
+
+
+def test_base_url_override_rewrites_host_but_keeps_result_url():
+    seen = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        return httpx2.Response(200, text="ok")
+
+    client = PttClient(
+        CountingLimiter(),
+        transport=httpx2.MockTransport(handler),
+        base_url_override="http://fake-ptt:8080/",
+    )
+
+    result = client.fetch(URL)
+
+    assert seen["url"] == "http://fake-ptt:8080/bbs/Stock/index.html"
+    assert result.url == URL
+
+
+def test_no_override_requests_original_url():
+    seen = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        return httpx2.Response(200)
+
+    client_with(handler).fetch(URL)
+
+    assert seen["url"] == URL

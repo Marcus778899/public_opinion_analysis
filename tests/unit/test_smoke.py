@@ -22,6 +22,8 @@ PACKAGES = [
     "radar.collector.crawler",
     "radar.collector.http",
     "radar.collector.list_cache",
+    "radar.collector.recrawl",
+    "radar.collector.scheduler",
     "radar.collector.rate_limit",
     "radar.ingest.main",
     "radar.ingest.writer",

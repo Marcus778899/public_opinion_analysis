@@ -6,6 +6,7 @@ from typing import Protocol
 import httpx2
 
 from radar.collector.rate_limit import RateLimiter
+from radar.common.ids import PTT_BASE_URL
 from radar.common.kafka.consumer import TransientError
 
 USER_AGENT = "radar-crawler/0.1 (+https://github.com/Marcus778899/public_opinion_analysis)"
@@ -37,9 +38,12 @@ class PttClient:
         *,
         timeout_s: float = 10.0,
         transport: httpx2.BaseTransport | None = None,
+        base_url_override: str | None = None,
     ) -> None:
         # NOTE: transport 可注入，單元測試用 MockTransport，不對 PTT 發請求
+        # NOTE: base_url_override 只給端到端測試，把 www.ptt.cc 換成假 PTT 伺服器
         self._limiter = limiter
+        self._base_url_override = base_url_override
         self._client = httpx2.Client(
             headers={"User-Agent": USER_AGENT},
             cookies=OVER18_COOKIE,
@@ -52,7 +56,7 @@ class PttClient:
         """200 與 404 正常回傳；5xx、429、逾時、連線錯誤拋 TransientError。"""
         self._limiter.wait()
         try:
-            response = self._client.get(url)
+            response = self._client.get(self._rewrite(url))
         except httpx2.TransportError as e:
             raise TransientError(f"GET {url} failed: {e!r}") from e
         status = response.status_code
@@ -64,3 +68,9 @@ class PttClient:
 
     def close(self) -> None:
         self._client.close()
+
+    def _rewrite(self, url: str) -> str:
+        """只換掉開頭的 PTT_BASE_URL；FetchResult.url 仍是原網址，parser 才算得出正確的 post_id。"""
+        if self._base_url_override and url.startswith(PTT_BASE_URL):
+            return self._base_url_override.rstrip("/") + url[len(PTT_BASE_URL) :]
+        return url

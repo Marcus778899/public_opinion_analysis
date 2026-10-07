@@ -25,7 +25,7 @@ from radar.common.kafka.dlq import DlqPublisher
 from radar.common.kafka.producer import JsonProducer
 from radar.common.log import log, setup_logging
 from radar.common.schemas import CrawlTask, RawHtml, RawPost
-from radar.common.settings import get_kafka_settings
+from radar.common.settings import CrawlerSettings, get_kafka_settings
 
 
 class CrawlHandler:
@@ -148,9 +148,15 @@ def deleted_post(
 @log.catch(level="CRITICAL")
 def main() -> None:
     setup_logging("crawler")
+    settings = CrawlerSettings()
     kafka = get_kafka_settings()
     producer = JsonProducer(kafka)
-    client = PttClient(RateLimiter())
+    client = PttClient(
+        RateLimiter(settings.min_interval_s, settings.jitter_s),
+        base_url_override=settings.ptt_base_url,
+    )
+    if settings.ptt_base_url:
+        log.warning("requests redirected to %s (end-to-end test mode)", settings.ptt_base_url)
     handler = CrawlHandler(client, producer, ListPushCache(), clock=lambda: datetime.now(UTC))
     consumer = BatchConsumer(
         kafka,

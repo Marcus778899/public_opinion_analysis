@@ -1,0 +1,48 @@
+# 端到端測試用的覆寫檔（S1-07）：加上假 PTT 伺服器，爬蟲改打它，重爬間隔縮短
+# 用法：make e2e-up && make e2e；任何請求都不會打到真的 PTT
+#
+# NOTE: Postgres 與 Kafka 改掛 e2e 專用的 volume，不會碰到本機開發資料；
+# 否則 Scheduler 會對開發資料裡的真實文章派發重爬，假伺服器回 404 而被誤標為刪除
+services:
+  postgres:
+    volumes:
+      - e2e_postgres_data:/var/lib/postgresql/data
+  kafka_1:
+    volumes:
+      - e2e_kafka_1_data:/var/lib/kafka/data
+  kafka_2:
+    volumes:
+      - e2e_kafka_2_data:/var/lib/kafka/data
+  kafka_3:
+    volumes:
+      - e2e_kafka_3_data:/var/lib/kafka/data
+
+  fake-ptt:
+    image: radar-app:latest
+    container_name: radar_fake_ptt
+    profiles: ["app"]
+    command: ["uvicorn", "tests.e2e.fake_ptt:app", "--host", "0.0.0.0", "--port", "8080"]
+    volumes:
+      - ../tests:/app/tests:ro
+    ports:
+      - "127.0.0.1:8081:8080"
+
+  crawler:
+    environment:
+      CRAWLER_PTT_BASE_URL: 'http://fake-ptt:8080'
+      CRAWLER_MIN_INTERVAL_S: '0.2'
+      CRAWLER_JITTER_S: '0.1'
+    depends_on:
+      fake-ptt:
+        condition: service_started
+
+  scheduler:
+    environment:
+      SCHEDULER_TIME_SCALE: '0.05'
+      SCHEDULER_DUE_POSTS_INTERVAL_SEC: '5'
+
+volumes:
+  e2e_postgres_data:
+  e2e_kafka_1_data:
+  e2e_kafka_2_data:
+  e2e_kafka_3_data:

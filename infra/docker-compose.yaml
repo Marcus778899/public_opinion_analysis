@@ -17,6 +17,26 @@ x-kafka-env: &kafka-env
   KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
   KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
 
+# 自寫服務共用設定（設計文件 10.3）：同一個 image，只有 command 不同；make up-app 才啟動
+x-app-env: &app-env
+  KAFKA_BOOTSTRAP_SERVERS: 'kafka_1:29092,kafka_2:29092,kafka_3:29092'
+  POSTGRES_HOST: 'postgres'
+  POSTGRES_PORT: '5432'
+  LOG_DIR: '/app/log'
+
+# NOTE: image 只由 init 建置；其他服務沿用，避免多個服務同時建置同一個 tag 互相衝突
+x-app: &app
+  image: radar-app:latest
+  pull_policy: never
+  restart: unless-stopped
+  profiles: ["app"]
+  env_file: ../.env
+  volumes:
+    - app_logs:/app/log
+  depends_on:
+    init:
+      condition: service_completed_successfully
+
 x-kafka-healthcheck: &kafka-healthcheck
   test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29092 > /dev/null"]
   interval: 10s
@@ -96,6 +116,64 @@ services:
       timeout: 5s
       retries: 10
 
+  # ======= 自寫服務（profile: app）=======
+  # 一次性：建表與建立 topic（皆冪等），完成後其他服務才啟動
+  init:
+    image: radar-app:latest
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: radar_init
+    profiles: ["app"]
+    env_file: ../.env
+    environment:
+      <<: *app-env
+    command: ["sh", "-c", "alembic upgrade head && python scripts/create_topics.py"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka_1:
+        condition: service_healthy
+      kafka_2:
+        condition: service_healthy
+      kafka_3:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    container_name: radar_api
+    command: ["uvicorn", "radar.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      <<: *app-env
+    # 沒有身分驗證，只開放本機連線（設計文件 4.3）
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  scheduler:
+    <<: *app
+    # 只能 1 個；多開時其餘的會等 advisory lock（standby）
+    container_name: radar_scheduler
+    command: ["python", "-m", "radar.collector.scheduler"]
+    environment:
+      <<: *app-env
+      SCHEDULER_API_URL: 'http://api:8000'
+
+  crawler:
+    <<: *app
+    command: ["python", "-m", "radar.collector.crawler"]
+    environment:
+      <<: *app-env
+    deploy:
+      replicas: 3
+
+  ingest:
+    <<: *app
+    container_name: radar_ingest
+    command: ["python", "-m", "radar.ingest.main"]
+    environment:
+      <<: *app-env
+
   # TODO(S2-03): Apicurio、kafka-connect（Debezium）、kafka-connect-init 依 kafka_tutorial/deployment 的寫法加入
 
   # ======= Kafka UI（make up-debug 才啟動）=======
@@ -118,6 +196,7 @@ services:
         condition: service_healthy
 
 volumes:
+  app_logs:
   kafka_1_data:
   kafka_2_data:
   kafka_3_data:

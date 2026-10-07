@@ -1,7 +1,13 @@
 import pytest
 from pydantic import ValidationError
 
-from radar.common.settings import ApiSettings, KafkaSettings, PostgresSettings
+from radar.common.settings import (
+    ApiSettings,
+    CrawlerSettings,
+    KafkaSettings,
+    PostgresSettings,
+    SchedulerSettings,
+)
 
 PG_ENV = {
     "POSTGRES_HOST": "db",
@@ -70,3 +76,26 @@ def test_api_settings_cors_origins_empty_string(monkeypatch):
     monkeypatch.setenv("API_CORS_ORIGINS", "")
 
     assert ApiSettings().cors_origins == []
+
+
+def test_scheduler_and_crawler_settings_defaults(monkeypatch):
+    for key in ("SCHEDULER_API_URL", "SCHEDULER_TIME_SCALE", "CRAWLER_PTT_BASE_URL"):
+        monkeypatch.delenv(key, raising=False)
+
+    scheduler, crawler = SchedulerSettings(), CrawlerSettings()
+
+    assert (scheduler.api_url, scheduler.time_scale, scheduler.due_posts_limit) == (
+        "http://localhost:8000",
+        1.0,
+        500,
+    )
+    assert (crawler.ptt_base_url, crawler.min_interval_s, crawler.jitter_s) == (None, 2.0, 2.0)
+
+
+def test_scheduler_settings_from_env(monkeypatch):
+    monkeypatch.setenv("SCHEDULER_TIME_SCALE", "0.05")
+    monkeypatch.setenv("SCHEDULER_API_URL", "http://api:8000")
+
+    settings = SchedulerSettings()
+
+    assert (settings.time_scale, settings.api_url) == (0.05, "http://api:8000")
