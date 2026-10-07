@@ -240,8 +240,8 @@
 
 | 層級 | 範圍 | 工具 | 執行時機 |
 |---|---|---|---|
-| 單元 | parser、upsert SQL 組裝、熱度計算、年齡分級 | pytest | 本地每次 commit；CI 於合併到 `develop` / `main` 時 |
-| 整合 | 單一服務 + 真實 Kafka / PG（單節點即可） | testcontainers | CI 於合併到 `develop` / `main` 時 |
+| 單元 | parser、upsert SQL 組裝、熱度計算、年齡分級 | pytest | 本地每次 commit；CI 於 PR 開到及合併到 `develop` / `main` 時 |
+| 整合 | 單一服務 + 真實 Kafka / PG（單節點即可） | testcontainers | CI 於 PR 開到及合併到 `develop` / `main` 時 |
 | 端到端 | 整個 compose，用假 PTT 伺服器 | 本地 `make e2e` | 每階段驗收 |
 | 回放 | 把錄下來的 topic 資料重送，驗證熱度偵測 | 腳本 | 第 5 階段起 |
 
