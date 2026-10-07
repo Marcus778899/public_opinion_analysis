@@ -23,6 +23,7 @@ x-app-env: &app-env
   POSTGRES_HOST: 'postgres'
   POSTGRES_PORT: '5432'
   CLICKHOUSE_URL: 'http://clickhouse:8123'
+  SCHEMA_REGISTRY_URL: 'http://apicurio:8080/apis/ccompat/v7'
   LOG_DIR: '/app/log'
 
 # NOTE: image 只由 init 建置；其他服務沿用，避免多個服務同時建置同一個 tag 互相衝突
@@ -183,6 +184,15 @@ services:
     <<: *app
     container_name: radar_ingest
     command: ["python", "-m", "radar.ingest.main"]
+    environment:
+      <<: *app-env
+
+  # 串流抽樣標註（S3-08）：會持續呼叫 LLM API，獨立 profile，make up-labeling 才啟動
+  label-stream:
+    <<: *app
+    container_name: radar_label_stream
+    profiles: ["labeling"]
+    command: ["python", "-m", "radar.ml.labeling.stream"]
     environment:
       <<: *app-env
 

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><title>人工標註</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--bg:#fafaf8;--fg:#1d1d1b;--muted:#6b6b66;--line:#ddd;--pos:#2e7d32;--neg:#c62828;--neu:#5d6d7e}
+@media (prefers-color-scheme:dark){:root{--bg:#1b1b1a;--fg:#ececea;--muted:#9a9a94;--line:#3a3a38}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 system-ui,sans-serif}
+main{max-width:860px;margin:0 auto;padding:16px}
+header{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.muted{color:var(--muted);font-size:14px}
+article{white-space:pre-wrap;border:1px solid var(--line);border-radius:8px;padding:16px;
+max-height:55vh;overflow:auto;margin:12px 0}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+button{font:inherit;padding:6px 14px;border:1px solid var(--line);border-radius:6px;
+background:transparent;color:inherit;cursor:pointer}
+button.on[data-p=positive]{background:var(--pos);color:#fff}
+button.on[data-p=neutral]{background:var(--neu);color:#fff}
+button.on[data-p=negative]{background:var(--neg);color:#fff}
+input,select{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:6px;
+background:transparent;color:inherit}
+input.wide{flex:1;min-width:200px}
+#msg{min-height:1.5em}
+</style></head><body><main>
+<header><h1 style="font-size:20px;margin:0">人工標註</h1>
+<span class="muted" id="progress"></span></header>
+<div class="muted" id="meta"></div>
+<h2 id="title" style="font-size:18px;margin:8px 0 0"></h2>
+<article id="content"></article>
+<div class="row"><strong>整篇</strong>
+<button data-p="positive">1 正面</button><button data-p="neutral">2 中立</button>
+<button data-p="negative">3 負面</button></div>
+<div id="targets"></div>
+<div class="row"><button id="add">+ 對象</button>
+<input class="wide" id="note" placeholder="備註（拿不準時寫理由）"></div>
+<div class="row"><button id="prev">← 上一篇</button><button id="save">Enter 儲存並下一篇</button>
+<button id="next">→ 下一篇</button></div>
+<div id="msg" class="muted"></div>
+<p class="muted">依 docs/labeling-guideline.md：判斷作者的態度；新聞只看心得段落；不看推文。</p>
+</main><script>
+// 快捷鍵：1/2/3 = 正/中/負，Enter 送出，←/→ 上下篇
+let cur=null, whole=null;
+const $=s=>document.querySelector(s);
+function pick(p){whole=p;document.querySelectorAll("[data-p]").forEach(b=>b.classList.toggle("on",b.dataset.p===p))}
+function addTarget(t="",p="neutral"){const d=document.createElement("div");d.className="row";
+d.innerHTML='<input placeholder="對象名稱"><select><option value="positive">正面</option>'+
+'<option value="neutral">中立</option><option value="negative">負面</option></select><button>刪除</button>';
+d.querySelector("input").value=t;d.querySelector("select").value=p;
+d.querySelector("button").onclick=()=>d.remove();$("#targets").append(d)}
+function show(item,progress){cur=item;$("#targets").innerHTML="";pick(null);$("#note").value="";
+if(progress)$("#progress").textContent=`已標 ${progress.labeled} / ${progress.total}`;
+if(!item){$("#title").textContent="全部標完了";$("#content").textContent="";$("#meta").textContent="";return}
+const p=item.post;$("#meta").textContent=`#${item.index+1}　${p.board}　${p.post_id}`;
+$("#title").textContent=p.title||"（無標題）";$("#content").textContent=p.content||"（無內文）";
+$("#content").scrollTop=0;
+if(item.existing){for(const s of item.existing){if(s.target===null)pick(s.polarity);else addTarget(s.target,s.polarity)}
+$("#note").value=item.note||"";$("#msg").textContent="這篇已標過，修改後儲存會覆蓋"}}
+async function load(url){const r=await fetch(url);if(!r.ok){$("#msg").textContent=await r.text();return}
+const d=await r.json();if("progress" in d)show(d.item,d.progress);else show(d)}
+async function save(){if(!cur)return;if(!whole){$("#msg").textContent="請先選整篇情緒（1/2/3）";return}
+const sentiments=[{target:null,polarity:whole}];
+for(const row of $("#targets").children){const t=row.querySelector("input").value.trim();
+if(t)sentiments.push({target:t,polarity:row.querySelector("select").value})}
+const r=await fetch("/api/labels",{method:"POST",headers:{"Content-Type":"application/json"},
+body:JSON.stringify({post_id:cur.post.post_id,sentiments,note:$("#note").value.trim()||null})});
+if(!r.ok){$("#msg").textContent="儲存失敗："+await r.text();return}
+$("#msg").textContent="已儲存";load("/api/next")}
+document.querySelectorAll("[data-p]").forEach(b=>b.onclick=()=>pick(b.dataset.p));
+$("#add").onclick=()=>addTarget();$("#save").onclick=save;
+$("#prev").onclick=()=>cur&&cur.index>0&&load(`/api/posts/${cur.index-1}`);
+$("#next").onclick=()=>cur&&load(`/api/posts/${cur.index+1}`);
+document.addEventListener("keydown",e=>{if(e.target.tagName==="INPUT"&&e.key!=="Enter")return;
+if(e.key==="1")pick("positive");else if(e.key==="2")pick("neutral");else if(e.key==="3")pick("negative");
+else if(e.key==="Enter"){e.preventDefault();save()}else if(e.key==="ArrowLeft")$("#prev").click();
+else if(e.key==="ArrowRight")$("#next").click()});
+load("/api/next");
+</script></body></html>
