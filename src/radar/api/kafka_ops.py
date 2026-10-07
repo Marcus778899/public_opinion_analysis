@@ -1,26 +1,16 @@
 """API 對 Kafka 的操作：手動派發爬取任務、查 DLQ 數量。"""
 
-import uuid
-from datetime import UTC, datetime
-
 from confluent_kafka import Consumer, TopicPartition
 
-from radar.common.enums import CrawlReason, CrawlTaskType
-from radar.common.ids import board_index_url
+from radar.common.enums import CrawlReason
 from radar.common.kafka import names
 from radar.common.kafka.producer import JsonProducer
 from radar.common.schemas import CrawlTask
+from radar.common.tasks import make_list_task
 
 
 def make_manual_list_task(board: str) -> CrawlTask:
-    return CrawlTask(
-        task_id=uuid.uuid4(),
-        type=CrawlTaskType.LIST,
-        board=board,
-        url=board_index_url(board),
-        reason=CrawlReason.MANUAL,
-        created_at=datetime.now(UTC),
-    )
+    return make_list_task(board, CrawlReason.MANUAL)
 
 
 def dispatch_task(producer: JsonProducer, task: CrawlTask) -> None:
