@@ -16,7 +16,8 @@ uv run ruff check --fix . && uv run ruff format .
 uv run --env-file .env alembic upgrade head
 pre-commit run --all-files
 
-make up && make migrate && make topics    # 啟動 Kafka（3 節點）+ Postgres，建表與 topic
+make up && make migrate && make topics    # 啟動 Kafka（3 節點）+ Postgres + CDC + ClickHouse，建表與 topic
+make ch-migrate && make connector         # ClickHouse 建表、註冊 Debezium connector
 make api                                  # 本機啟動管理 API
 make seed                                 # 透過 API 建立初始看板
 make up-app                               # 整套服務以 compose 啟動（自動建表與 topic）

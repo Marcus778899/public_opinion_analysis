@@ -1,6 +1,6 @@
 # 即時輿情雷達：設計草案
 
-> 狀態：實作中（階段 0 完成，階段 1 進行中；進度見開發規格第 6 章）
+> 狀態：實作中（階段 1 待 24 小時驗收，階段 2 進行中；進度見開發規格第 6 章）
 > 最後更新：2026-10-07
 >
 > 本文件需與程式同步：改動資料流、表、topic、訊息格式時先更新這裡（CLAUDE.md）。
@@ -127,7 +127,7 @@
 |---|---|
 | `__consumer_offsets` | Kafka |
 | `connect_configs` / `connect_offsets` / `connect_statuses` | Kafka Connect |
-| `__debezium-heartbeat.cdc` | Debezium heartbeat |
+| `__debezium-heartbeat.cdc` | Debezium heartbeat（broker 不自動建 topic，列在 `topics.yaml`） |
 | `changelog__*` / `repartition__*` | Quix Streams（2～4 個） |
 
 Apicurio 使用 SQL 儲存，不建立 topic。PG connector 不需要 schema history topic。
@@ -363,24 +363,49 @@ CREATE INDEX ON crawl_state (next_crawl_at);
 
 ### 6.1 Debezium
 
-- `table.include.list` 只包含 `posts`、`comments`
-- Avro 格式，schema 由 Apicurio 管理
-- 開啟 `heartbeat.interval.ms`，避免冷門時段 replication slot 停滯、WAL 累積
+- `table.include.list` 只包含 `posts`、`comments`；publication `radar_cdc` 由 Alembic migration 建立，Debezium 不自動建立（`publication.autocreate.mode=disabled`）
+- Avro 格式，schema 由 Apicurio 管理；Apicurio 使用同一個 PG instance 裡**獨立的 database** `apicurio`
+- 開啟 `heartbeat.interval.ms`，避免冷門時段 replication slot 停滯、WAL 累積；broker 關閉了自動建立 topic，heartbeat topic 要列在 `topics.yaml`
+- `ExtractNewRecordState` 攤平訊息，附加 `__op`、`__source_ts_ms`、`__source_lsn`；PG 端的刪除以 `delete.tombstone.handling.mode=rewrite` 改寫成 `__deleted=true`（與 PTT 刪文的 `is_deleted` 是兩回事，系統不會刪 PG 的列）
+- 版本：Debezium 3.7.0.Final（`quay.io/debezium/connect`，Docker Hub 的 `debezium/connect` 已停止更新）、Apicurio Registry 3.3.3
 
-### 6.2 ClickHouse 表
+### 6.2 ClickHouse 讀取 Avro 的方式（S2-01 驗證結果）
+
+> 2026-10-07 實測。先以 Debezium 2.5 + Apicurio 2.5.10 + ClickHouse 25.8 驗證可行，再改用目前版本 Debezium 3.7 + Apicurio 3.3.3 + ClickHouse 26.8（皆搭配 Kafka 4.1）重新驗證；以下以目前版本為準
+
+ClickHouse 的 `AvroConfluent` 格式能直接讀 Apicurio 序列化的訊息，不需要中間的 Python consumer。條件：
+
+| 項目 | 設定 | 不這樣做的後果 |
+|---|---|---|
+| 訊息格式 | schema ID 放在訊息開頭（1 byte magic + 4 bytes ID）；Apicurio 3.x converter 預設即是（`Default4ByteIdHandler`），2.x 需設 `as-confluent=true`、`headers.enabled=false` | ID 放在 Kafka header，ClickHouse 讀不到 |
+| ID 種類 | converter 明確設 `use-id=contentId`（3.x 預設即是，寫明避免日後預設值改變） | ccompat API 用 contentId 查 schema；寫成 globalId 時，「內容和既有 schema 相同的新版本」查詢得到 404，整個 topic 卡住（2.x 實測） |
+| Registry 位址 | `format_avro_schema_registry_url = http://apicurio:8080/apis/ccompat/v7` | — |
+| 缺欄位 | `input_format_avro_allow_missing_fields = 1` | Kafka engine 表的欄位在訊息的 schema 中不存在（例如新增欄位前產生的舊訊息）時，整個 topic 卡住（實測） |
+| 時間欄位 | Debezium 把 `timestamptz` 轉成 ISO 8601 字串（`ZonedTimestamp`）；Kafka engine 表宣告為 `String`，在 materialized view 用 `parseDateTime64BestEffort` 轉換 | 直接宣告 `DateTime64` 會解析失敗，訊息卡住 |
+
+- 以上 ClickHouse 設定集中在 named collection `cdc_kafka`（`infra/clickhouse/config.d/`），DDL 只寫 topic 與 consumer group；使用者需要 `named_collection_control` 權限（`infra/clickhouse/users.d/`）
+- Debezium 3.x 已移除 `delete.handling.mode`、`drop.tombstones`，舊設定會被忽略且不報錯（實測時 `__deleted` 因此消失）
+- snapshot 的列 `__op=r`，同一次 snapshot 的列共用同一個 LSN
+- ClickHouse 重啟後，Kafka engine 要等舊成員的 session 逾時才重新分配 partition，約 1 分鐘內不會消費
+
+### 6.3 ClickHouse 表
 
 使用 Kafka table engine + materialized view 直接消費 topic。
 
 | 表 | Engine | 來源 | 用途 |
 |---|---|---|---|
-| `posts_latest` | `ReplacingMergeTree(version)` | `cdc.public.posts` | 最新狀態（version 用 `ts_ms` 或 LSN） |
+| `posts_latest` | `ReplacingMergeTree(lsn)` | `cdc.public.posts` | 最新狀態 |
 | `posts_history` | `MergeTree` | `cdc.public.posts` | 推噓數變化歷程 |
-| `comments` | `MergeTree` | `cdc.public.comments` | 每分鐘新增推文數 |
-| `labels` | `MergeTree` | `labels` | 標註結果 |
+| `comments` | `MergeTree` | `cdc.public.comments` | 每分鐘新增推文數；多一個 `board` 欄位（從 `post_id` 取出，PG 的 `comments` 沒有），依看板統計時不必 join |
+| `labels` | `MergeTree` | `labels` | 標註結果；一則訊息的 `sentiments` 以 `ARRAY JOIN` 攤成一列一個 (target, polarity)（15.3） |
 | `predictions` | `MergeTree` | `predictions` | 推論結果（含 `model_version`） |
+| `alerts` | `MergeTree` | `alerts` | 警示紀錄 |
 
+- `posts_latest` 的 version 用 `__source_lsn`：同一列的後續變更 LSN 一定較大；`ts_ms` 是毫秒，同一毫秒內多次變更會分不出先後
 - 查詢 `posts_latest` 加 `FINAL` 或用 `argMax`
-- 刪除事件以 `is_deleted` 處理
+- PTT 刪文以 `is_deleted` 處理
+- JSON topic 同樣用 named collection（`json_kafka`），並設 `input_format_skip_unknown_fields=1`：訊息只做加欄位的相容變更（開發規格 2.2），新欄位不會讓 ClickHouse 卡住
+- ClickHouse 的 schema 以 `infra/clickhouse/migrations/` 的編號 SQL 檔管理，已合併的檔案不可修改（同 Alembic）
 
 ---
 
@@ -525,9 +550,10 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 
 | 服務 | profile | 說明 |
 |---|---|---|
-| `kafka_1`～`kafka_3`、`postgres` | （預設） | `make up` 只啟動這些，本機開發時服務直接用 `uv run` 執行 |
-| `kafka-ui` | `debug` | `make up-debug` |
-| `init` | `app` | 一次性：`alembic upgrade head` 與建立 topic（皆冪等）；唯一負責建置 image 的服務 |
+| `kafka_1`～`kafka_3`、`postgres` | （預設） | 本機開發時服務直接用 `uv run` 執行 |
+| `apicurio-db-init`、`apicurio`、`connect`、`clickhouse` | （預設） | 階段 2 起屬於資料流的一部分，`make up` 一併啟動；`apicurio-db-init` 是一次性服務 |
+| `kafka-ui` | （預設） | 開發期間預設啟動（http://localhost:8089，只綁本機），部署前移除（S8-06） |
+| `init` | `app` | 一次性：Alembic、建立 topic、ClickHouse migration、註冊 connector（皆冪等）；唯一負責建置 `radar-app` image 的服務 |
 | `api` | `app` | 只綁 `127.0.0.1:8000` |
 | `scheduler` | `app` | 只能 1 個；多開時其餘的待命 |
 | `crawler` | `app` | `replicas: 3` |
@@ -551,9 +577,9 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 | 服務 | 占用 |
 |---|---|
 | Kafka（KRaft，3 節點） | ~1～1.5GB（實測閒置約 0.9GB） |
-| Kafka Connect + Debezium | ~1GB |
-| Apicurio | ~0.5GB |
-| ClickHouse | ~1GB+ |
+| Kafka Connect + Debezium | ~1GB（spike 實測約 0.7GB） |
+| Apicurio | ~0.5GB（spike 實測約 0.3GB） |
+| ClickHouse | ~1GB+（spike 實測閒置約 0.3GB，26.8 版） |
 | PostgreSQL | ~0.3GB |
 | Kafka UI | ~0.3GB |
 | 自寫 Python 服務 | ~1～1.5GB |
@@ -566,7 +592,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 ### 11.3 減輕負擔
 
 - JVM 服務設定 heap 上限
-- Kafka UI 需要時再開
+- Kafka UI 部署時移除（S8-06）
 - 標註用雲端 API，不同時跑 Ollama
 
 ---
