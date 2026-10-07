@@ -7,6 +7,7 @@ from radar.common.settings import (
     ConnectSettings,
     CrawlerSettings,
     KafkaSettings,
+    LabelingSettings,
     PostgresSettings,
     SchedulerSettings,
 )
@@ -134,3 +135,18 @@ def test_clickhouse_settings_missing_password_raises(monkeypatch):
 
     with pytest.raises(ValidationError):
         ClickHouseSettings()
+
+
+def test_labeling_settings_fallbacks_split_from_env(monkeypatch):
+    monkeypatch.setenv("LABEL_FALLBACKS", "gemini, openrouter")
+
+    assert LabelingSettings().fallbacks == ["gemini", "openrouter"]
+
+
+def test_labeling_settings_defaults(monkeypatch):
+    for var in ("LABEL_PRIMARY", "LABEL_FALLBACKS", "LABEL_MAX_CHARS"):
+        monkeypatch.delenv(var, raising=False)
+
+    s = LabelingSettings()
+
+    assert (s.primary, s.fallbacks, s.max_chars) == ("groq", ["gemini"], 2000)

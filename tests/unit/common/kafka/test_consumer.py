@@ -5,7 +5,7 @@ import pytest
 from confluent_kafka import KafkaError, KafkaException
 from pydantic import BaseModel
 
-from radar.common.kafka.consumer import BatchConsumer, TransientError
+from radar.common.kafka.consumer import BatchConsumer, DecodeError, TransientError
 from radar.common.kafka.dlq import DlqPublisher
 from radar.common.kafka.producer import JsonProducer
 from radar.common.settings import KafkaSettings
@@ -28,7 +28,7 @@ def msg(event_id: int, offset: int = 0) -> FakeMessage:
     return FakeMessage(json.dumps({"id": event_id}).encode(), offset_=offset)
 
 
-def build(batches, handler, dlq_producer=None):
+def build(batches, handler, dlq_producer=None, decode=None):
     fake = FakeConsumer(batches=batches)
     dlq_producer = dlq_producer or FakeProducer()
     dlq = DlqPublisher(JsonProducer(SETTINGS, producer=dlq_producer), "test")
@@ -41,6 +41,7 @@ def build(batches, handler, dlq_producer=None):
         dlq=dlq,
         consumer=fake,
         backoff=lambda: itertools.repeat(0),
+        decode=decode,
     )
     fake.on_exhausted = consumer.stop
     return consumer, fake, dlq_producer
@@ -167,3 +168,20 @@ def test_fatal_broker_error_raises():
     with pytest.raises(KafkaException):
         consumer.run()
     assert fake.closed
+
+
+def test_custom_decode_is_used_and_decode_error_goes_to_dlq():
+    def decode(message) -> Event:
+        if message.value() == b"bad":
+            raise DecodeError("broken avro")
+        return Event(id=int(message.value()))
+
+    handled = []
+    batches = [[FakeMessage(b"bad"), FakeMessage(b"7")]]
+    consumer, fake, dlq_producer = build(batches, handled.append, decode=decode)
+
+    consumer.run()
+
+    assert handled == [[Event(id=7)]]
+    assert len(dlq_producer.produced) == 1
+    assert fake.commits == 1
