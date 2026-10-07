@@ -3,9 +3,11 @@
 migration 檔名為 NNNN_<name>.sql，已執行的版本記在 schema_migrations 表。
 """
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import httpx2
 
@@ -43,11 +45,18 @@ class ClickHouseClient:
             timeout=30.0,
         )
 
-    def execute(self, sql: str) -> str:
-        resp = self._client.post("/", content=sql.encode())
+    def execute(self, sql: str, params: dict[str, str] | None = None) -> str:
+        """params 對應 SQL 中的 {name:Type}，由伺服器端代入，避免拼接字串。"""
+        query = {f"param_{k}": v for k, v in (params or {}).items()}
+        resp = self._client.post("/", content=sql.encode(), params=query)
         if resp.status_code != 200:
             raise ClickHouseError(f"{resp.status_code}: {resp.text.strip()}")
         return resp.text
+
+    def query_rows(self, sql: str, params: dict[str, str] | None = None) -> list[dict[str, Any]]:
+        """以 JSONEachRow 回傳每列一個 dict（外部無型別資料，呼叫端自行驗證）。"""
+        body = self.execute(f"{sql}\nFORMAT JSONEachRow", params)
+        return [json.loads(line) for line in body.splitlines() if line.strip()]
 
     def close(self) -> None:
         self._client.close()

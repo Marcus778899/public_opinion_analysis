@@ -76,6 +76,13 @@ class ConnectSettings(BaseSettings):
     ready_timeout_s: float = 180.0
 
 
+class SchemaRegistrySettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="SCHEMA_REGISTRY_")
+
+    # Apicurio 的 Confluent 相容 API；docker-compose 內為 http://apicurio:8080/apis/ccompat/v7
+    url: str = "http://localhost:8080/apis/ccompat/v7"
+
+
 class ClickHouseSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CLICKHOUSE_")
 
@@ -83,6 +90,52 @@ class ClickHouseSettings(BaseSettings):
     db: str = "radar"
     user: str
     password: SecretStr
+
+
+class GeminiSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="GEMINI_")
+
+    api_key: SecretStr
+    base_url: str = "https://generativelanguage.googleapis.com"
+    # 額度以「專案 × 模型」計算；gemini-3.5-flash 免費只有 20 次/天，不適合批次標註
+    model: str = "gemini-3.1-flash-lite"
+    min_interval_s: float = 4.0
+
+
+class GroqSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="GROQ_")
+
+    api_key: SecretStr
+    base_url: str = "https://api.groq.com/openai/v1"
+    model: str = "qwen/qwen3.8-27b"
+    min_interval_s: float = 2.0
+
+
+class OpenRouterSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="OPENROUTER_")
+
+    api_key: SecretStr
+    base_url: str = "https://openrouter.ai/api/v1"
+    model: str = "google/gemma-4-31b-it:free"
+    min_interval_s: float = 4.0
+
+
+class LabelingSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="LABEL_")
+
+    # 內文超過此長度截斷，控制每篇的 token 數（開發規格 7.11）
+    max_chars: int = 2000
+    # 主要標註者的服務商；backfill 固定用它，不混用
+    primary: str = "groq"
+    # 串流標註的備援順序，主要標註者每日額度用完時依序改用
+    fallbacks: Annotated[list[str], NoDecode] = ["gemini"]
+
+    @field_validator("fallbacks", mode="before")
+    @classmethod
+    def _split_fallbacks(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [v.strip() for v in value.split(",") if v.strip()]
+        return value
 
 
 @lru_cache
