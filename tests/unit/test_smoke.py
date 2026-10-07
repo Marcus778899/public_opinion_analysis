@@ -17,6 +17,8 @@ PACKAGES = [
     "radar.api",
     "radar.collector",
     "radar.collector.parsers",
+    "radar.collector.parsers.ptt",
+    "radar.collector.parsers.ptt_time",
     "radar.ingest",
     "radar.ml.labeling",
     "radar.ml.training",
