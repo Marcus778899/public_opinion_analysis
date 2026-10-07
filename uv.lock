@@ -565,6 +565,7 @@ dependencies = [
     { name = "alembic" },
     { name = "confluent-kafka" },
     { name = "fastapi" },
+    { name = "httpx2" },
     { name = "loggerhelper" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-settings" },
@@ -576,7 +577,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx2" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
@@ -588,6 +588,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.20.0" },
     { name = "confluent-kafka", specifier = ">=2.15.1" },
     { name = "fastapi", specifier = ">=0.142.2" },
+    { name = "httpx2", specifier = ">=2.13.1" },
     { name = "loggerhelper", path = "lib/loggerhelper-2.0.0-py3-none-any.whl" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.6" },
     { name = "pydantic-settings", specifier = ">=2.15.0" },
@@ -599,7 +600,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx2", specifier = ">=2.13.1" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "ruff", specifier = ">=0.16.10" },
