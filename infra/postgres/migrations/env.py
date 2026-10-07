@@ -4,7 +4,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from radar.common.db.models import Base
-from radar.common.db.url import database_url
+from radar.common.settings import get_postgres_settings
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -17,7 +17,9 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # 連線資訊從環境變數讀取，不寫在 alembic.ini
-config.set_main_option("sqlalchemy.url", database_url().render_as_string(hide_password=False))
+# NOTE: set_main_option 走 configparser 插值，密碼中的 % 必須跳脫成 %%
+_url = get_postgres_settings().url().render_as_string(hide_password=False)
+config.set_main_option("sqlalchemy.url", _url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 

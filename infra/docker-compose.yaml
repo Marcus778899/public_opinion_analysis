@@ -1,0 +1,124 @@
+name: radar
+
+# Kafka 節點共用設定；各節點只差 NODE_ID、EXTERNAL port 與 volume
+x-kafka-env: &kafka-env
+  KAFKA_PROCESS_ROLES: 'broker,controller'
+  CLUSTER_ID: ${CLUSTER_ID}
+  KAFKA_CONTROLLER_QUORUM_VOTERS: ${KAFKA_QUORUM_VOTERS}
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT'
+  KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+  KAFKA_INTER_BROKER_LISTENER_NAME: 'INTERNAL'
+  KAFKA_HEAP_OPTS: ${KAFKA_HEAP_OPTS}
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+  # 3 節點：預設 3 份副本、至少 2 份寫入成功（容許 1 個節點掛掉）
+  KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+  KAFKA_MIN_INSYNC_REPLICAS: 2
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+
+x-kafka-healthcheck: &kafka-healthcheck
+  test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29092 > /dev/null"]
+  interval: 10s
+  timeout: 10s
+  retries: 10
+
+services:
+  # ======= Kafka node 1 =======
+  kafka_1:
+    image: apache/kafka:${KAFKA_VERSION}
+    container_name: radar_kafka_1
+    hostname: kafka_1
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENERS: 'INTERNAL://:29092,EXTERNAL://:9092,CONTROLLER://:9093'
+      KAFKA_ADVERTISED_LISTENERS: 'INTERNAL://kafka_1:29092,EXTERNAL://${KAFKA_EXTERNAL_HOST}:9092'
+    volumes:
+      - kafka_1_data:/var/lib/kafka/data
+    healthcheck: *kafka-healthcheck
+
+  # ======= Kafka node 2 =======
+  kafka_2:
+    image: apache/kafka:${KAFKA_VERSION}
+    container_name: radar_kafka_2
+    hostname: kafka_2
+    restart: unless-stopped
+    ports:
+      - "9094:9094"
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 2
+      KAFKA_LISTENERS: 'INTERNAL://:29092,EXTERNAL://:9094,CONTROLLER://:9093'
+      KAFKA_ADVERTISED_LISTENERS: 'INTERNAL://kafka_2:29092,EXTERNAL://${KAFKA_EXTERNAL_HOST}:9094'
+    volumes:
+      - kafka_2_data:/var/lib/kafka/data
+    healthcheck: *kafka-healthcheck
+
+  # ======= Kafka node 3 =======
+  kafka_3:
+    image: apache/kafka:${KAFKA_VERSION}
+    container_name: radar_kafka_3
+    hostname: kafka_3
+    restart: unless-stopped
+    ports:
+      - "9096:9096"
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 3
+      KAFKA_LISTENERS: 'INTERNAL://:29092,EXTERNAL://:9096,CONTROLLER://:9093'
+      KAFKA_ADVERTISED_LISTENERS: 'INTERNAL://kafka_3:29092,EXTERNAL://${KAFKA_EXTERNAL_HOST}:9096'
+    volumes:
+      - kafka_3_data:/var/lib/kafka/data
+    healthcheck: *kafka-healthcheck
+
+  # ======= PostgreSQL =======
+  postgres:
+    image: postgres:${POSTGRES_VERSION}
+    container_name: radar_postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    # Debezium 需要 logical decoding；表結構由 Alembic 管理，不放 init SQL
+    command: ["postgres", "-c", "wal_level=logical"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # TODO(S2-03): Apicurio、kafka-connect（Debezium）、kafka-connect-init 依 kafka_tutorial/deployment 的寫法加入
+
+  # ======= Kafka UI（make up-debug 才啟動）=======
+  kafka-ui:
+    image: kafbat/kafka-ui:${KAFKA_UI_VERSION}
+    container_name: radar_kafka_ui
+    profiles: ["debug"]
+    ports:
+      - "8089:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: 'local'
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: 'kafka_1:29092,kafka_2:29092,kafka_3:29092'
+      # TODO(S2-03): KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://apicurio:8080/apis/ccompat/v7
+    depends_on:
+      kafka_1:
+        condition: service_healthy
+      kafka_2:
+        condition: service_healthy
+      kafka_3:
+        condition: service_healthy
+
+volumes:
+  kafka_1_data:
+  kafka_2_data:
+  kafka_3_data:
+  postgres_data:

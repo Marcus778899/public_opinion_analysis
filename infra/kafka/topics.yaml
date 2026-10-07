@@ -1,0 +1,38 @@
+# 業務 topic 定義（設計文件 3.2），由 `make topics` 套用，冪等
+# retention 單位：小時；未列出的 config 使用 broker 預設值
+defaults:
+  replication_factor: 3
+  config:
+    compression.type: zstd
+    min.insync.replicas: "2"
+
+topics:
+  - name: crawl.tasks
+    partitions: 3
+    retention_hours: 24
+  - name: raw.posts
+    partitions: 3
+    retention_hours: 168
+  - name: raw.html
+    partitions: 3
+    retention_hours: 72
+    config:
+      max.message.bytes: "5242880"
+  - name: cdc.public.posts
+    partitions: 3
+    retention_hours: 336
+  - name: cdc.public.comments
+    partitions: 3
+    retention_hours: 336
+  - name: labels
+    partitions: 3
+    retention_hours: 720
+  - name: predictions
+    partitions: 3
+    retention_hours: 720
+  - name: alerts
+    partitions: 1
+    retention_hours: 168
+  - name: dlq
+    partitions: 1
+    retention_hours: 720
