@@ -16,7 +16,6 @@ from radar.collector.parsers.ptt import (
     post_id_from_url,
 )
 from radar.collector.parsers.ptt_time import created_at_from_filename
-from radar.collector.rate_limit import RateLimiter
 from radar.common.enums import CrawlTaskType
 from radar.common.ids import split_post_id
 from radar.common.kafka import names
@@ -24,6 +23,7 @@ from radar.common.kafka.consumer import BatchConsumer
 from radar.common.kafka.dlq import DlqPublisher
 from radar.common.kafka.producer import JsonProducer
 from radar.common.log import log, setup_logging
+from radar.common.rate_limit import RateLimiter
 from radar.common.schemas import CrawlTask, RawHtml, RawPost
 from radar.common.settings import CrawlerSettings, get_kafka_settings
 

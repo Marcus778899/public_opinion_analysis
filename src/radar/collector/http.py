@@ -5,9 +5,9 @@ from typing import Protocol
 
 import httpx2
 
-from radar.collector.rate_limit import RateLimiter
 from radar.common.ids import PTT_BASE_URL
 from radar.common.kafka.consumer import TransientError
+from radar.common.rate_limit import RateLimiter
 
 USER_AGENT = "radar-crawler/0.1 (+https://github.com/Marcus778899/public_opinion_analysis)"
 OVER18_COOKIE = {"over18": "1"}
