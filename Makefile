@@ -37,8 +37,8 @@ ch-migrate:  ## 套用 ClickHouse 尚未執行的 migration
 seed:  ## 透過 API 建立初始看板（需先 make api）
 	$(UV_ENV) python scripts/seed_boards.py
 
-testset:  ## 抽出 300 篇人工測試集（S3-04，只能抽一次）
-	$(UV_ENV) python -m radar.ml.labeling.testset --size 300 --boards Gossiping Stock Tech_Job
+testset:  ## 依看板配額抽出 300 篇人工測試集（S3-04，只能抽一次；配額見開發規格 7.11）
+	$(UV_ENV) python -m radar.ml.labeling.testset --counts Gossiping=180 Stock=90 Tech_Job=30
 
 human-label:  ## 本機人工標註頁（http://127.0.0.1:8090）
 	$(UV_ENV) python -m radar.ml.labeling.human_app
