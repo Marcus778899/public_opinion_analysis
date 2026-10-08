@@ -179,6 +179,8 @@ services:
     command: ["python", "-m", "radar.collector.crawler"]
     environment:
       <<: *app-env
+    # 一個列表任務可能需要 1 分鐘以上；預設 10 秒會在批次中途被強制結束（開發規格 2.2）
+    stop_grace_period: 90s
     deploy:
       replicas: 3
 

@@ -200,3 +200,66 @@ def test_deleted_post_uses_filename_time_and_zero_counts():
     assert post.is_deleted
     assert post.created_at == datetime.fromtimestamp(1791345103, UTC)
     assert (post.push_count, post.boo_count, post.comments) == (0, 0, [])
+
+
+# --- #11：同一網址連續暫時性失敗的上限 ---
+
+
+def retry_until_done(handler, task, attempts=10):
+    """模擬 BatchConsumer 對同一批的重試；回傳拋出 TransientError 的次數。"""
+    for failures in range(attempts):
+        try:
+            handler([task])
+            return failures
+        except TransientError:
+            continue
+    raise AssertionError("handler kept failing")
+
+
+def test_post_timeout_below_cap_raises_transient(handler, fetcher):
+    fetcher.errors[POST_URL] = TransientError("timeout")
+
+    for _ in range(4):
+        with pytest.raises(TransientError):
+            handler([post_task()])
+
+
+def test_post_timeout_fifth_time_skips_post_without_raising(handler, fetcher, producer):
+    fetcher.errors[POST_URL] = TransientError("timeout")
+
+    assert retry_until_done(handler, post_task()) == 4
+    assert len(fetcher.post_requests()) == 5
+    assert producer.produced == []
+
+
+def test_transient_attempts_reset_after_success(handler, fetcher, producer):
+    fetcher.errors[POST_URL] = TransientError("timeout")
+    for _ in range(4):
+        with pytest.raises(TransientError):
+            handler([post_task()])
+    del fetcher.errors[POST_URL]
+    handler([post_task()])
+    fetcher.errors[POST_URL] = TransientError("timeout")
+
+    # 成功後重新計數，下一批又可以重試 4 次
+    assert retry_until_done(handler, post_task()) == 4
+
+
+def test_transient_attempts_counted_per_url(handler, fetcher):
+    other = "https://www.ptt.cc/bbs/Stock/M.1791345104.A.E42.html"
+    fetcher.errors[POST_URL] = TransientError("timeout")
+    fetcher.errors[other] = TransientError("timeout")
+    for _ in range(4):
+        with pytest.raises(TransientError):
+            handler([post_task()])
+
+    with pytest.raises(TransientError):
+        handler([post_task(other, "Stock.M.1791345104.A.E42")])
+
+
+def test_list_page_timeout_fifth_time_skips_list(handler, fetcher, producer):
+    fetcher.errors[INDEX_URL] = TransientError("timeout")
+
+    assert retry_until_done(handler, list_task()) == 4
+    assert fetcher.list_requests() == [INDEX_URL] * 5
+    assert producer.produced == []
