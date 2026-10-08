@@ -1,6 +1,6 @@
 """[一次性] 在人工測試集上評估（S3-06、階段 3 驗收）。
 
-回報 baseline 的 macro-F1，以及兩個 LLM 標註者各自與人工的一致率（開發規格 7.11）。
+回報 baseline 的 macro-F1 與兩個 LLM 標註者與人工的一致率，整體與各看板分開（開發規格 7.11）。
 用法：python -m radar.ml.training.evaluate --model models/<model_version>
 """
 
@@ -23,6 +23,8 @@ from radar.ml.training.dataset import Example, post_text
 from radar.ml.training.train import load_model, write_card
 
 REPORT_FILE = "evaluation.md"
+# 看板樣本數低於此值時在輸出註明 F1 只供參考
+SMALL_BOARD_N = 50
 
 
 @dataclass(frozen=True)
@@ -74,9 +76,41 @@ def llm_vs_human(labeler: str, llm: dict[str, Polarity], human: dict[str, Polari
     )
 
 
+def evaluate_by_board(
+    pipeline: Pipeline, examples: list[Example]
+) -> dict[str, ClassificationReport]:
+    """依 Example.board 分組各自評估；依看板名稱排序。"""
+    groups: dict[str, list[Example]] = {}
+    for e in examples:
+        groups.setdefault(e.board, []).append(e)
+    return {board: evaluate_model(pipeline, groups[board]) for board in sorted(groups)}
+
+
+def agreements_by_board(
+    llm_labels: dict[str, dict[str, Polarity]],
+    human: dict[str, Polarity],
+    boards: dict[str, str],
+) -> dict[str, list[Agreement]]:
+    """llm_labels 為 {labeler: {post_id: polarity}}，boards 為 {post_id: board}；依看板名稱排序。"""
+    grouped: dict[str, dict[str, Polarity]] = {}
+    for pid, polarity in human.items():
+        if pid in boards:
+            grouped.setdefault(boards[pid], {})[pid] = polarity
+    return {
+        board: [llm_vs_human(name, labels, grouped[board]) for name, labels in llm_labels.items()]
+        for board in sorted(grouped)
+    }
+
+
 def render_markdown(
-    model_version: str, model: ClassificationReport, agreements: list[Agreement]
+    model_version: str,
+    model: ClassificationReport,
+    agreements: list[Agreement],
+    *,
+    board_reports: dict[str, ClassificationReport],
+    board_agreements: dict[str, list[Agreement]],
 ) -> str:
+    """寫入 models/<model_version>/evaluation.md；手寫評估報告的數字來源（開發規格 7.11）。"""
     labels = list(Polarity)
     lines = [
         f"# 評估：{model_version}",
@@ -85,10 +119,12 @@ def render_markdown(
         "",
         "## Baseline",
         "",
-        f"- macro-F1：**{model.macro_f1:.3f}**",
-        *(f"- {p.value} F1：{model.per_class_f1[p]:.3f}" for p in labels),
+        "| 範圍 | 篇數 | macro-F1 | " + " | ".join(f"{p.value} F1" for p in labels) + " |",
+        "|---" * (len(labels) + 3) + "|",
+        _f1_row("整體", model),
+        *(_f1_row(_board_name(b, r.n), r) for b, r in board_reports.items()),
         "",
-        "混淆矩陣（列 = 人工，欄 = 模型）：",
+        "整體混淆矩陣（列 = 人工，欄 = 模型）：",
         "",
         "| 人工 \\ 模型 | " + " | ".join(p.value for p in labels) + " |",
         "|---" * (len(labels) + 1) + "|",
@@ -99,15 +135,30 @@ def render_markdown(
         "",
         "## LLM 標註者 vs 人工",
         "",
-        "| 標註者 | 篇數 | 一致率 | Cohen's kappa |",
-        "|---|---|---|---|",
+        "| 標註者 | 範圍 | 篇數 | 一致率 | Cohen's kappa |",
+        "|---|---|---|---|---|",
+        *(_agreement_row(a, "整體") for a in agreements),
         *(
-            f"| `{a.labeler}` | {a.n} | {a.accuracy:.1%} | {a.cohen_kappa:.3f} |"
-            for a in agreements
+            _agreement_row(a, _board_name(board, a.n))
+            for board, board_rows in board_agreements.items()
+            for a in board_rows
         ),
         "",
     ]
     return "\n".join(lines)
+
+
+def _board_name(board: str, n: int) -> str:
+    return f"{board}（樣本少，只供參考）" if n < SMALL_BOARD_N else board
+
+
+def _f1_row(scope: str, report: ClassificationReport) -> str:
+    per_class = " | ".join(f"{report.per_class_f1[p]:.3f}" for p in Polarity)
+    return f"| {scope} | {report.n} | **{report.macro_f1:.3f}** | {per_class} |"
+
+
+def _agreement_row(a: Agreement, scope: str) -> str:
+    return f"| `{a.labeler}` | {scope} | {a.n} | {a.accuracy:.1%} | {a.cohen_kappa:.3f} |"
 
 
 @log.catch(level="CRITICAL")
@@ -142,15 +193,25 @@ def main() -> None:
         if pid in posts
     ]
     report = evaluate_model(pipeline, examples)
+    board_reports = evaluate_by_board(pipeline, examples)
     agreements = [llm_vs_human(name, labels, human) for name, labels in llm_labels.items()]
+    boards = {pid: post.board for pid, post in posts.items()}
+    board_agreements = agreements_by_board(llm_labels, human, boards)
 
     card.metrics = {
         "testset_n": float(report.n),
         "macro_f1": report.macro_f1,
         **{f"f1_{p.value}": v for p, v in report.per_class_f1.items()},
+        **{f"macro_f1_{board}": r.macro_f1 for board, r in board_reports.items()},
     }
     write_card(args.model, card)
-    markdown = render_markdown(card.model_version, report, agreements)
+    markdown = render_markdown(
+        card.model_version,
+        report,
+        agreements,
+        board_reports=board_reports,
+        board_agreements=board_agreements,
+    )
     (args.model / REPORT_FILE).write_text(markdown)
     log.info(
         "macro-F1=%.3f on %d posts; report: %s", report.macro_f1, report.n, args.model / REPORT_FILE
