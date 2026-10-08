@@ -23,6 +23,7 @@ from radar.common.schemas import Label, Sentiment
 from radar.common.settings import ClickHouseSettings, LabelingSettings, get_kafka_settings
 from radar.ml.labeling.factory import build_labeler
 from radar.ml.labeling.prompt import PROMPT_VERSION
+from radar.ml.labeling.sampling import array_param
 from radar.ml.labeling.testset import TESTSET_DIR, load_post_ids
 
 MANUAL_LABELER = "claude-sonnet-manual"
@@ -74,12 +75,51 @@ def export_batch(
         "limit": str(size + len(exclude_ids)),
     }
     rows = [r for r in client.query_rows(export_query(), params) if r["post_id"] not in exclude_ids]
+    return _write_batch(rows[:size], max_chars, out_dir, now)
+
+
+def export_testset_query() -> str:
+    """人工測試集中 Claude 尚未標過（同一 prompt 版本）的文章；不要求主要標註者先標。"""
+    return (
+        "SELECT post_id, board, title, content FROM posts_latest FINAL\n"
+        "WHERE post_id IN {ids:Array(String)} AND post_id NOT IN (\n"
+        "  SELECT post_id FROM labels\n"
+        "  WHERE labeler = {manual:String} AND version = {version:String}\n"
+        ")\n"
+        "ORDER BY post_id\n"
+        "LIMIT {limit:UInt32}"
+    )
+
+
+def export_testset_batch(
+    client: ClickHouseClient,
+    post_ids: list[str],
+    size: int,
+    max_chars: int,
+    out_dir: Path,
+    now: datetime,
+) -> Path | None:
+    """匯出一批人工測試集給 Claude 標；沒有剩下的回傳 None。檔名與截斷規則同 export_batch。"""
+    if not post_ids:
+        return None
+    params = {
+        "ids": array_param(post_ids),
+        "manual": MANUAL_LABELER,
+        "version": PROMPT_VERSION,
+        "limit": str(size),
+    }
+    return _write_batch(client.query_rows(export_testset_query(), params), max_chars, out_dir, now)
+
+
+def _write_batch(
+    rows: list[dict[str, str]], max_chars: int, out_dir: Path, now: datetime
+) -> Path | None:
     if not rows:
         return None
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"batch-{now:%Y%m%dT%H%M%S}.jsonl"
     with path.open("w", encoding="utf-8") as f:
-        for r in rows[:size]:
+        for r in rows:
             # 截斷規則與 LLM prompt 相同，兩個標註者看到的內容一致
             content = (r.get("content") or "")[:max_chars]
             post = BatchPost(
@@ -151,10 +191,27 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     exp = sub.add_parser("export")
     exp.add_argument("--size", type=int, default=50)
+    exp.add_argument("--testset", action="store_true", help="匯出人工測試集（評估用）")
     imp = sub.add_parser("import")
     imp.add_argument("output", type=Path)
     args = parser.parse_args()
     settings = LabelingSettings()
+
+    if args.command == "export" and args.testset:
+        ch = ClickHouseClient(ClickHouseSettings())
+        try:
+            path = export_testset_batch(
+                ch,
+                load_post_ids(TESTSET_DIR),
+                args.size,
+                settings.max_chars,
+                MANUAL_DIR,
+                datetime.now(UTC),
+            )
+        finally:
+            ch.close()
+        log.info("exported %s", path or "nothing: every testset post already has a manual label")
+        return
 
     if args.command == "export":
         # 只需要主要標註者的名稱，不會真的呼叫它
