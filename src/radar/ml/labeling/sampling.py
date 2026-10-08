@@ -85,3 +85,18 @@ def fetch_posts(client: ClickHouseClient, post_ids: list[str]) -> dict[str, Post
         {"ids": array_param(post_ids)},
     )
     return {r["post_id"]: _to_post(r) for r in rows}
+
+
+def labeled_post_ids(
+    client: ClickHouseClient, labeler: str, version: str, post_ids: list[str]
+) -> set[str]:
+    """post_ids 中已有這組 labeler + version 標註的文章（續跑用）。"""
+    if not post_ids:
+        return set()
+    rows = client.query_rows(
+        "SELECT DISTINCT post_id FROM labels\n"
+        "WHERE labeler = {labeler:String} AND version = {version:String}\n"
+        "  AND post_id IN {ids:Array(String)}",
+        {"labeler": labeler, "version": version, "ids": array_param(post_ids)},
+    )
+    return {r["post_id"] for r in rows}
