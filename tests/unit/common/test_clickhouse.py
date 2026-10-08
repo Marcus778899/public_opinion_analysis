@@ -91,6 +91,16 @@ def test_load_migrations_duplicate_version_raises(tmp_path):
         load_migrations(tmp_path)
 
 
+def test_load_migrations_missing_directory_raises(tmp_path):
+    with pytest.raises(MigrationFileError, match="not found"):
+        load_migrations(tmp_path / "missing")
+
+
+def test_load_migrations_empty_directory_raises(tmp_path):
+    with pytest.raises(MigrationFileError, match="no migration"):
+        load_migrations(tmp_path)
+
+
 def test_load_migrations_repo_files_parse():
     loaded = load_migrations(REPO_MIGRATIONS)
 
