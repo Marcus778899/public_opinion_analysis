@@ -10,6 +10,8 @@ x-kafka-env: &kafka-env
   KAFKA_INTER_BROKER_LISTENER_NAME: 'INTERNAL'
   KAFKA_HEAP_OPTS: ${KAFKA_HEAP_OPTS}
   KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+  # NOTE: image 預設寫在 /tmp/kafka-logs；不指定時 volume 是空的，移除 container 就丟掉所有資料
+  KAFKA_LOG_DIRS: '/var/lib/kafka/data'
   # 3 節點：預設 3 份副本、至少 2 份寫入成功（容許 1 個節點掛掉）
   KAFKA_DEFAULT_REPLICATION_FACTOR: 3
   KAFKA_MIN_INSYNC_REPLICAS: 2
