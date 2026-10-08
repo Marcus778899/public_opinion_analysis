@@ -18,3 +18,11 @@ class CrawlReason(StrEnum):
     SCHEDULE = "schedule"
     MANUAL = "manual"
     RECRAWL = "recrawl"
+
+
+class Polarity(StrEnum):
+    """情緒三分類（設計文件 15.3）。"""
+
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+    NEUTRAL = "neutral"

@@ -1,4 +1,4 @@
-from radar.collector.rate_limit import RateLimiter
+from radar.common.rate_limit import RateLimiter
 
 
 class FakeClock:

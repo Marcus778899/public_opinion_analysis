@@ -6,6 +6,7 @@
 
 - [設計文件](docs/realtime-sentiment-radar-design.md)
 - [開發流程規格](docs/development-spec.md)
+- [情緒標註準則](docs/labeling-guideline.md)：LLM、Claude 與人工標註共用
 
 ## 開發環境
 
@@ -38,6 +39,21 @@ uv run --env-file .env python -m radar.collector.scheduler  # 另開終端機
 uv run --env-file .env python -m radar.collector.crawler    # 另開終端機
 uv run --env-file .env python -m radar.ingest.main          # 另開終端機
 make seed
+```
+
+**階段 3：標註與訓練**（需要 `.env` 的 `GROQ_API_KEY`、`GEMINI_API_KEY`，以及 ClickHouse 已有資料；準則見 [docs/labeling-guideline.md](docs/labeling-guideline.md)）：
+
+```bash
+make testset                                                          # 抽 300 篇人工測試集（只做一次）
+make human-label                                                      # 人工標註測試集
+uv run --env-file .env python -m radar.ml.labeling.backfill --per-board 1000   # 主要標註者批次標註，可中斷續跑
+# Claude Code 中執行 /label-posts                                       # 第二標註者（Claude），一次 50 篇
+uv run --env-file .env python -m radar.ml.labeling.cross_check        # 交叉比對，輸出不一致清單
+uv run --env-file .env python -m radar.ml.experiments.push_ratio      # 推噓比弱標註實驗
+uv run --env-file .env python -m radar.ml.training.export             # 匯出訓練資料
+uv run --env-file .env python -m radar.ml.training.train --data data/datasets/<名稱>.jsonl
+uv run --env-file .env python -m radar.ml.training.evaluate --model models/<model_version>
+make up-labeling                                                      # 串流抽樣標註新文章
 ```
 
 **端到端測試**（假 PTT 伺服器、獨立的資料 volume，不碰開發資料也不連真的 PTT）：

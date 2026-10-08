@@ -2,7 +2,7 @@ COMPOSE := docker compose -f infra/docker-compose.yaml --env-file .env
 COMPOSE_E2E := docker compose -f infra/docker-compose.yaml -f infra/docker-compose.e2e.yaml --env-file .env
 UV_ENV := uv run --env-file .env
 
-.PHONY: up up-app down logs migrate topics connector ch-migrate seed api lint test test-int e2e-up e2e e2e-down
+.PHONY: up up-app up-labeling testset human-label down logs migrate topics connector ch-migrate seed api lint test test-int e2e-up e2e e2e-down
 
 up:  ## 啟動基礎設施
 	$(COMPOSE) up -d --wait
@@ -10,8 +10,11 @@ up:  ## 啟動基礎設施
 up-app:  ## 連同 api、scheduler、crawler ×3、ingest 一起啟動（會重新建 image，並自動建表與 topic）
 	$(COMPOSE) --profile app up -d --build --wait
 
+up-labeling:  ## 啟動串流抽樣標註（S3-08，會持續呼叫 LLM API）
+	$(COMPOSE) --profile app --profile labeling up -d --wait label-stream
+
 down:
-	$(COMPOSE) --profile app down --remove-orphans
+	$(COMPOSE) --profile app --profile labeling down --remove-orphans
 
 e2e-down:  ## 停止 e2e 環境並刪除 e2e 專用的資料 volume
 	$(COMPOSE_E2E) --profile app down -v --remove-orphans
@@ -33,6 +36,12 @@ ch-migrate:  ## 套用 ClickHouse 尚未執行的 migration
 
 seed:  ## 透過 API 建立初始看板（需先 make api）
 	$(UV_ENV) python scripts/seed_boards.py
+
+testset:  ## 抽出 300 篇人工測試集（S3-04，只能抽一次）
+	$(UV_ENV) python -m radar.ml.labeling.testset --size 300 --boards Gossiping Stock Tech_Job
+
+human-label:  ## 本機人工標註頁（http://127.0.0.1:8090）
+	$(UV_ENV) python -m radar.ml.labeling.human_app
 
 api:  ## 本機啟動管理 API（http://localhost:8000/docs）
 	$(UV_ENV) uvicorn radar.api.main:app --reload --port 8000

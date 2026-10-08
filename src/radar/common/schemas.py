@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
-from radar.common.enums import CommentType, CrawlReason, CrawlTaskType
+from radar.common.enums import CommentType, CrawlReason, CrawlTaskType, Polarity
 from radar.common.ids import split_post_id
 
 # 必須帶時區，並統一轉成 UTC（開發規格 2.1）
@@ -110,6 +110,57 @@ class RawHtml(KafkaMessage):
     url: str
     crawled_at: UtcDatetime
     html: str
+
+
+class Sentiment(BaseModel):
+    """target 為 None 代表整篇；對象是開放的實體字串，不是 enum（設計文件 15.3）。"""
+
+    target: str | None
+    polarity: Polarity
+
+
+class Label(KafkaMessage):
+    """topic: labels；key: post_id。version 是 prompt 版本，與 labeler 一起識別一次標註。"""
+
+    post_id: str
+    labeler: str
+    version: str
+    labeled_at: UtcDatetime
+    sentiments: list[Sentiment]
+
+    @model_validator(mode="after")
+    def _check_sentiments(self) -> Self:
+        check_sentiments(self.sentiments)
+        return self
+
+
+class CdcPost(BaseModel):
+    """cdc.public.posts 經 ExtractNewRecordState 攤平後的 value（設計文件 6.1）；只取需要的欄位。"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    post_id: str
+    board: str
+    title: str | None = None
+    content: str | None = None
+    is_deleted: bool = False
+    op: str | None = Field(default=None, alias="__op")
+    # PG 端刪除列時為 "true"；系統不刪 PG 的列，正常不會出現
+    deleted: str | None = Field(default=None, alias="__deleted")
+    source_lsn: int | None = Field(default=None, alias="__source_lsn")
+
+
+def check_sentiments(sentiments: list[Sentiment]) -> None:
+    """恰好一筆整篇（target=None）；對象不可為空白、不可重複。LLM 輸出與人工標註共用。"""
+    whole = [s for s in sentiments if s.target is None]
+    if len(whole) != 1:
+        raise ValueError(f"expected exactly one whole-post sentiment, got {len(whole)}")
+    targets = [s.target for s in sentiments if s.target is not None]
+    if any(not t.strip() for t in targets):
+        raise ValueError("target must not be blank")
+    duplicated = sorted(t for t, n in Counter(targets).items() if n > 1)
+    if duplicated:
+        raise ValueError(f"duplicate targets: {duplicated}")
 
 
 def _check_belongs_to_board(post_id: str, board: str) -> None:

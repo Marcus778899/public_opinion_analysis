@@ -24,7 +24,7 @@ PACKAGES = [
     "radar.collector.list_cache",
     "radar.collector.recrawl",
     "radar.collector.scheduler",
-    "radar.collector.rate_limit",
+    "radar.common.rate_limit",
     "radar.ingest.main",
     "radar.ingest.writer",
     "radar.api.deps",

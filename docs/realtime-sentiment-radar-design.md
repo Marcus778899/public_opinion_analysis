@@ -449,6 +449,9 @@ ClickHouse 的 `AvroConfluent` 格式能直接讀 Apicurio 序列化的訊息，
 | 便宜付費 API | 數美元 | 可搭配 Batch API |
 | Ollama 本地 | $0 | 只用於測試 prompt；7B 模型判斷反串較弱 |
 
+- LLM 只用在**標註**（離線批次 + 串流抽樣 5%），線上預測一律用自己訓練的小模型：LLM 的額度、延遲、成本都撐不住每篇文章推論
+- 多組 API key 輪替暫不做；需要時只換不同服務商（開發規格 7.11）
+
 ### 7.5 模型路線
 
 1. Baseline：TF-IDF + Logistic Regression
@@ -516,13 +519,20 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 │   ├── api/                 # [常駐 ×1] FastAPI（main、routes、repository、seed）
 │   ├── collector/
 │   │   ├── scheduler.py     # [常駐 ×1] APScheduler
-│   │   ├── crawler.py       # [常駐 ×N]（http、rate_limit、list_cache）
+│   │   ├── crawler.py       # [常駐 ×N]（http、list_cache）
 │   │   └── parsers/         # PTT 列表頁與文章頁解析
 │   ├── ingest/              # [常駐] main、writer
 │   ├── ml/
 │   │   ├── labeling/
+│   │   │   ├── prompt.py    # 標註準則（RULES）與輸出格式，對應 docs/labeling-guideline.md
+│   │   │   ├── llm.py       # Labeler：Gemini、OpenAI 相容（Groq、OpenRouter）、FallbackLabeler
 │   │   │   ├── stream.py    # [常駐] 抽樣標註
-│   │   │   └── backfill.py  # [一次性] 初期批次標註
+│   │   │   ├── backfill.py  # [一次性] 初期批次標註
+│   │   │   ├── manual.py    # [一次性] Claude 手動標註的匯出／匯入（搭配 skill /label-posts）
+│   │   │   ├── cross_check.py  # [一次性] 兩個標註者交叉比對
+│   │   │   ├── testset.py   # [一次性] 人工測試集
+│   │   │   └── human_app.py # [本機] 人工標註頁
+│   │   ├── experiments/     # [一次性] push_ratio（推噓比弱標註實驗）
 │   │   ├── training/        # [一次性] export / train / evaluate
 │   │   └── inference/main.py  # [常駐]
 │   ├── streaming/heat.py    # [常駐] Quix Streams
@@ -541,7 +551,8 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 | 類型 | 程式 | 執行方式 |
 |---|---|---|
 | 常駐 | api、scheduler、crawler、ingest、labeling/stream、inference、heat、bot | docker-compose service |
-| 一次性 | labeling/backfill、training/* | 手動執行或 Colab |
+| 一次性 | labeling/backfill、manual、cross_check、testset、experiments/*、training/* | 手動執行或 Colab |
+| 本機 | labeling/human_app | 人工標註時執行，只綁 127.0.0.1 |
 
 不使用系統 cron，定時行為都在常駐程式內用 APScheduler 處理。
 
@@ -553,6 +564,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 |---|---|---|
 | `kafka_1`～`kafka_3`、`postgres` | （預設） | 本機開發時服務直接用 `uv run` 執行 |
 | `apicurio-db-init`、`apicurio`、`connect`、`clickhouse` | （預設） | 階段 2 起屬於資料流的一部分，`make up` 一併啟動；`apicurio-db-init` 是一次性服務 |
+| `label-stream` | `labeling` | 串流抽樣標註，會持續呼叫 LLM API，`make up-labeling` 才啟動 |
 | `kafka-ui` | （預設） | 開發期間預設啟動（http://localhost:8089，只綁本機），部署前移除（S8-06） |
 | `init` | `app` | 一次性：Alembic、建立 topic、ClickHouse migration、註冊 connector（皆冪等）；唯一負責建置 `radar-app` image 的服務 |
 | `api` | `app` | 只綁 `127.0.0.1:8000` |
