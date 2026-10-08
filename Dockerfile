@@ -17,6 +17,8 @@ COPY src/ src/
 COPY alembic.ini ./
 COPY infra/postgres/migrations/ infra/postgres/migrations/
 COPY infra/kafka/topics.yaml infra/kafka/topics.yaml
+COPY infra/clickhouse/migrations/ infra/clickhouse/migrations/
+COPY infra/debezium/radar-cdc.json infra/debezium/radar-cdc.json
 COPY scripts/ scripts/
 RUN uv sync --frozen --no-dev
 

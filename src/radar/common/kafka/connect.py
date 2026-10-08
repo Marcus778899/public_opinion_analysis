@@ -22,6 +22,10 @@ class ConnectError(RuntimeError):
     """Kafka Connect REST API 回應非預期的狀態碼，或逾時仍未就緒。"""
 
 
+class ConnectorNotFoundError(ConnectError):
+    """查狀態時回 404：connector 不存在，或剛建立、狀態尚未產生。"""
+
+
 @dataclass(frozen=True)
 class ConnectorSpec:
     name: str
@@ -91,6 +95,8 @@ def put_connector(client: httpx2.Client, spec: ConnectorSpec) -> bool:
 
 def get_status(client: httpx2.Client, name: str) -> ConnectorStatus:
     resp = client.get(f"/connectors/{name}/status")
+    if resp.status_code == 404:
+        raise ConnectorNotFoundError(f"get status {name} failed: 404 {resp.text}")
     if resp.status_code != 200:
         raise ConnectError(f"get status {name} failed: {resp.status_code} {resp.text}")
     body = resp.json()
@@ -104,13 +110,19 @@ def wait_until_running(
     client: httpx2.Client, name: str, timeout_s: float, poll_s: float = 2.0
 ) -> ConnectorStatus:
     """PUT 成功只代表設定被接受；連不上 PG、publication 不存在要等 task 啟動才會失敗。"""
+    # NOTE: PUT 建立後狀態是非同步產生的，剛建立時查狀態會先回 404
     deadline = time.monotonic() + timeout_s
     while True:
-        status = get_status(client, name)
-        if status.is_running:
-            return status
-        if _FAILED in [status.connector_state, *status.task_states]:
-            raise ConnectError(f"connector {name} failed: {status}")
+        status: ConnectorStatus | str
+        try:
+            status = get_status(client, name)
+        except ConnectorNotFoundError:
+            status = "status not found yet"
+        else:
+            if status.is_running:
+                return status
+            if _FAILED in [status.connector_state, *status.task_states]:
+                raise ConnectError(f"connector {name} failed: {status}")
         if time.monotonic() >= deadline:
             raise ConnectError(f"connector {name} not running after {timeout_s}s: {status}")
         time.sleep(poll_s)
