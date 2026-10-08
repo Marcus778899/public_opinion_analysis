@@ -7,6 +7,7 @@ from pathlib import Path
 from pydantic import BaseModel, model_validator
 
 from radar.common.clickhouse import ClickHouseClient
+from radar.common.ids import is_valid_board
 from radar.common.log import log, setup_logging
 from radar.common.schemas import Sentiment, UtcDatetime, check_sentiments
 from radar.common.settings import ClickHouseSettings
@@ -31,15 +32,40 @@ class HumanLabel(BaseModel):
         return self
 
 
-def select_testset(client: ClickHouseClient, size: int, boards: list[str]) -> list[str]:
-    """各看板平均分配；除不盡的餘數給排在前面的看板。"""
-    base, extra = divmod(size, len(boards))
+class InsufficientPostsError(ValueError):
+    """某看板可用文章少於配額；不默默少抽，否則各看板比例會偏掉。"""
+
+
+def parse_board_counts(values: list[str]) -> dict[str, int]:
+    """CLI 的 ["Gossiping=180", "Stock=90"] → {"Gossiping": 180, "Stock": 90}。"""
+    counts: dict[str, int] = {}
+    for value in values:
+        board, sep, raw = value.partition("=")
+        if not sep:
+            raise ValueError(f"expected <board>=<count>: {value!r}")
+        if not is_valid_board(board):
+            raise ValueError(f"invalid board: {board!r}")
+        if board in counts:
+            raise ValueError(f"duplicate board: {board!r}")
+        try:
+            count = int(raw)
+        except ValueError:
+            raise ValueError(f"count must be an integer: {value!r}") from None
+        if count < 1:
+            raise ValueError(f"count must be >= 1: {value!r}")
+        counts[board] = count
+    return counts
+
+
+def select_testset(client: ClickHouseClient, counts: dict[str, int]) -> list[str]:
+    """依看板配額抽樣，回傳順序依 counts 的看板順序（開發規格 7.11）。"""
     ids: list[str] = []
-    for i, board in enumerate(boards):
-        spec = SampleSpec(
-            per_board=base + (1 if i < extra else 0), seed=TESTSET_SEED, boards=[board]
-        )
-        ids.extend(p.post_id for p in sample_posts(client, spec, exclude_ids=set()))
+    for board, count in counts.items():
+        spec = SampleSpec(per_board=count, seed=TESTSET_SEED, boards=[board])
+        posts = sample_posts(client, spec, exclude_ids=set())
+        if len(posts) < count:
+            raise InsufficientPostsError(f"{board}: only {len(posts)} usable posts, need {count}")
+        ids.extend(p.post_id for p in posts)
     return ids
 
 
@@ -81,19 +107,19 @@ def append_human_label(directory: Path, label: HumanLabel) -> None:
 
 @log.catch(level="CRITICAL")
 def main() -> None:
-    """用法：python -m radar.ml.labeling.testset --size 300 --boards Gossiping Stock Tech_Job"""
+    """用法：python -m radar.ml.labeling.testset --counts Gossiping=180 Stock=90 Tech_Job=30"""
     setup_logging("testset")
-    parser = argparse.ArgumentParser(description="抽出人工測試集（S3-04）")
-    parser.add_argument("--size", type=int, default=300)
-    parser.add_argument("--boards", nargs="+", required=True)
+    parser = argparse.ArgumentParser(description="依看板配額抽出人工測試集（S3-04）")
+    parser.add_argument("--counts", nargs="+", required=True, help="<board>=<篇數>，可多個")
     args = parser.parse_args()
+    counts = parse_board_counts(args.counts)
     ch = ClickHouseClient(ClickHouseSettings())
     try:
-        ids = select_testset(ch, args.size, args.boards)
+        ids = select_testset(ch, counts)
     finally:
         ch.close()
     write_post_ids(TESTSET_DIR, ids)
-    log.info("testset: %d posts written to %s", len(ids), TESTSET_DIR / POST_IDS_FILE)
+    log.info("testset: %d posts %s written to %s", len(ids), counts, TESTSET_DIR / POST_IDS_FILE)
 
 
 if __name__ == "__main__":
