@@ -179,6 +179,30 @@ def test_wait_until_running_failed_task_raises_immediately(monkeypatch):
         wait_until_running(status_sequence(body("RUNNING", "FAILED")), "c", timeout_s=60)
 
 
+def test_wait_until_running_status_404_right_after_create_keeps_polling(monkeypatch):
+    monkeypatch.setattr(connect.time, "sleep", lambda _: None)
+    responses = iter(
+        [
+            httpx2.Response(404, json={"error_code": 404, "message": "No status found"}),
+            httpx2.Response(200, json=body("RUNNING", "RUNNING")),
+        ]
+    )
+
+    status = wait_until_running(client_with(lambda r: next(responses)), "c", timeout_s=60)
+
+    assert status.is_running
+
+
+def test_wait_until_running_status_404_until_timeout_raises(monkeypatch):
+    monkeypatch.setattr(connect.time, "sleep", lambda _: None)
+    clock = iter(range(0, 1000, 10))
+    monkeypatch.setattr(connect.time, "monotonic", lambda: next(clock))
+    client = client_with(lambda r: httpx2.Response(404, text="not found"))
+
+    with pytest.raises(ConnectError, match="not running"):
+        wait_until_running(client, "c", timeout_s=30)
+
+
 def test_wait_until_running_timeout_raises(monkeypatch):
     monkeypatch.setattr(connect.time, "sleep", lambda _: None)
     clock = iter(range(0, 1000, 10))

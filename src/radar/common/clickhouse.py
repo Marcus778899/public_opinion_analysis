@@ -22,7 +22,7 @@ class ClickHouseError(RuntimeError):
 
 
 class MigrationFileError(ValueError):
-    """migration 檔名不符規則或版本重複。"""
+    """migration 資料夾不存在、沒有檔案、檔名不符規則或版本重複。"""
 
 
 @dataclass(frozen=True)
@@ -94,8 +94,14 @@ def split_statements(sql: str) -> list[str]:
 
 
 def load_migrations(directory: Path) -> list[Migration]:
+    # NOTE: 資料夾不存在時 glob 回傳空清單，會被當成「沒有待執行的 migration」而默默略過
+    if not directory.is_dir():
+        raise MigrationFileError(f"{directory}: migrations directory not found")
+    paths = sorted(directory.glob("*.sql"))
+    if not paths:
+        raise MigrationFileError(f"{directory}: no migration files")
     migrations: dict[int, Migration] = {}
-    for path in sorted(directory.glob("*.sql")):
+    for path in paths:
         match = _FILENAME.match(path.name)
         if match is None:
             raise MigrationFileError(f"{path.name}: expected NNNN_<name>.sql")
