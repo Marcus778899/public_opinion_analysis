@@ -1,13 +1,15 @@
+import itertools
 import threading
+import time
 import uuid
 
 import pytest
-from confluent_kafka import Consumer
+from confluent_kafka import Consumer, TopicPartition
 from confluent_kafka.admin import AdminClient, NewTopic
 from pydantic import BaseModel
 
 from radar.common.kafka.config import admin_config, consumer_config
-from radar.common.kafka.consumer import BatchConsumer
+from radar.common.kafka.consumer import BatchConsumer, TransientError
 from radar.common.kafka.dlq import DLQ_TOPIC, DlqPublisher
 from radar.common.kafka.producer import JsonProducer
 from radar.common.schemas import DlqRecord
@@ -133,3 +135,42 @@ def test_redelivered_after_restart_when_not_committed(kafka_settings, topic):
     run_until(make_consumer(kafka_settings, topic, "g3", collect, producer), second_done)
 
     assert received == [Event(id=7)]
+
+
+def test_retry_longer_than_max_poll_interval_keeps_assignment_and_commits(kafka_settings, topic):
+    """#11：重試超過 max.poll.interval.ms 時不可失去 assignment 而 crash。"""
+    producer = JsonProducer(kafka_settings)
+    producer.send(topic, "k", Event(id=1))
+    producer.flush()
+    config = {
+        **consumer_config(kafka_settings, "g4"),
+        "max.poll.interval.ms": 6000,
+        "session.timeout.ms": 6000,
+    }
+    started: list[float] = []
+    done = threading.Event()
+
+    def slow_recovery(items):
+        started.append(time.monotonic())
+        if time.monotonic() - started[0] < 10:  # 比 max.poll.interval.ms 長
+            raise TransientError("down")
+        done.set()
+
+    consumer = BatchConsumer(
+        kafka_settings,
+        group_id="g4",
+        topics=[topic],
+        model=Event,
+        handler=slow_recovery,
+        dlq=DlqPublisher(producer, "g4"),
+        consumer=Consumer(config),
+        backoff=lambda: itertools.repeat(1.0),
+    )
+
+    errors = run_until(consumer, done)
+
+    assert errors == []
+    checker = Consumer(consumer_config(kafka_settings, "g4"))
+    committed = checker.committed([TopicPartition(topic, 0)], timeout=10)
+    checker.close()
+    assert committed[0].offset == 1

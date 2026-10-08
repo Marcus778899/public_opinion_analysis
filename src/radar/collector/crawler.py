@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
-from radar.collector.http import FetchError, PttClient, PttFetcher
+from radar.collector.http import FetchError, FetchResult, PttClient, PttFetcher
 from radar.collector.list_cache import ListPushCache
 from radar.collector.parsers.ptt import (
     ListPage,
@@ -19,7 +19,7 @@ from radar.collector.parsers.ptt_time import created_at_from_filename
 from radar.common.enums import CrawlTaskType
 from radar.common.ids import split_post_id
 from radar.common.kafka import names
-from radar.common.kafka.consumer import BatchConsumer
+from radar.common.kafka.consumer import BatchConsumer, TransientError
 from radar.common.kafka.dlq import DlqPublisher
 from radar.common.kafka.producer import JsonProducer
 from radar.common.log import log, setup_logging
@@ -39,12 +39,16 @@ class CrawlHandler:
         *,
         clock: Callable[[], datetime],
         max_list_pages: int = 3,
+        max_transient_attempts: int = 5,
     ) -> None:
         self._fetcher = fetcher
         self._producer = producer
         self._cache = cache
         self._clock = clock
         self._max_list_pages = max_list_pages
+        self._max_transient_attempts = max_transient_attempts
+        # 各網址連續暫時性失敗的次數；成功或略過後移除
+        self._transient_attempts: dict[str, int] = {}
 
     def __call__(self, tasks: list[CrawlTask]) -> None:
         for task in tasks:
@@ -54,6 +58,8 @@ class CrawlHandler:
                 self.handle_post(task)
         # 確保 commit 前訊息已落地
         self._producer.flush()
+        # 計數只用在同一批的重試之間；整批成功後清掉，避免殘留
+        self._transient_attempts.clear()
 
     def handle_list(self, task: CrawlTask) -> int:
         """回傳抓了幾篇內頁。
@@ -89,7 +95,7 @@ class CrawlHandler:
         """成功送出 raw.posts 回傳 True；不可重試的失敗記 ERROR 後回傳 False。"""
         post_id = post_id_from_url(url)
         try:
-            result = self._fetcher.fetch(url)
+            result = self._fetch(url)
         except FetchError as e:
             log.error("skip post %s: %s", post_id, e)
             return False
@@ -112,9 +118,23 @@ class CrawlHandler:
         self._producer.send(names.RAW_POSTS, post_id, post)
         return True
 
-    def _fetch_list(self, url: str, board: str) -> ListPage | None:
+    def _fetch(self, url: str) -> FetchResult:
+        """同一網址連續 TransientError 達上限就改拋 FetchError（略過），避免卡住 partition。"""
         try:
             result = self._fetcher.fetch(url)
+        except TransientError as e:
+            attempts = self._transient_attempts.get(url, 0) + 1
+            if attempts >= self._max_transient_attempts:
+                self._transient_attempts.pop(url, None)
+                raise FetchError(f"{e} (gave up after {attempts} attempts)") from e
+            self._transient_attempts[url] = attempts
+            raise
+        self._transient_attempts.pop(url, None)
+        return result
+
+    def _fetch_list(self, url: str, board: str) -> ListPage | None:
+        try:
+            result = self._fetch(url)
             if result.status != 200:
                 raise FetchError(f"list page {url} returned {result.status}")
             return parse_list_page(result.html, board)

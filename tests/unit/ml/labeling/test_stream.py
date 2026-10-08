@@ -85,3 +85,14 @@ def test_handler_all_exhausted_raises_transient():
 
     with pytest.raises(TransientError):
         h([event("a")])
+
+
+def test_handler_all_exhausted_transient_carries_retry_after():
+    h, _, _ = handler(ScriptedLabeler(QuotaExhaustedError("daily")))
+
+    with pytest.raises(TransientError) as info:
+        h([event("a")])
+
+    # FallbackLabeler 預設冷卻 1 小時
+    assert info.value.retry_after_s is not None
+    assert 3590 < info.value.retry_after_s <= 3600

@@ -238,7 +238,11 @@ def _with_output_retry(call: Callable[[], list[Sentiment]]) -> list[Sentiment]:
 
 
 class AllExhaustedError(RetryableLabelerError):
-    """所有標註者的每日額度都用完；串流標註稍後重試，不丟訊息。"""
+    """所有標註者的每日額度都用完；串流標註等到 retry_after_s 後再試，不丟訊息。"""
+
+    def __init__(self, message: str, *, retry_after_s: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_s = retry_after_s
 
 
 class FallbackLabeler:
@@ -270,7 +274,16 @@ class FallbackLabeler:
                     "%s exhausted, cooling down %.0fs: %s", labeler.name, self._cooldown_s, e
                 )
                 self._exhausted_until[labeler.name] = now + self._cooldown_s
-        raise AllExhaustedError("all labelers have exhausted their daily quota")
+        raise AllExhaustedError(
+            "all labelers have exhausted their daily quota",
+            retry_after_s=self.seconds_until_available(),
+        )
+
+    def seconds_until_available(self) -> float:
+        """距離最早有標註者結束冷卻的秒數；已有可用的回傳 0。"""
+        now = self._clock()
+        remaining = [self._exhausted_until.get(lb.name, 0.0) - now for lb in self._labelers]
+        return max(0.0, min(remaining))
 
     def close(self) -> None:
         for labeler in self._labelers:
