@@ -17,6 +17,9 @@ COPY src/ src/
 COPY alembic.ini ./
 COPY infra/postgres/migrations/ infra/postgres/migrations/
 COPY infra/kafka/topics.yaml infra/kafka/topics.yaml
+COPY infra/clickhouse/migrations/ infra/clickhouse/migrations/
+COPY infra/debezium/radar-cdc.json infra/debezium/radar-cdc.json
+COPY scripts/ scripts/
 RUN uv sync --frozen --no-dev
 
 RUN useradd --create-home --uid 1000 radar && mkdir -p /app/log && chown radar /app/log

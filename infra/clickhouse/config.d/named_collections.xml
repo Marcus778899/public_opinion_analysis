@@ -1,0 +1,18 @@
+<!-- CDC topic 的連線設定集中在這裡，DDL 只寫 topic 與 consumer group（設計文件 6.2） -->
+<clickhouse>
+  <named_collections>
+    <cdc_kafka>
+      <kafka_broker_list>kafka_1:29092,kafka_2:29092,kafka_3:29092</kafka_broker_list>
+      <kafka_format>AvroConfluent</kafka_format>
+      <format_avro_schema_registry_url>http://apicurio:8080/apis/ccompat/v7</format_avro_schema_registry_url>
+      <!-- 欄位在舊訊息的 schema 中不存在時填預設值，否則整個 topic 卡住（設計文件 6.2） -->
+      <input_format_avro_allow_missing_fields>1</input_format_avro_allow_missing_fields>
+    </cdc_kafka>
+    <json_kafka>
+      <kafka_broker_list>kafka_1:29092,kafka_2:29092,kafka_3:29092</kafka_broker_list>
+      <kafka_format>JSONEachRow</kafka_format>
+      <!-- 訊息只做加欄位的相容變更（開發規格 2.2），未知欄位略過 -->
+      <input_format_skip_unknown_fields>1</input_format_skip_unknown_fields>
+    </json_kafka>
+  </named_collections>
+</clickhouse>

@@ -1,0 +1,31 @@
+{
+  "name": "radar-cdc",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "plugin.name": "pgoutput",
+    "database.hostname": "${CDC_DATABASE_HOST}",
+    "database.port": "5432",
+    "database.user": "${POSTGRES_USER}",
+    "database.password": "${POSTGRES_PASSWORD}",
+    "database.dbname": "${POSTGRES_DB}",
+    "topic.prefix": "cdc",
+    "table.include.list": "public.posts,public.comments",
+    "publication.name": "radar_cdc",
+    "publication.autocreate.mode": "disabled",
+    "slot.name": "radar_cdc",
+    "heartbeat.interval.ms": "60000",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.add.fields": "op,source.ts_ms,source.lsn",
+    "transforms.unwrap.delete.tombstone.handling.mode": "rewrite",
+    "key.converter": "io.apicurio.registry.utils.converter.AvroConverter",
+    "key.converter.apicurio.registry.url": "${CDC_REGISTRY_URL}",
+    "key.converter.apicurio.registry.auto-register": "true",
+    "key.converter.apicurio.registry.use-id": "contentId",
+    "value.converter": "io.apicurio.registry.utils.converter.AvroConverter",
+    "value.converter.apicurio.registry.url": "${CDC_REGISTRY_URL}",
+    "value.converter.apicurio.registry.auto-register": "true",
+    "value.converter.apicurio.registry.use-id": "contentId"
+  }
+}

@@ -19,6 +19,10 @@ class TransientError(Exception):
     """handler 遇到可重試的錯誤（網路、DB 斷線）時拋出；整批重試、不 commit。"""
 
 
+class DecodeError(Exception):
+    """自訂 decode 遇到壞資料時拋出；與 ValidationError 一樣送 DLQ。"""
+
+
 class BatchConsumer[T: BaseModel]:
     """at-least-once 的批次 consumer（開發規格 2.2）。
 
@@ -38,10 +42,13 @@ class BatchConsumer[T: BaseModel]:
         batch_timeout_s: float = 1.0,
         consumer: Consumer | None = None,
         backoff: Callable[[], Iterator[float]] = backoff_delays,
+        decode: Callable[[Message], T] | None = None,
     ) -> None:
+        """decode 預設把訊息當 JSON 驗證成 model；CDC 的 Avro 訊息傳入自訂 decode。"""
         self._consumer = consumer or Consumer(consumer_config(settings, group_id))
         self._consumer.subscribe(topics)
         self._model = model
+        self._decode_one = decode or (lambda msg: model.model_validate_json(msg.value() or b""))
         self._handler = handler
         self._dlq = dlq
         self._batch_size = batch_size
@@ -85,8 +92,8 @@ class BatchConsumer[T: BaseModel]:
         items: list[T] = []
         for msg in messages:
             try:
-                items.append(self._model.model_validate_json(msg.value() or b""))
-            except ValidationError as e:
+                items.append(self._decode_one(msg))
+            except (ValidationError, DecodeError) as e:
                 self._dlq.publish(msg, e)
         return items
 
