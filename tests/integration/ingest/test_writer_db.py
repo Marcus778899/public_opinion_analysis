@@ -133,12 +133,102 @@ def test_deleted_post_only_sets_flag(session_factory):
     assert stats.marked_deleted == 1
     row = post_row(session_factory)
     assert (row.is_deleted, row.push_count, row.content) == (True, 3, "原本的內文")
+    assert row.crawled_at == T0 + timedelta(minutes=5)
     assert (
         write(
             session_factory, [make_post(crawled_at=T0 + timedelta(minutes=9), is_deleted=True)]
         ).marked_deleted
         == 0
     )
+
+
+# ---------- 撤銷刪除（開發規格 7.14） ----------
+DELETED_AT = T0 + timedelta(minutes=5)
+
+
+def write_then_delete(session_factory):
+    write(session_factory, [make_post(n_push=3, content="原本的內文")])
+    write(session_factory, [make_post(crawled_at=DELETED_AT, is_deleted=True)])
+
+
+def test_deleted_snapshot_updates_crawled_at(session_factory):
+    write_then_delete(session_factory)
+
+    row = post_row(session_factory)
+    assert (row.is_deleted, row.crawled_at) == (True, DELETED_AT)
+
+
+def test_older_deleted_snapshot_does_not_mark_newer_post(session_factory):
+    write(session_factory, [make_post(crawled_at=T0 + timedelta(minutes=5), n_push=2)])
+
+    stats = write(session_factory, [make_post(crawled_at=T0, is_deleted=True)])
+
+    assert stats.marked_deleted == 0
+    assert post_row(session_factory).is_deleted is False
+
+
+def test_newer_live_snapshot_undeletes_post_with_new_content(session_factory):
+    write_then_delete(session_factory)
+    later = DELETED_AT + timedelta(minutes=1)
+
+    stats = write(session_factory, [make_post(crawled_at=later, n_push=4, content="新內文")])
+
+    assert stats.posts_written == 1
+    row = post_row(session_factory)
+    assert (row.is_deleted, row.push_count, row.content, row.crawled_at) == (
+        False,
+        4,
+        "新內文",
+        later,
+    )
+
+
+def test_newer_live_snapshot_without_changes_still_undeletes(session_factory):
+    write_then_delete(session_factory)
+
+    stats = write(
+        session_factory,
+        [make_post(crawled_at=DELETED_AT + timedelta(minutes=1), n_push=3, content="原本的內文")],
+    )
+
+    assert stats.posts_written == 1
+    assert post_row(session_factory).is_deleted is False
+
+
+def test_live_snapshot_older_than_deletion_does_not_undelete(session_factory):
+    write_then_delete(session_factory)
+
+    stats = write(
+        session_factory, [make_post(crawled_at=DELETED_AT - timedelta(minutes=1), n_push=9)]
+    )
+
+    assert stats.posts_written == 0
+    row = post_row(session_factory)
+    assert (row.is_deleted, row.push_count) == (True, 3)
+
+
+def test_live_post_not_deleted_newer_snapshot_without_changes_still_skipped(session_factory):
+    write(session_factory, [make_post(n_push=2)])
+    version = post_row(session_factory).xmin
+
+    stats = write(session_factory, [make_post(crawled_at=T0 + timedelta(minutes=1), n_push=2)])
+
+    assert stats.posts_written == 0
+    assert post_row(session_factory).xmin == version
+
+
+def test_delete_then_undelete_in_same_batch_keeps_latest(session_factory):
+    write(session_factory, [make_post(n_push=1)])
+    batch = [
+        make_post(crawled_at=DELETED_AT, is_deleted=True),
+        make_post(crawled_at=DELETED_AT + timedelta(minutes=1), n_push=2),
+    ]
+
+    stats = write(session_factory, batch)
+
+    assert (stats.posts_written, stats.marked_deleted) == (1, 0)
+    row = post_row(session_factory)
+    assert (row.is_deleted, row.push_count) == (False, 2)
 
 
 def test_deleted_unknown_post_is_ignored(session_factory):

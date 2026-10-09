@@ -6,7 +6,7 @@
 
 from dataclasses import dataclass
 
-from sqlalchemy import or_, update
+from sqlalchemy import DateTime, String, column, false, or_, update, values
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
@@ -82,7 +82,10 @@ def write_each(session: Session, posts: list[RawPost]) -> tuple[WriteStats, list
 
 
 def upsert_posts(session: Session, posts: list[RawPost]) -> int:
-    """回傳實際寫入（新增或更新）的列數。"""
+    """回傳實際寫入（新增或更新）的列數。
+
+    已標記刪除的文章收到較新的快照算有變化，is_deleted 改回 false（開發規格 7.14）。
+    """
     if not posts:
         return 0
     stmt = insert(Post).values(
@@ -105,9 +108,12 @@ def upsert_posts(session: Session, posts: list[RawPost]) -> int:
     new = stmt.excluded
     stmt = stmt.on_conflict_do_update(
         index_elements=[Post.post_id],
-        set_={col: new[col] for col in (*_CHANGE_COLUMNS, "crawled_at")},
+        set_={**{col: new[col] for col in (*_CHANGE_COLUMNS, "crawled_at")}, "is_deleted": false()},
         where=(Post.crawled_at < new.crawled_at)
-        & or_(*(getattr(Post, col).is_distinct_from(new[col]) for col in _CHANGE_COLUMNS)),
+        & or_(
+            Post.is_deleted,
+            *(getattr(Post, col).is_distinct_from(new[col]) for col in _CHANGE_COLUMNS),
+        ),
     ).returning(Post.post_id)
     return len(session.execute(stmt).all())
 
@@ -139,15 +145,22 @@ def insert_comments(session: Session, posts: list[RawPost]) -> int:
 
 
 def mark_deleted(session: Session, posts: list[RawPost]) -> int:
-    """只把既有文章的 is_deleted 設為 true，其他欄位保留最後一次的內容。
+    """把既有文章標記刪除並更新 crawled_at，其他欄位保留最後一次的內容。
 
-    從未見過的文章不新增；已標記過的不重複寫，避免多餘的 CDC 事件。
+    從未見過的、已標記過的、比 crawled_at 舊的都不寫（開發規格 7.14）。
     """
     if not posts:
         return 0
+    snapshots = values(
+        column("post_id", String), column("crawled_at", DateTime(timezone=True)), name="snapshots"
+    ).data([(p.post_id, p.crawled_at) for p in posts])
     stmt = (
         update(Post)
-        .where(Post.post_id.in_([p.post_id for p in posts]), Post.is_deleted.is_(False))
-        .values(is_deleted=True)
+        .where(
+            Post.post_id == snapshots.c.post_id,
+            Post.is_deleted.is_(False),
+            Post.crawled_at < snapshots.c.crawled_at,
+        )
+        .values(is_deleted=True, crawled_at=snapshots.c.crawled_at)
     )
     return session.execute(stmt).rowcount
