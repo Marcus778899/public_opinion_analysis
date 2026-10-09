@@ -36,7 +36,7 @@ def test_handler_commits_once_per_batch(session, monkeypatch):
     monkeypatch.setattr(
         ingest_main,
         "write_batch",
-        lambda s, posts: calls.append(posts) or WriteStats(len(posts), 1, 0, 0),
+        lambda s, posts: calls.append(posts) or WriteStats(len(posts), 1, 0, 0, 0),
     )
 
     IngestHandler(lambda: session)([make_post(), make_post("Stock.M.2.A.002")])
@@ -64,7 +64,9 @@ def test_handler_data_error_falls_back_to_write_each_and_returns_rejections(sess
     rejection = Rejection(1, DataError("INSERT", {}, Exception("NUL")))
     monkeypatch.setattr(ingest_main, "write_batch", integrity_error)
     monkeypatch.setattr(
-        ingest_main, "write_each", lambda s, posts: (WriteStats(len(posts), 1, 0, 0), [rejection])
+        ingest_main,
+        "write_each",
+        lambda s, posts: (WriteStats(len(posts), 1, 0, 0, 0), [rejection]),
     )
 
     result = IngestHandler(lambda: session)([make_post(), make_post("Stock.M.2.A.002")])
@@ -74,7 +76,7 @@ def test_handler_data_error_falls_back_to_write_each_and_returns_rejections(sess
 
 
 def test_handler_without_errors_returns_no_rejections(session, monkeypatch):
-    monkeypatch.setattr(ingest_main, "write_batch", lambda s, posts: WriteStats(1, 1, 0, 0))
+    monkeypatch.setattr(ingest_main, "write_batch", lambda s, posts: WriteStats(1, 1, 0, 0, 0))
 
     assert IngestHandler(lambda: session)([make_post()]) == []
 

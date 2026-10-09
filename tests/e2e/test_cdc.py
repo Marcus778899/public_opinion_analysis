@@ -50,7 +50,8 @@ def test_comments_reach_clickhouse_with_board(fake_ptt, db, clickhouse, board):
         lambda: (
             (
                 r := clickhouse_rows(
-                    clickhouse, f"SELECT board, type FROM comments WHERE post_id = '{post_id}'"
+                    clickhouse,
+                    f"SELECT board, type FROM comments_latest FINAL WHERE post_id = '{post_id}'",
                 )
             )
             and len(r) == 3
@@ -69,3 +70,25 @@ def test_unchanged_recrawl_produces_no_cdc_event(fake_ptt, db, clickhouse, board
     time.sleep(30)  # e2e 的重爬間隔已縮短，這段時間內會重爬數次，但內容沒變
 
     assert history(clickhouse, post_id) == before
+
+
+def comment_users(clickhouse, post_id: str) -> list[list[str]]:
+    return clickhouse_rows(
+        clickhouse,
+        f"SELECT floor, user_id FROM comments_latest FINAL WHERE post_id = '{post_id}' "
+        "ORDER BY floor",
+    )
+
+
+def test_deleted_comment_shifts_floors_in_clickhouse(fake_ptt, db, clickhouse, board):
+    post_id = new_post(fake_ptt, board)
+    wait_until(lambda: post_row(db, post_id), timeout_s=60)
+    fake_ptt.post(f"/_control/posts/{post_id}/comments", json={"pushes": 3, "boos": 0})
+    wait_until(lambda: len(comment_users(clickhouse, post_id)) == 3, timeout_s=90)
+
+    fake_ptt.delete(f"/_control/posts/{post_id}/comments/2")
+
+    rows = wait_until(
+        lambda: (r := comment_users(clickhouse, post_id)) and len(r) == 2 and r, timeout_s=90
+    )
+    assert rows == [["1", "user1"], ["2", "user3"]]
