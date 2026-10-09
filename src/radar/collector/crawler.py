@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
+from radar.collector.fetch_cache import RecentFetches
 from radar.collector.http import FetchError, FetchResult, PttClient, PttFetcher
 from radar.collector.list_cache import ListPushCache
 from radar.collector.parsers.ptt import (
@@ -36,6 +37,7 @@ class CrawlHandler:
         fetcher: PttFetcher,
         producer: JsonProducer,
         cache: ListPushCache,
+        recent: RecentFetches,
         *,
         clock: Callable[[], datetime],
         max_list_pages: int = 3,
@@ -44,6 +46,7 @@ class CrawlHandler:
         self._fetcher = fetcher
         self._producer = producer
         self._cache = cache
+        self._recent = recent
         self._clock = clock
         self._max_list_pages = max_list_pages
         self._max_transient_attempts = max_transient_attempts
@@ -88,8 +91,14 @@ class CrawlHandler:
         log.info("list %s done, fetched %d posts", task.board, fetched)
         return fetched
 
-    def handle_post(self, task: CrawlTask) -> None:
+    def handle_post(self, task: CrawlTask) -> bool:
+        """派發後已抓過（積壓時的重複派發）就略過、回傳 False；否則抓取並回傳 True。"""
+        post_id = post_id_from_url(task.url)
+        if self._recent.fetched_since(post_id, task.created_at):
+            log.info("skip duplicate post task %s dispatched at %s", post_id, task.created_at)
+            return False
         self.fetch_and_publish_post(task.url, task.board, task.task_id)
+        return True
 
     def fetch_and_publish_post(self, url: str, board: str, task_id: UUID) -> bool:
         """成功送出 raw.posts 回傳 True；不可重試的失敗記 ERROR 後回傳 False。"""
@@ -100,6 +109,8 @@ class CrawlHandler:
             log.error("skip post %s: %s", post_id, e)
             return False
         crawled_at = self._clock()
+        # 404、解析失敗也算抓過：再抓一次結果相同
+        self._recent.remember(post_id, crawled_at)
         if result.status == 404:
             self._producer.send(
                 names.RAW_POSTS, post_id, deleted_post(post_id, board, url, task_id, crawled_at)
@@ -177,7 +188,9 @@ def main() -> None:
     )
     if settings.ptt_base_url:
         log.warning("requests redirected to %s (end-to-end test mode)", settings.ptt_base_url)
-    handler = CrawlHandler(client, producer, ListPushCache(), clock=lambda: datetime.now(UTC))
+    handler = CrawlHandler(
+        client, producer, ListPushCache(), RecentFetches(), clock=lambda: datetime.now(UTC)
+    )
     consumer = BatchConsumer(
         kafka,
         group_id="crawler",
