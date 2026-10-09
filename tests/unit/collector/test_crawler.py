@@ -1,13 +1,14 @@
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from radar.collector.crawler import CrawlHandler, deleted_post
+from radar.collector.fetch_cache import RecentFetches
 from radar.collector.http import FetchError
 from radar.collector.list_cache import ListPushCache
-from radar.collector.parsers.ptt import ListEntry
+from radar.collector.parsers.ptt import ListEntry, post_id_from_url
 from radar.common.enums import CrawlReason, CrawlTaskType
 from radar.common.kafka import names
 from radar.common.kafka.consumer import TransientError
@@ -33,7 +34,7 @@ def list_task():
     )
 
 
-def post_task(url=POST_URL, post_id=POST_ID):
+def post_task(url=POST_URL, post_id=POST_ID, created_at=NOW):
     return CrawlTask(
         task_id=uuid.uuid4(),
         type=CrawlTaskType.POST,
@@ -41,7 +42,7 @@ def post_task(url=POST_URL, post_id=POST_ID):
         url=url,
         post_id=post_id,
         reason=CrawlReason.RECRAWL,
-        created_at=NOW,
+        created_at=created_at,
     )
 
 
@@ -58,7 +59,7 @@ def cache():
 @pytest.fixture
 def handler(fetcher, producer, cache):
     json_producer = JsonProducer(KafkaSettings(bootstrap_servers="x"), producer=producer)
-    return CrawlHandler(fetcher, json_producer, cache, clock=lambda: NOW)
+    return CrawlHandler(fetcher, json_producer, cache, RecentFetches(), clock=lambda: NOW)
 
 
 def sent(producer, topic):
@@ -110,7 +111,9 @@ def test_list_task_stops_at_max_pages(fetcher, producer, cache):
     fetcher.pages[PREV_URL] = read_fixture("list_first_page.html")
     seed_cache(cache, "Stock.M.1.A.001", 1)
     json_producer = JsonProducer(KafkaSettings(bootstrap_servers="x"), producer=producer)
-    handler = CrawlHandler(fetcher, json_producer, cache, clock=lambda: NOW, max_list_pages=1)
+    handler = CrawlHandler(
+        fetcher, json_producer, cache, RecentFetches(), clock=lambda: NOW, max_list_pages=1
+    )
 
     handler([list_task()])
 
@@ -263,3 +266,91 @@ def test_list_page_timeout_fifth_time_skips_list(handler, fetcher, producer):
     assert retry_until_done(handler, list_task()) == 4
     assert fetcher.list_requests() == [INDEX_URL] * 5
     assert producer.produced == []
+
+
+# ---------- 略過重複的重爬任務（開發規格 7.12） ----------
+LATER = NOW + timedelta(minutes=5)
+
+
+@pytest.fixture
+def recent():
+    return RecentFetches()
+
+
+@pytest.fixture
+def later_handler(fetcher, producer, cache, recent):
+    """抓取時間是 LATER，晚於 NOW 派發的任務。"""
+    json_producer = JsonProducer(KafkaSettings(bootstrap_servers="x"), producer=producer)
+    return CrawlHandler(fetcher, json_producer, cache, recent, clock=lambda: LATER)
+
+
+def test_post_task_already_fetched_after_dispatch_is_skipped_without_request(
+    later_handler, fetcher, producer, recent
+):
+    recent.remember(POST_ID, NOW + timedelta(minutes=1))
+
+    assert later_handler.handle_post(post_task(created_at=NOW)) is False
+    assert fetcher.requested == []
+    assert producer.produced == []
+
+
+def test_post_task_fetched_before_dispatch_is_fetched_again(later_handler, fetcher, recent):
+    recent.remember(POST_ID, NOW - timedelta(minutes=1))
+
+    assert later_handler.handle_post(post_task(created_at=NOW)) is True
+    assert fetcher.post_requests() == [POST_URL]
+
+
+def test_duplicate_post_tasks_in_queue_fetch_once(later_handler, fetcher, producer):
+    later_handler([post_task(created_at=NOW)])
+    later_handler([post_task(created_at=NOW + timedelta(minutes=2))])
+
+    assert fetcher.post_requests() == [POST_URL]
+    assert len(sent(producer, names.RAW_POSTS)) == 1
+
+
+def test_post_fetched_via_list_task_skips_older_recrawl_task(later_handler, fetcher):
+    later_handler([list_task()])
+    url = fetcher.post_requests()[0]
+    fetched = len(fetcher.post_requests())
+
+    later_handler([post_task(url=url, post_id=post_id_from_url(url), created_at=NOW)])
+
+    assert len(fetcher.post_requests()) == fetched
+
+
+def test_post_404_is_remembered_as_fetched(later_handler, fetcher):
+    fetcher.status[POST_URL] = 404
+
+    later_handler([post_task(created_at=NOW)])
+    later_handler([post_task(created_at=NOW)])
+
+    assert fetcher.post_requests() == [POST_URL]
+
+
+def test_post_parse_error_is_remembered_as_fetched(later_handler, fetcher):
+    fetcher.pages[POST_URL] = read_fixture("over18.html")
+
+    later_handler([post_task(created_at=NOW)])
+    later_handler([post_task(created_at=NOW)])
+
+    assert fetcher.post_requests() == [POST_URL]
+
+
+def test_post_fetch_error_is_not_remembered(later_handler, fetcher, recent):
+    fetcher.errors[POST_URL] = FetchError("403")
+
+    later_handler([post_task(created_at=NOW)])
+
+    assert not recent.fetched_since(POST_ID, NOW)
+
+
+def test_transient_error_is_not_remembered(later_handler, fetcher):
+    fetcher.errors[POST_URL] = TransientError("503")
+    with pytest.raises(TransientError):
+        later_handler([post_task(created_at=NOW)])
+    del fetcher.errors[POST_URL]
+
+    later_handler([post_task(created_at=NOW)])
+
+    assert fetcher.post_requests() == [POST_URL, POST_URL]
