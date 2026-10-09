@@ -8,10 +8,15 @@ from dataclasses import dataclass
 
 from sqlalchemy import or_, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 
 from radar.common.db.models import Comment, Post
+from radar.common.kafka.consumer import Rejection
 from radar.common.schemas import RawPost
+
+# 這筆資料本身有問題：逐筆寫入、送 DLQ（開發規格 7.13）；其他 DB 錯誤仍中止服務
+DATA_ERRORS = (IntegrityError, DataError)
 
 # NOTE: PG 單一語句參數上限 65535；comments 6 欄，每批 5000 列約 30000 個參數
 COMMENT_CHUNK_SIZE = 5000
@@ -49,6 +54,31 @@ def write_batch(session: Session, posts: list[RawPost]) -> WriteStats:
         comments_inserted=insert_comments(session, live),
         marked_deleted=mark_deleted(session, deleted),
     )
+
+
+def write_each(session: Session, posts: list[RawPost]) -> tuple[WriteStats, list[Rejection]]:
+    """逐筆模式（開發規格 7.13）：同批去重後每筆一個 savepoint，資料錯誤的回報 index。
+
+    呼叫端負責 commit；OperationalError 照常往外拋（整批重試）。
+    """
+    latest: dict[str, int] = {}
+    for i, post in enumerate(posts):
+        j = latest.get(post.post_id)
+        if j is None or post.crawled_at > posts[j].crawled_at:
+            latest[post.post_id] = i
+    written = comments = deleted = 0
+    rejections: list[Rejection] = []
+    for i in latest.values():
+        try:
+            with session.begin_nested():
+                stats = write_batch(session, [posts[i]])
+        except DATA_ERRORS as e:
+            rejections.append(Rejection(i, e))
+            continue
+        written += stats.posts_written
+        comments += stats.comments_inserted
+        deleted += stats.marked_deleted
+    return WriteStats(len(posts), written, comments, deleted), rejections
 
 
 def upsert_posts(session: Session, posts: list[RawPost]) -> int:
