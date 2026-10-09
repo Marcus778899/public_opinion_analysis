@@ -18,6 +18,7 @@ from radar.common.settings import ClickHouseSettings
 from radar.ml.experiments.push_ratio import fetch_votes
 from radar.ml.labeling.cross_check import fetch_whole_post_labels
 from radar.ml.labeling.manual import MANUAL_LABELER, export_batch, read_batch
+from radar.ml.labeling.prompt import PROMPT_VERSION
 from radar.ml.labeling.sampling import SampleSpec, fetch_posts, sample_posts
 from radar.ml.training.export import fetch_rows
 
@@ -93,7 +94,7 @@ def seed(client: ClickHouseClient) -> None:
         ("Gossiping.M.3.A.1", "groq:q", "2026-10-07 01:00:00", None, "negative"),
     ]
     values = ", ".join(
-        f"('{p}', '{lab}', 'prompt-v4', '{ts}', {'NULL' if t is None else repr(t)}, '{pol}')"
+        f"('{p}', '{lab}', '{PROMPT_VERSION}', '{ts}', {'NULL' if t is None else repr(t)}, '{pol}')"
         for p, lab, ts, t, pol in labels
     )
     cols = "post_id, labeler, version, labeled_at, target, polarity"
@@ -122,7 +123,7 @@ def test_sample_posts_uses_latest_version_and_respects_board_filter(ch):
 
 
 def test_sample_posts_skips_already_labeled(ch):
-    spec = SampleSpec(per_board=10, seed=1, skip_labeler="groq:q", skip_version="prompt-v4")
+    spec = SampleSpec(per_board=10, seed=1, skip_labeler="groq:q", skip_version=PROMPT_VERSION)
 
     ids = {p.post_id for p in sample_posts(ch, spec, set())}
 
@@ -137,7 +138,7 @@ def test_fetch_posts_by_ids(ch):
 
 
 def test_fetch_whole_post_labels_takes_latest_and_ignores_targets(ch):
-    labels = fetch_whole_post_labels(ch, "groq:q", "prompt-v4")
+    labels = fetch_whole_post_labels(ch, "groq:q", PROMPT_VERSION)
 
     assert labels == {
         "Stock.M.1.A.1": Polarity.POSITIVE,
@@ -147,14 +148,14 @@ def test_fetch_whole_post_labels_takes_latest_and_ignores_targets(ch):
 
 
 def test_fetch_rows_joins_latest_label_and_post(ch):
-    rows = {r["post_id"]: r for r in fetch_rows(ch, "groq:q", "prompt-v4")}
+    rows = {r["post_id"]: r for r in fetch_rows(ch, "groq:q", PROMPT_VERSION)}
 
     assert set(rows) == {"Stock.M.1.A.1", "Stock.M.2.A.1", "Gossiping.M.3.A.1"}
     assert (rows["Stock.M.1.A.1"]["polarity"], rows["Stock.M.1.A.1"]["title"]) == ("positive", "t1")
 
 
 def test_fetch_votes_joins_counts(ch):
-    votes = {v.post_id: v for v in fetch_votes(ch, "groq:q", "prompt-v4")}
+    votes = {v.post_id: v for v in fetch_votes(ch, "groq:q", PROMPT_VERSION)}
 
     assert (votes["Stock.M.2.A.1"].push_count, votes["Stock.M.2.A.1"].boo_count) == (20, 2)
 

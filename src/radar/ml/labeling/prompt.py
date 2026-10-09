@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from radar.common.schemas import Sentiment, check_sentiments
 
-PROMPT_VERSION = "prompt-v4"
+PROMPT_VERSION = "prompt-v5"
 
 # Gemini responseSchema（OpenAPI 子集），要求模型只輸出這個結構
 RESPONSE_SCHEMA: dict[str, object] = {
@@ -77,6 +77,11 @@ RULES: tuple[str, ...] = (
     "轉貼他人的貼文、聲明或發言（例如 [爆卦] 轉貼臉書文）時，被轉貼者的立場不是作者的立場；"
     "作者沒有另外評論 → 整篇 neutral，也不列對象。",
     "只依標題與內文判斷，不參考推文。",
+    "提問文（[問卦]、[請益] 等）：真心發問、求助、求推薦 → 整篇 neutral，文中被評價的對象照樣列出；"
+    "反問、借問題酸人或嘲諷（問題本身就是表態，作者不期待真的得到答案）→ 依規則 5 判斷語氣。",
+    "對象沒有指名（用暗語、代稱，例如「某位愛蓋章的公子」「某族群」）→ 整篇依語氣判斷，不列對象；"
+    "文中直接使用的綽號或代稱（例如「洋流」「泡麵頭」）算指名，照規則 3 列出。",
+    "心得或內文只有表情符號、一兩個字，看不出態度（例如「12年前 =.=」「穩了」）→ 整篇 neutral。",
 )
 
 _INSTRUCTIONS = "\n".join(
