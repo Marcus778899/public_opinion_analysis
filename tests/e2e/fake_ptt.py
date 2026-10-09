@@ -103,6 +103,15 @@ class FakePtt:
                     post.comments.append(FakeComment(type_, f"user{n}", f"推文{n}", time_text))
         return post
 
+    def delete_comment(self, post_id: str, floor: int) -> FakePost:
+        """刪掉第 floor 則推文（從 1 開始），後面的往前移，重現樓層位移。"""
+        post = self._get(post_id)
+        with self._lock:
+            if not 1 <= floor <= len(post.comments):
+                raise KeyError(f"{post_id} floor {floor}")
+            del post.comments[floor - 1]
+        return post
+
     def delete(self, post_id: str) -> None:
         self._get(post_id).deleted = True
 
@@ -199,6 +208,7 @@ def _article_time(created_at: datetime) -> str:
 def create_app(state: FakePtt | None = None) -> FastAPI:
     """頁面：/bbs/{board}/index.html、/bbs/{board}/{filename}.html
     控制：POST /_control/posts、POST /_control/posts/{post_id}/comments、
+         DELETE /_control/posts/{post_id}/comments/{floor}、
          DELETE /_control/posts/{post_id}、POST /_control/reset
     """
     ptt = state or FakePtt()
@@ -222,6 +232,14 @@ def create_app(state: FakePtt | None = None) -> FastAPI:
     def add_comments(post_id: str, data: NewComments) -> dict[str, int]:
         try:
             post = ptt.add_comments(post_id, data)
+        except KeyError as e:
+            raise HTTPException(404) from e
+        return {"comments": len(post.comments)}
+
+    @app.delete("/_control/posts/{post_id}/comments/{floor}")
+    def delete_comment(post_id: str, floor: int) -> dict[str, int]:
+        try:
+            post = ptt.delete_comment(post_id, floor)
         except KeyError as e:
             raise HTTPException(404) from e
         return {"comments": len(post.comments)}

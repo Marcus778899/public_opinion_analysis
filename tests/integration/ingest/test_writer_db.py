@@ -15,6 +15,7 @@ from tests.helpers.raw_posts import T0, make_post
 
 ALEMBIC_INI = Path(__file__).resolve().parents[3] / "alembic.ini"
 POST_ID = "Stock.M.1791345103.A.E41"
+OTHER_ID = "Stock.M.1791345200.A.001"
 
 
 @pytest.fixture
@@ -52,7 +53,7 @@ def post_row(session_factory, post_id=POST_ID):
 def test_new_post_and_comments_inserted(session_factory):
     stats = write(session_factory, [make_post(n_push=2, n_boo=1, n_arrow=1)])
 
-    assert (stats.posts_written, stats.comments_inserted) == (1, 4)
+    assert (stats.posts_written, stats.comments_written) == (1, 4)
     row = post_row(session_factory)
     assert (row.push_count, row.boo_count, row.is_deleted) == (2, 1, False)
     types = [r[0] for r in query(session_factory, "SELECT type FROM comments ORDER BY floor")]
@@ -66,7 +67,7 @@ def test_replaying_same_batch_writes_nothing(session_factory):
 
     stats = write(session_factory, batch)
 
-    assert (stats.posts_written, stats.comments_inserted) == (0, 0)
+    assert (stats.posts_written, stats.comments_written) == (0, 0)
     assert post_row(session_factory).xmin == version  # 沒有實際更新，就不會有 CDC 事件
 
 
@@ -107,7 +108,7 @@ def test_new_comments_appended_existing_kept(session_factory):
 
     stats = write(session_factory, [make_post(crawled_at=T0 + timedelta(minutes=2), n_push=5)])
 
-    assert stats.comments_inserted == 3
+    assert stats.comments_written == 3
     assert query(session_factory, "SELECT count(*) FROM comments")[0][0] == 5
 
 
@@ -238,17 +239,120 @@ def test_deleted_unknown_post_is_ignored(session_factory):
     assert query(session_factory, "SELECT count(*) FROM posts")[0][0] == 0
 
 
+# ---------- 推文同步（開發規格 7.15） ----------
+def without_floor(post, floor, crawled_at):
+    """模擬第 floor 則推文被刪：後面的往前移一層。"""
+    kept = [c for c in post.comments if c.floor != floor]
+    comments = [c.model_copy(update={"floor": i}) for i, c in enumerate(kept, 1)]
+    return post.model_copy(
+        update={"crawled_at": crawled_at, "comments": comments, "push_count": len(comments)}
+    )
+
+
+def comment_rows(session_factory, post_id=POST_ID):
+    return [
+        tuple(r)
+        for r in query(
+            session_factory,
+            "SELECT floor, user_id FROM comments WHERE post_id = :id ORDER BY floor",
+            id=post_id,
+        )
+    ]
+
+
+def test_comment_deleted_in_middle_shifts_floors_and_drops_last(session_factory):
+    first = make_post(n_push=4)
+    write(session_factory, [first])
+
+    stats = write(session_factory, [without_floor(first, 2, T0 + timedelta(minutes=1))])
+
+    assert (stats.comments_written, stats.comments_deleted) == (2, 1)
+    assert comment_rows(session_factory) == [(1, "u1"), (2, "u3"), (3, "u4")]
+
+
+def test_appended_comments_do_not_rewrite_existing_floors(session_factory):
+    write(session_factory, [make_post(n_push=2)])
+    versions = query(session_factory, "SELECT xmin::text FROM comments ORDER BY floor")
+
+    stats = write(session_factory, [make_post(crawled_at=T0 + timedelta(minutes=1), n_push=3)])
+
+    assert (stats.comments_written, stats.comments_deleted) == (1, 0)
+    assert query(session_factory, "SELECT xmin::text FROM comments ORDER BY floor")[:2] == versions
+
+
+def test_unchanged_recrawl_writes_no_comments(session_factory):
+    write(session_factory, [make_post(n_push=3)])
+
+    stats = write(session_factory, [make_post(crawled_at=T0 + timedelta(minutes=1), n_push=3)])
+
+    assert (stats.comments_written, stats.comments_deleted) == (0, 0)
+
+
+def test_snapshot_without_comments_deletes_all(session_factory):
+    write(session_factory, [make_post(n_push=3)])
+
+    stats = write(session_factory, [make_post(crawled_at=T0 + timedelta(minutes=1), n_push=0)])
+
+    assert stats.comments_deleted == 3
+    assert comment_rows(session_factory) == []
+
+
+def test_older_snapshot_does_not_touch_comments(session_factory):
+    newer = make_post(crawled_at=T0 + timedelta(minutes=5), n_push=4)
+    write(session_factory, [newer])
+
+    stats = write(session_factory, [without_floor(newer, 2, T0)])
+
+    assert (stats.comments_written, stats.comments_deleted) == (0, 0)
+    assert comment_rows(session_factory) == [(i, f"u{i}") for i in range(1, 5)]
+
+
+def test_newer_snapshot_without_post_changes_still_syncs_comments(session_factory):
+    first = make_post(n_push=3)
+    write(session_factory, [first])
+    # 推文內容變了但推噓數不變：posts 不寫，推文仍要同步
+    changed = first.comments[:2] + [first.comments[2].model_copy(update={"user_id": "other"})]
+    snapshot = first.model_copy(
+        update={"crawled_at": T0 + timedelta(minutes=1), "comments": changed}
+    )
+
+    stats = write(session_factory, [snapshot])
+
+    assert (stats.posts_written, stats.comments_written) == (0, 1)
+    assert comment_rows(session_factory)[-1] == (3, "other")
+
+
+def test_deleted_snapshot_keeps_comments(session_factory):
+    write(session_factory, [make_post(n_push=3)])
+
+    stats = write(
+        session_factory, [make_post(crawled_at=T0 + timedelta(minutes=1), is_deleted=True)]
+    )
+
+    assert (stats.marked_deleted, stats.comments_deleted) == (1, 0)
+    assert len(comment_rows(session_factory)) == 3
+
+
+def test_comment_sync_only_affects_its_own_post(session_factory):
+    other = make_post(OTHER_ID, n_push=3)
+    write(session_factory, [make_post(n_push=3), other])
+
+    write(session_factory, [make_post(crawled_at=T0 + timedelta(minutes=1), n_push=1)])
+
+    assert len(comment_rows(session_factory)) == 1
+    assert len(comment_rows(session_factory, OTHER_ID)) == 3
+
+
 def test_large_comment_batch_is_chunked(session_factory, monkeypatch):
     monkeypatch.setattr(writer, "COMMENT_CHUNK_SIZE", 7)
 
     stats = write(session_factory, [make_post(n_push=10, n_boo=6)])
 
-    assert stats.comments_inserted == 16
+    assert stats.comments_written == 16
     assert query(session_factory, "SELECT count(*) FROM comments")[0][0] == 16
 
 
 # ---------- 逐筆模式（開發規格 7.13） ----------
-OTHER_ID = "Stock.M.1791345200.A.001"
 POISON_ID = "Stock.M.1791345300.A.002"
 
 

@@ -33,10 +33,12 @@ class IngestHandler:
         except OperationalError as e:
             raise TransientError(f"database unavailable: {e}") from e
         log.info(
-            "batch received=%d posts_written=%d comments_inserted=%d marked_deleted=%d",
+            "batch received=%d posts_written=%d comments_written=%d comments_deleted=%d "
+            "marked_deleted=%d",
             stats.received,
             stats.posts_written,
-            stats.comments_inserted,
+            stats.comments_written,
+            stats.comments_deleted,
             stats.marked_deleted,
         )
         return rejections
