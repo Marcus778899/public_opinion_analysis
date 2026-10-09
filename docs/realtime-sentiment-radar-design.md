@@ -274,7 +274,8 @@ LIMIT 500;                                               -- 其餘留到下一�
 - upsert 冪等，at-least-once 即可
 - **同批去重**：同一個 `post_id` 只留 `crawled_at` 最新的一筆；`ON CONFLICT DO UPDATE` 不能在同一個語句更新同一列兩次
 - **推文分段**：每 5000 列送一次，避開 PG 單一語句 65535 個參數的上限
-- **刪除快照**：只把既有文章的 `is_deleted` 設為 true，保留刪除前的內容；從未見過的文章略過，已標記的不重複寫
+- **刪除快照**：只把既有文章的 `is_deleted` 設為 true 並更新 `crawled_at`，保留刪除前的內容；從未見過的文章略過，已標記的不重複寫；比 `posts.crawled_at` 舊的刪除快照略過（較晚到的舊 404 不可蓋掉較新的 200）
+- **撤銷刪除**：已標記刪除的文章收到比 `crawled_at` 新的正常快照時，`is_deleted` 改回 false 並寫入新內容，避免 PTT／Cloudflare 暫時性的錯誤 404 讓文章被永久誤判為刪除。Scheduler 照舊不重爬已刪除的文章；被誤判的文章若還在列表上，推文數一變（或爬蟲重啟、快取清空）列表任務就會重抓內頁而復原。真的被刪的文章在列表上沒有連結，不會被重抓
 - **錯誤處理**：
   - DB 連線錯誤（`OperationalError`）→ 整批重試
   - 資料錯誤（`IntegrityError`、`DataError`，例如約束違反、文字含 `\x00`）→ rollback 後改成逐筆寫入（每筆一個 savepoint），寫不進去的送 `dlq`，其餘照常寫入並 commit；只在出錯時逐筆，平常仍整批寫入
@@ -292,9 +293,11 @@ ON CONFLICT (post_id) DO UPDATE SET
   boo_count  = EXCLUDED.boo_count,
   title      = EXCLUDED.title,
   content    = EXCLUDED.content,
-  crawled_at = EXCLUDED.crawled_at
+  crawled_at = EXCLUDED.crawled_at,
+  is_deleted = FALSE                                          -- 撤銷刪除
 WHERE posts.crawled_at < EXCLUDED.crawled_at                  -- 舊快照不覆蓋新的
-  AND (posts.push_count IS DISTINCT FROM EXCLUDED.push_count
+  AND (posts.is_deleted
+    OR posts.push_count IS DISTINCT FROM EXCLUDED.push_count
     OR posts.boo_count  IS DISTINCT FROM EXCLUDED.boo_count
     OR posts.title      IS DISTINCT FROM EXCLUDED.title       -- 作者可能改標題
     OR posts.content    IS DISTINCT FROM EXCLUDED.content);   -- 沒變化就不寫
@@ -302,6 +305,13 @@ WHERE posts.crawled_at < EXCLUDED.crawled_at                  -- 舊快照不覆
 INSERT INTO comments (post_id, floor, type, user_id, content, commented_at)
 VALUES (...)
 ON CONFLICT (post_id, floor) DO NOTHING;
+
+-- 刪除快照
+UPDATE posts SET is_deleted = TRUE, crawled_at = v.crawled_at
+FROM (VALUES (...)) AS v(post_id, crawled_at)
+WHERE posts.post_id = v.post_id
+  AND NOT posts.is_deleted
+  AND posts.crawled_at < v.crawled_at;
 ```
 
 沒有變化就不寫入，也就不產生 CDC 事件。
@@ -412,7 +422,7 @@ ClickHouse 的 `AvroConfluent` 格式能直接讀 Apicurio 序列化的訊息，
 
 - `posts_latest` 的 version 用 `__source_lsn`：同一列的後續變更 LSN 一定較大；`ts_ms` 是毫秒，同一毫秒內多次變更會分不出先後
 - 查詢 `posts_latest` 加 `FINAL` 或用 `argMax`
-- PTT 刪文以 `is_deleted` 處理
+- PTT 刪文以 `is_deleted` 處理；撤銷刪除只是 `is_deleted` 改回 false 的一般更新，`posts_latest` 以較大的 LSN 取代即可
 - JSON topic 同樣用 named collection（`json_kafka`），並設 `input_format_skip_unknown_fields=1`：訊息只做加欄位的相容變更（開發規格 2.2），新欄位不會讓 ClickHouse 卡住
 - ClickHouse 的 schema 以 `infra/clickhouse/migrations/` 的編號 SQL 檔管理，已合併的檔案不可修改（同 Alembic）
 
@@ -635,6 +645,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 - [ ] `crawled_at` 列入變化判斷 → 每次重爬都產生事件
 - [ ] 同一批有重複的 `post_id` 沒先去重 → `ON CONFLICT DO UPDATE` 直接報錯
 - [ ] 刪除快照直接 upsert → 推噓數被清成 0、內文被清空
+- [ ] 刪除標記不可逆、不比較 `crawled_at` → 暫時性的 404 或晚到的舊 404 讓文章被永久誤判為刪除
 - [ ] 一次 INSERT 太多推文 → 超過 PG 65535 個參數上限
 - [ ] Debezium 沒開 heartbeat → WAL 塞滿硬碟
 - [ ] ClickHouse 用一般 MergeTree 存最新狀態 → 重複列
