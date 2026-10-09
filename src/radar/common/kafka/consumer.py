@@ -2,6 +2,7 @@ import signal
 import threading
 import time
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from types import FrameType
 
 from confluent_kafka import Consumer, KafkaError, KafkaException, Message, TopicPartition
@@ -38,6 +39,14 @@ _LOST_ASSIGNMENT_CODES = frozenset(
 )
 
 
+@dataclass(frozen=True)
+class Rejection:
+    """handler 回報寫不進下游的訊息；index 是傳入 handler 的第幾筆（開發規格 7.13）。"""
+
+    index: int
+    error: Exception
+
+
 class DecodeError(Exception):
     """自訂 decode 遇到壞資料時拋出；與 ValidationError 一樣送 DLQ。"""
 
@@ -45,7 +54,8 @@ class DecodeError(Exception):
 class BatchConsumer[T: BaseModel]:
     """at-least-once 的批次 consumer（開發規格 2.2）。
 
-    解析失敗的訊息送 DLQ；handler 拋 TransientError 時退避重試；其他例外直接中止服務。
+    解析失敗與 handler 回報的 Rejection 送 DLQ；handler 拋 TransientError 時退避重試；
+    其他例外直接中止服務。
     """
 
     def __init__(
@@ -55,7 +65,7 @@ class BatchConsumer[T: BaseModel]:
         group_id: str,
         topics: list[str],
         model: type[T],
-        handler: Callable[[list[T]], None],
+        handler: Callable[[list[T]], list[Rejection] | None],
         dlq: DlqPublisher,
         batch_size: int = 500,
         batch_timeout_s: float = 1.0,
@@ -86,9 +96,12 @@ class BatchConsumer[T: BaseModel]:
                 messages = self._poll_batch()
                 if not messages:
                     continue
-                items = self._decode(messages)
-                if items and not self._handle_with_retry(items):
-                    break
+                decoded = self._decode(messages)
+                if decoded:
+                    rejections = self._handle_with_retry([item for _, item in decoded])
+                    if rejections is None:
+                        break
+                    self._publish_rejections([m for m, _ in decoded], rejections)
                 self._commit()
         finally:
             self._consumer.close()
@@ -110,28 +123,36 @@ class BatchConsumer[T: BaseModel]:
                 log.warning("consumer error (non-fatal): %s", err)
         return valid
 
-    def _decode(self, messages: list[Message]) -> list[T]:
-        items: list[T] = []
+    def _decode(self, messages: list[Message]) -> list[tuple[Message, T]]:
+        """保留原始訊息，handler 回報 Rejection 時才找得回來送 DLQ。"""
+        decoded: list[tuple[Message, T]] = []
         for msg in messages:
             try:
-                items.append(self._decode_one(msg))
+                decoded.append((msg, self._decode_one(msg)))
             except (ValidationError, DecodeError) as e:
                 self._dlq.publish(msg, e)
-        return items
+        return decoded
 
-    def _handle_with_retry(self, items: list[T]) -> bool:
-        """成功回傳 True；重試期間被要求停止回傳 False（呼叫端不得 commit）。"""
+    def _publish_rejections(self, messages: list[Message], rejections: list[Rejection]) -> None:
+        """依 index 找回原始訊息送 DLQ；index 超出範圍是 handler 的 bug，直接拋出。"""
+        for r in rejections:
+            if not 0 <= r.index < len(messages):
+                raise IndexError(f"rejection index {r.index} out of range ({len(messages)})")
+        for r in rejections:
+            self._dlq.publish(messages[r.index], r.error)
+
+    def _handle_with_retry(self, items: list[T]) -> list[Rejection] | None:
+        """成功回傳 handler 的 Rejection（可為空）；重試期間被要求停止回傳 None（不得 commit）。"""
         delays = self._backoff()
         paused = False
         try:
             while True:
                 try:
-                    self._handler(items)
-                    return True
+                    return self._handler(items) or []
                 except TransientError as e:
                     if self._stop.is_set():
                         log.warning("stopping during retry, batch left uncommitted: %s", e)
-                        return False
+                        return None
                     if not paused:
                         self._pause_assigned()
                         paused = True
@@ -140,7 +161,7 @@ class BatchConsumer[T: BaseModel]:
                     self._wait_keeping_membership(delay)
                     if self._stop.is_set():
                         log.warning("stopping during retry, batch left uncommitted: %s", e)
-                        return False
+                        return None
         finally:
             if paused:
                 self._resume_assigned()

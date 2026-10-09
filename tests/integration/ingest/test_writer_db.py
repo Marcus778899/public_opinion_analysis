@@ -5,10 +5,12 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
+from sqlalchemy.exc import DataError
 
 from radar.common.db.session import make_engine, make_session_factory
 from radar.ingest import writer
-from radar.ingest.writer import write_batch
+from radar.ingest.main import IngestHandler
+from radar.ingest.writer import write_batch, write_each
 from tests.helpers.raw_posts import T0, make_post
 
 ALEMBIC_INI = Path(__file__).resolve().parents[3] / "alembic.ini"
@@ -153,3 +155,68 @@ def test_large_comment_batch_is_chunked(session_factory, monkeypatch):
 
     assert stats.comments_inserted == 16
     assert query(session_factory, "SELECT count(*) FROM comments")[0][0] == 16
+
+
+# ---------- 逐筆模式（開發規格 7.13） ----------
+OTHER_ID = "Stock.M.1791345200.A.001"
+POISON_ID = "Stock.M.1791345300.A.002"
+
+
+def write_each_committed(session_factory, posts):
+    with session_factory() as session:
+        result = write_each(session, posts)
+        session.commit()
+    return result
+
+
+def post_ids(session_factory):
+    return [r[0] for r in query(session_factory, "SELECT post_id FROM posts ORDER BY post_id")]
+
+
+def test_write_each_rejects_nul_byte_post_and_writes_others(session_factory):
+    batch = [make_post(), make_post(POISON_ID, content="a\x00b"), make_post(OTHER_ID)]
+
+    stats, rejections = write_each_committed(session_factory, batch)
+
+    assert [r.index for r in rejections] == [1]
+    assert isinstance(rejections[0].error, DataError)
+    assert post_ids(session_factory) == sorted([POST_ID, OTHER_ID])
+    assert stats.posts_written == 2
+
+
+def test_write_each_rejection_index_points_to_original_position(session_factory):
+    batch = [make_post(), make_post(OTHER_ID), make_post(POISON_ID, title="x\x00")]
+
+    _, rejections = write_each_committed(session_factory, batch)
+
+    assert [r.index for r in rejections] == [2]
+
+
+def test_write_each_duplicates_write_latest_once(session_factory):
+    batch = [make_post(n_push=1), make_post(crawled_at=T0 + timedelta(minutes=1), n_push=3)]
+
+    stats, rejections = write_each_committed(session_factory, batch)
+
+    assert rejections == []
+    assert stats.posts_written == 1
+    assert post_row(session_factory).push_count == 3
+
+
+def test_write_each_all_valid_matches_write_batch_stats(session_factory, postgres_env):
+    batch = [make_post(n_push=2), make_post(OTHER_ID, n_boo=1)]
+
+    each_stats, _ = write_each_committed(session_factory, batch)
+    with make_engine(postgres_env).begin() as conn:
+        conn.execute(text("TRUNCATE comments, posts CASCADE"))
+    batch_stats = write(session_factory, batch)
+
+    assert each_stats == batch_stats
+
+
+def test_ingest_handler_batch_with_poison_post_commits_rest(session_factory):
+    batch = [make_post(), make_post(POISON_ID, content="\x00"), make_post(OTHER_ID)]
+
+    rejections = IngestHandler(session_factory)(batch)
+
+    assert [r.index for r in rejections] == [1]
+    assert post_ids(session_factory) == sorted([POST_ID, OTHER_ID])

@@ -5,7 +5,7 @@ import pytest
 from confluent_kafka import KafkaError, KafkaException, TopicPartition
 from pydantic import BaseModel
 
-from radar.common.kafka.consumer import BatchConsumer, DecodeError, TransientError
+from radar.common.kafka.consumer import BatchConsumer, DecodeError, Rejection, TransientError
 from radar.common.kafka.dlq import DlqPublisher
 from radar.common.kafka.producer import JsonProducer
 from radar.common.settings import KafkaSettings
@@ -339,3 +339,74 @@ def test_commit_other_kafka_error_raises():
     with pytest.raises(KafkaException):
         consumer.run()
     assert fake.closed
+
+
+# ---------- handler 回報 Rejection（開發規格 7.13） ----------
+def dlq_offsets(dlq_producer):
+    return [json.loads(m["value"])["offset"] for m in dlq_producer.produced]
+
+
+def test_rejected_items_go_to_dlq_then_batch_is_committed():
+    def handler(items):
+        return [Rejection(1, ValueError("bad row"))]
+
+    consumer, fake, dlq_producer = build([[msg(1, 10), msg(2, 11), msg(3, 12)]], handler)
+
+    consumer.run()
+
+    assert dlq_offsets(dlq_producer) == [11]
+    assert "ValueError: bad row" in json.loads(dlq_producer.produced[0]["value"])["error"]
+    assert fake.commits == 1
+
+
+def test_rejection_index_maps_to_message_after_undecodable_ones_are_dropped():
+    handled = []
+
+    def handler(items):
+        handled.append(items)
+        return [Rejection(1, ValueError("bad row"))]
+
+    batch = [msg(1, 10), FakeMessage(b"not json", offset_=11), msg(3, 12)]
+    consumer, _, dlq_producer = build([batch], handler)
+
+    consumer.run()
+
+    assert handled == [[Event(id=1), Event(id=3)]]
+    assert dlq_offsets(dlq_producer) == [11, 12]
+
+
+def test_handler_returning_none_commits_without_dlq():
+    consumer, fake, dlq_producer = build([[msg(1)]], lambda items: None)
+
+    consumer.run()
+
+    assert dlq_producer.produced == []
+    assert fake.commits == 1
+
+
+def test_rejection_index_out_of_range_raises_without_commit():
+    consumer, fake, dlq_producer = build([[msg(1)]], lambda items: [Rejection(5, ValueError())])
+
+    with pytest.raises(IndexError):
+        consumer.run()
+
+    assert dlq_producer.produced == []
+    assert fake.commits == 0
+
+
+def test_rejections_from_successful_retry_go_to_dlq():
+    calls = []
+
+    def handler(items):
+        calls.append(items)
+        if len(calls) == 1:
+            raise TransientError("db down")
+        return [Rejection(0, ValueError("bad row"))]
+
+    consumer, fake, dlq_producer = build([[msg(1, 7)]], handler)
+
+    consumer.run()
+
+    assert len(calls) == 2
+    assert dlq_offsets(dlq_producer) == [7]
+    assert fake.commits == 1
