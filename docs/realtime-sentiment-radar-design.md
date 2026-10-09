@@ -275,6 +275,7 @@ LIMIT 500;                                               -- 其餘留到下一�
 - **同批去重**：同一個 `post_id` 只留 `crawled_at` 最新的一筆；`ON CONFLICT DO UPDATE` 不能在同一個語句更新同一列兩次
 - **推文分段**：每 5000 列送一次，避開 PG 單一語句 65535 個參數的上限
 - **刪除快照**：只把既有文章的 `is_deleted` 設為 true 並更新 `crawled_at`，保留刪除前的內容；從未見過的文章略過，已標記的不重複寫；比 `posts.crawled_at` 舊的刪除快照略過（較晚到的舊 404 不可蓋掉較新的 200）
+- **推文同步**：推文以頁面上的順序編樓層，中間有推文被刪時後面全部往前移一層。快照不比 `posts.crawled_at` 舊時才同步：同一樓層內容不同就更新，超過新快照最大樓層的刪除；比較舊的快照不碰推文（否則晚到、推文較少的舊快照會刪掉新推文）。一般重爬只是新推文接在後面，舊樓層不變，不會多寫
 - **撤銷刪除**：已標記刪除的文章收到比 `crawled_at` 新的正常快照時，`is_deleted` 改回 false 並寫入新內容，避免 PTT／Cloudflare 暫時性的錯誤 404 讓文章被永久誤判為刪除。Scheduler 照舊不重爬已刪除的文章；被誤判的文章若還在列表上，推文數一變（或爬蟲重啟、快取清空）列表任務就會重抓內頁而復原。真的被刪的文章在列表上沒有連結，不會被重抓
 - **錯誤處理**：
   - DB 連線錯誤（`OperationalError`）→ 整批重試
@@ -302,9 +303,19 @@ WHERE posts.crawled_at < EXCLUDED.crawled_at                  -- 舊快照不覆
     OR posts.title      IS DISTINCT FROM EXCLUDED.title       -- 作者可能改標題
     OR posts.content    IS DISTINCT FROM EXCLUDED.content);   -- 沒變化就不寫
 
+-- 推文：只處理快照不比 posts.crawled_at 舊的文章
 INSERT INTO comments (post_id, floor, type, user_id, content, commented_at)
 VALUES (...)
-ON CONFLICT (post_id, floor) DO NOTHING;
+ON CONFLICT (post_id, floor) DO UPDATE SET
+  type = EXCLUDED.type, user_id = EXCLUDED.user_id,
+  content = EXCLUDED.content, commented_at = EXCLUDED.commented_at
+WHERE (comments.type, comments.user_id, comments.content, comments.commented_at)
+  IS DISTINCT FROM
+  (EXCLUDED.type, EXCLUDED.user_id, EXCLUDED.content, EXCLUDED.commented_at);
+
+DELETE FROM comments
+USING (VALUES (...)) AS v(post_id, max_floor)                 -- 新快照的最大樓層，沒推文為 0
+WHERE comments.post_id = v.post_id AND comments.floor > v.max_floor;
 
 -- 刪除快照
 UPDATE posts SET is_deleted = TRUE, crawled_at = v.crawled_at
@@ -385,7 +396,7 @@ CREATE INDEX ON crawl_state (next_crawl_at);
 - `table.include.list` 只包含 `posts`、`comments`；publication `radar_cdc` 由 Alembic migration 建立，Debezium 不自動建立（`publication.autocreate.mode=disabled`）
 - Avro 格式，schema 由 Apicurio 管理；Apicurio 使用同一個 PG instance 裡**獨立的 database** `apicurio`
 - 開啟 `heartbeat.interval.ms`，避免冷門時段 replication slot 停滯、WAL 累積；broker 關閉了自動建立 topic，heartbeat topic 要列在 `topics.yaml`
-- `ExtractNewRecordState` 攤平訊息，附加 `__op`、`__source_ts_ms`、`__source_lsn`；PG 端的刪除以 `delete.tombstone.handling.mode=rewrite` 改寫成 `__deleted=true`（與 PTT 刪文的 `is_deleted` 是兩回事，系統不會刪 PG 的列）
+- `ExtractNewRecordState` 攤平訊息，附加 `__op`、`__source_ts_ms`、`__source_lsn`；PG 端的刪除以 `delete.tombstone.handling.mode=rewrite` 改寫成 `__deleted=true`（與 PTT 刪文的 `is_deleted` 是兩回事）。`posts` 的列不會被刪；`comments` 在推文樓層位移時會被改寫或刪除（5.1），因此設 `REPLICA IDENTITY FULL`，刪除事件才帶完整的舊列（預設只帶主鍵，其他欄位是 null，ClickHouse 的非 Nullable 欄位會解析失敗）
 - 版本：Debezium 3.7.0.Final（`quay.io/debezium/connect`，Docker Hub 的 `debezium/connect` 已停止更新）、Apicurio Registry 3.3.3
 
 ### 6.2 ClickHouse 讀取 Avro 的方式（S2-01 驗證結果）
@@ -415,13 +426,13 @@ ClickHouse 的 `AvroConfluent` 格式能直接讀 Apicurio 序列化的訊息，
 |---|---|---|---|
 | `posts_latest` | `ReplacingMergeTree(lsn)` | `cdc.public.posts` | 最新狀態 |
 | `posts_history` | `MergeTree` | `cdc.public.posts` | 推噓數變化歷程 |
-| `comments` | `MergeTree` | `cdc.public.comments` | 每分鐘新增推文數；多一個 `board` 欄位（從 `post_id` 取出，PG 的 `comments` 沒有），依看板統計時不必 join |
+| `comments_latest` | `ReplacingMergeTree(lsn, is_deleted)` | `cdc.public.comments` | 每分鐘新增推文數；多一個 `board` 欄位（從 `post_id` 取出，PG 的 `comments` 沒有），依看板統計時不必 join；PG 端的改寫、刪除以 LSN 取代，`is_deleted` 來自 `__deleted`，查詢加 `FINAL` 才會去掉已刪除的列 |
 | `labels` | `MergeTree` | `labels` | 標註結果；一則訊息的 `sentiments` 以 `ARRAY JOIN` 攤成一列一個 (target, polarity)（15.3） |
 | `predictions` | `MergeTree` | `predictions` | 推論結果（含 `model_version`） |
 | `alerts` | `MergeTree` | `alerts` | 警示紀錄 |
 
 - `posts_latest` 的 version 用 `__source_lsn`：同一列的後續變更 LSN 一定較大；`ts_ms` 是毫秒，同一毫秒內多次變更會分不出先後
-- 查詢 `posts_latest` 加 `FINAL` 或用 `argMax`
+- 查詢 `posts_latest`、`comments_latest` 加 `FINAL` 或用 `argMax`
 - PTT 刪文以 `is_deleted` 處理；撤銷刪除只是 `is_deleted` 改回 false 的一般更新，`posts_latest` 以較大的 LSN 取代即可
 - JSON topic 同樣用 named collection（`json_kafka`），並設 `input_format_skip_unknown_fields=1`：訊息只做加欄位的相容變更（開發規格 2.2），新欄位不會讓 ClickHouse 卡住
 - ClickHouse 的 schema 以 `infra/clickhouse/migrations/` 的編號 SQL 檔管理，已合併的檔案不可修改（同 Alembic）
@@ -499,7 +510,7 @@ ClickHouse 的 `AvroConfluent` 格式能直接讀 Apicurio 序列化的訊息，
 
 ### 8.3 熱度偵測
 
-- 輸入：`cdc.public.comments`、`cdc.public.posts`
+- 輸入：`cdc.public.comments`、`cdc.public.posts`；`comments` 的事件除了新增（`c`）也有改寫（`u`）、刪除（`d`），計算新增推文數時只算 `c`
 - 依文章 / 看板做滑動視窗統計（每 1 分鐘、視窗 10 分鐘），之後擴充到實體、主題（見 15.2）
 - 與歷史基準比較（z-score / EWMA），超過門檻寫入 `alerts`
 - Quix Streams：純 Python、狀態存 RocksDB 並備份到 changelog topic
@@ -647,6 +658,8 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 - [ ] 刪除快照直接 upsert → 推噓數被清成 0、內文被清空
 - [ ] 刪除標記不可逆、不比較 `crawled_at` → 暫時性的 404 或晚到的舊 404 讓文章被永久誤判為刪除
 - [ ] 一次 INSERT 太多推文 → 超過 PG 65535 個參數上限
+- [ ] 推文只新增不同步 → 中間的推文被刪後樓層位移，`comments` 與頁面、推噓數對不上
+- [ ] 會被刪除的表沒設 `REPLICA IDENTITY FULL` → Debezium 刪除事件只帶主鍵，下游的非 Nullable 欄位解析失敗
 - [ ] Debezium 沒開 heartbeat → WAL 塞滿硬碟
 - [ ] ClickHouse 用一般 MergeTree 存最新狀態 → 重複列
 
