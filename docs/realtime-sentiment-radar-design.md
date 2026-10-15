@@ -89,6 +89,7 @@
 | Ingest consumer | 1+ | 批次 upsert 進 PG，把快照轉成差異 |
 | PostgreSQL | 1 | Source of truth |
 | Debezium | 1 | 把 PG 的變化轉成事件 |
+| CDC watchdog | 1 | 監看 connector 與 replication slot，task 失敗時自動重啟（6.4） |
 | Apicurio | 1 | Schema Registry |
 | ClickHouse | 1 | OLAP 分析、熱度曲線、訓練資料來源 |
 | Telegram bot | 1 | 推送警示與每日摘要、接收訂閱指令 |
@@ -397,6 +398,7 @@ CREATE INDEX ON crawl_state (next_crawl_at);
 - Avro 格式，schema 由 Apicurio 管理；Apicurio 使用同一個 PG instance 裡**獨立的 database** `apicurio`
 - 開啟 `heartbeat.interval.ms`，避免冷門時段 replication slot 停滯、WAL 累積；broker 關閉了自動建立 topic，heartbeat topic 要列在 `topics.yaml`
 - `ExtractNewRecordState` 攤平訊息，附加 `__op`、`__source_ts_ms`、`__source_lsn`；PG 端的刪除以 `delete.tombstone.handling.mode=rewrite` 改寫成 `__deleted=true`（與 PTT 刪文的 `is_deleted` 是兩回事）。`posts` 的列不會被刪；`comments` 在推文樓層位移時會被改寫或刪除（5.1），因此設 `REPLICA IDENTITY FULL`，刪除事件才帶完整的舊列（預設只帶主鍵，其他欄位是 null，ClickHouse 的非 Nullable 欄位會解析失敗）
+- Converter 的 schema 快取：`fault-tolerant-refresh=true`、`check-period-ms` 拉長到 1 小時。預設每 30 秒過期，過期後下一筆訊息就要同步向 Apicurio 註冊 schema，任何一次失敗都會讓 task 永久停止（6.4）
 - 版本：Debezium 3.7.0.Final（`quay.io/debezium/connect`，Docker Hub 的 `debezium/connect` 已停止更新）、Apicurio Registry 3.3.3
 
 ### 6.2 ClickHouse 讀取 Avro 的方式（S2-01 驗證結果）
@@ -436,6 +438,27 @@ ClickHouse 的 `AvroConfluent` 格式能直接讀 Apicurio 序列化的訊息，
 - PTT 刪文以 `is_deleted` 處理；撤銷刪除只是 `is_deleted` 改回 false 的一般更新，`posts_latest` 以較大的 LSN 取代即可
 - JSON topic 同樣用 named collection（`json_kafka`），並設 `input_format_skip_unknown_fields=1`：訊息只做加欄位的相容變更（開發規格 2.2），新欄位不會讓 ClickHouse 卡住
 - ClickHouse 的 schema 以 `infra/clickhouse/migrations/` 的編號 SQL 檔管理，已合併的檔案不可修改（同 Alembic）
+
+### 6.4 故障處理
+
+Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED`，不會自動恢復，要手動重啟。這時爬蟲與 Ingest 照常運作，所以 consumer lag、DLQ 都看不出異常；但 ClickHouse 會停止更新，replication slot 沒人讀，PG 的 WAL 持續累積（2026-10-10 驗收時發生，約 70 MB/小時，#31）。
+
+分三層處理：
+
+| 層 | 作法 | 處理的情況 |
+|---|---|---|
+| 減少失敗 | Converter 快取設定（6.1） | 快取過期後，向 Apicurio 刷新時偶發的連線錯誤 |
+| 自動恢復 | 常駐服務 `cdc-watchdog` 定期查 connector 狀態，`FAILED` 時呼叫 Connect REST API 重啟失敗的 task，間隔以指數退避拉長 | 其他原因造成的 task 失敗（例如 Apicurio 停機期間遇到新的 schema） |
+| 讓人知道 | `cdc-watchdog` 同時檢查 replication slot：`active=false` 持續太久，或 WAL 延遲超過門檻，就記 ERROR，由 loggerhelper 送到 Slack | 自動恢復失敗、PG 端的問題 |
+| 監看 watchdog 本身 | `cdc-watchdog` 每輪 ping 外部的 heartbeat 服務（healthchecks.io）；CDC 異常時改 ping `/fail`。外部服務超過期限沒收到 ping，或收到 `/fail`，就寄 email | watchdog crash、卡住、開發機睡眠或 Docker 停止；Slack 漏看 |
+
+- **為什麼要外部服務**：監控程式和被監控的服務在同一台機器上，無法回報「整台機器停了」（2026-10-10 的驗收監控腳本就是無聲無息地停了 10 小時）；只有「該收到卻沒收到就通知」的外部服務能涵蓋這種情況
+- **heartbeat 只帶 URL，不送任何資料內容**；沒設定 URL 就不送（測試與 e2e 環境都不設）
+
+- **不用 Connect 內建的錯誤處理**：`errors.retry.timeout` 只重試 `RetriableException`；`errors.tolerance=all` 會丟掉訊息，資料不完整
+- **不設 `max_slot_wal_keep_size`**：超過上限時 PG 會讓 slot 失效，必須重新 snapshot；寧可記 ERROR 讓人處理
+- **重啟後會重送**：Debezium 從最後一次 flush 的 offset 接續，之後的事件會再送一次。`posts_latest`、`comments_latest` 以 LSN 去重不受影響；`posts_history` 是 `MergeTree`，會出現 `(post_id, lsn)` 相同的重複列，畫曲線時要以 LSN 去重
+- `cdc-watchdog` 只讀 PG 的系統表，不寫入任何表（5.4）
 
 ---
 
@@ -551,6 +574,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 │   │   ├── crawler.py       # [常駐 ×N]（http、list_cache）
 │   │   └── parsers/         # PTT 列表頁與文章頁解析
 │   ├── ingest/              # [常駐] main、writer
+│   ├── cdc/watchdog.py      # [常駐 ×1] 監看 Debezium connector 與 replication slot
 │   ├── ml/
 │   │   ├── labeling/
 │   │   │   ├── prompt.py    # 標註準則（RULES）與輸出格式，對應 docs/labeling-guideline.md
@@ -579,7 +603,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 
 | 類型 | 程式 | 執行方式 |
 |---|---|---|
-| 常駐 | api、scheduler、crawler、ingest、labeling/stream、inference、heat、bot | docker-compose service |
+| 常駐 | api、scheduler、crawler、ingest、cdc/watchdog、labeling/stream、inference、heat、bot | docker-compose service |
 | 一次性 | labeling/backfill、manual、cross_check、testset、experiments/*、training/* | 手動執行或 Colab |
 | 本機 | labeling/human_app | 人工標註時執行，只綁 127.0.0.1 |
 
@@ -600,6 +624,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 | `scheduler` | `app` | 只能 1 個；多開時其餘的待命 |
 | `crawler` | `app` | `replicas: 3` |
 | `ingest` | `app` | |
+| `cdc-watchdog` | `app` | 只能 1 個；多開會重複重啟 connector（6.4） |
 
 - `make up-app` 啟動整套；自寫服務等 `init` 成功結束後才啟動
 - 端到端測試另加 `infra/docker-compose.e2e.yaml`：假 PTT 伺服器、爬蟲改打它、重爬間隔縮短，並改用 e2e 專用的資料 volume，不碰開發資料
@@ -661,6 +686,8 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 - [ ] 推文只新增不同步 → 中間的推文被刪後樓層位移，`comments` 與頁面、推噓數對不上
 - [ ] 會被刪除的表沒設 `REPLICA IDENTITY FULL` → Debezium 刪除事件只帶主鍵，下游的非 Nullable 欄位解析失敗
 - [ ] Debezium 沒開 heartbeat → WAL 塞滿硬碟
+- [ ] Connect task `FAILED` 沒人重啟、只看 consumer lag → CDC 停了好幾個小時都沒發現，WAL 持續累積
+- [ ] Apicurio converter 用預設的快取設定 → 每 30 秒同步刷新一次 schema，一次連線失敗就讓 task 永久停止
 - [ ] ClickHouse 用一般 MergeTree 存最新狀態 → 重複列
 
 ### 12.3 排程
