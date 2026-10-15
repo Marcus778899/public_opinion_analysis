@@ -16,7 +16,7 @@ up-labeling:  ## 啟動串流抽樣標註（S3-08，會持續呼叫 LLM API）
 down:
 	$(COMPOSE) --profile app --profile labeling down --remove-orphans
 
-e2e-down:  ## 停止 e2e 環境並刪除 e2e 專用的資料 volume
+e2e-down:  ## 停止 e2e 環境並刪除 e2e 專用的資料與 log volume（不碰開發環境的 volume）
 	$(COMPOSE_E2E) --profile app down -v --remove-orphans
 
 logs:
@@ -57,7 +57,7 @@ test:
 test-int:
 	uv run pytest tests/integration
 
-e2e-up:  ## 整套服務 + 假 PTT 伺服器，使用 e2e 專用的資料 volume（不碰開發資料、不連真的 PTT）
+e2e-up:  ## 整套服務 + 假 PTT 伺服器，使用 e2e 專用的 volume（不碰開發資料、不連真的 PTT）；容器名稱與開發環境相同，會取代開發環境的容器
 	$(COMPOSE_E2E) --profile app up -d --build --wait
 
 e2e:  ## 端到端測試，需先 make e2e-up
