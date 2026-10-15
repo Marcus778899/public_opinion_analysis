@@ -531,7 +531,13 @@ Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED
 ### 8.2 情緒推論
 
 - 消費 `cdc.public.posts`，載入模型預測，寫入 `predictions`
-- 訊息帶 `model_version`
+- 訊息帶 `model_version`；啟動時載入一個指定的模型版本（`models/<model_version>/`），換模型就重啟服務
+- **避免重複推論**：大部分 CDC 事件只是推噓數更新。以模型輸入文字（標題＋截斷後的內文，與訓練相同）的 hash 判斷，與本地快取的 hash 相同就不推論
+  - 快取裡沒有這篇時：新文章（`op=c`）推論；更新（`op=u`）與 snapshot（`op=r`）只記下 hash、不推論。重啟後快取是空的，若對更新也推論，每篇文章的第一次推噓數變化都會重複推論一次
+  - 代價：重啟後的第一次更新若剛好是內文被編輯，這次編輯不會重新推論；服務上線前已存在的文章沒有推論結果，需要時另外補跑
+  - Connect 重啟重送的 `op=c` 事件，hash 相同也不會重複推論
+- 刪除的文章（`is_deleted`）不推論
+- 模型檔不進 image：compose 以唯讀方式掛載 `models/`，模型版本由環境變數指定
 
 ### 8.3 熱度偵測
 
@@ -620,6 +626,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 | `kafka_1`～`kafka_3`、`postgres` | （預設） | 本機開發時服務直接用 `uv run` 執行 |
 | `apicurio-db-init`、`apicurio`、`connect`、`clickhouse` | （預設） | 階段 2 起屬於資料流的一部分，`make up` 一併啟動；`apicurio-db-init` 是一次性服務 |
 | `label-stream` | `labeling` | 串流抽樣標註，會持續呼叫 LLM API，`make up-labeling` 才啟動 |
+| `inference` | `inference` | 情緒推論（8.2），需要先訓練好模型；`make up-inference` 才啟動，以唯讀方式掛載 `models/` |
 | `kafka-ui` | （預設） | 開發期間預設啟動（http://localhost:8089，只綁本機），部署前移除（S8-06） |
 | `init` | `app` | 一次性：Alembic、建立 topic、ClickHouse migration、註冊 connector（皆冪等）；唯一負責建置 `radar-app` image 的服務 |
 | `api` | `app` | 只綁 `127.0.0.1:8000` |
