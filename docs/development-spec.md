@@ -322,6 +322,7 @@
 | Ingest 逐筆隔離毒訊息（7.13） | ✅ 完成；整合測試以含 `\x00` 的文章重現（原本整批失敗、服務中止），修正後只有該筆進 DLQ | #12 |
 | 刪除標記可撤銷（7.14） | ✅ 完成；整合測試重現原本的兩個問題（較舊的 404 晚到會標記刪除、刪除後較舊的 200 會蓋掉內容），修正後刪除可被較新的快照撤銷 | #13 |
 | 推文同步（7.15） | ✅ 完成；整合測試重現中間推文被刪後的樓層位移；端到端測試確認 PG 的推文刪除經 CDC 反映到 `comments_latest FINAL`（`REPLICA IDENTITY FULL`） | #14 |
+| 抓取失敗的新文章不記進列表快取（7.17） | ✅ 完成；單元測試重現「失敗的新文章下一輪不再抓」後修正。尚未部署：等階段 2 驗收結束再重建爬蟲，並跑 e2e | #33 |
 | CDC 故障自動恢復（7.16） | ✅ 完成；e2e 重現兩種失敗（舊快取設定在刷新時失敗、沒有 watchdog 時 task 停在 `FAILED`），修正後通過。2026-10-15 開發環境重啟後，10/10 起積壓的 759 MB WAL 約 1 分鐘消化完，PG 與 ClickHouse 的 posts、comments 筆數一致 | #31 |
 | 階段 2 驗收（24 小時運作、WAL 延遲） | ⬜ 待重跑：2026-10-09 第一次執行，約 8 小時後 Debezium task 失敗而中斷（#31） | — |
 | S3-01 標註準則與 prompt | ✅ 完成（prompt-v4，`docs/labeling-guideline.md`；15 篇實測選定標註者）；2026-10-08 依交叉比對升 prompt-v5（規則 11～13） | #10 |
@@ -711,6 +712,17 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
   - Apicurio 停機時重啟 Connect（快取清空），讓 task 遇到快取裡沒有的 schema 而失敗；Apicurio 恢復後，不需要人工介入，新文章能進 `posts_latest`。停掉 watchdog 時，Apicurio 恢復後 task 仍停在 `FAILED`
   - e2e 環境把 watchdog 的檢查間隔與退避時間縮短
 
+### 7.17 抓取失敗的新文章不記進列表快取（fix，2026-10-15，#33）
+
+2026-10-15 14:30～16:20（台北）的 18 次 520／525 涉及 15 篇文章，其中 `HatePolitics.M.1792046614.A.30B` 一直沒有進 PG。列表任務不論內頁抓取成功與否都把推文數記進 `ListPushCache`，之後推文數沒變就不再抓；這篇又還不在 PG，Scheduler 也不會重爬。8.1 原本寫的「之後的重爬會再抓到」只對已在 PG 的文章成立。
+
+- **不記進快取**：列表任務抓內頁遇到 `FetchError`（含暫時性錯誤重試 5 次後放棄）時，不呼叫 `remember`，下一輪列表輪詢會再抓
+- **最多重試 3 輪**：同一篇在列表任務中連續失敗 3 次就照常記進快取並記 ERROR（可能永久漏抓），避免一篇一直失敗的文章每輪都多發請求；計數存在 handler 內，最多記 1,000 篇（超過丟最舊的），重啟後清空
+- **解析失敗、404 照舊記進快取**：重抓結果相同
+- **`fetch_and_publish_post` 改回傳結果種類**（`PostOutcome`：送出、解析失敗、抓取失敗），列表任務據此決定要不要記進快取；文章任務照舊不需要
+- **log 等級**：單次抓取失敗（列表頁、內頁）改記 WARNING；連續 20 次抓取失敗（不分網址）記一次 ERROR、之後第一次成功記 INFO。日常 0.4% 的 52x 幾乎不可能連續 20 次，連續失敗代表 PTT 或 Cloudflare 長時間無法連線，需要人處理
+- 門檻（3 輪、1,000 篇、20 次）是 `CrawlHandler` 的建構參數，與既有的 `max_list_pages`、`max_transient_attempts` 一致，不另開環境變數
+
 ---
 
 ## 8. 風險清單
@@ -727,7 +739,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | PTT 恢復伺服器端的 over18 檢查 | 列表頁變成確認頁 | 2026-10 實測伺服器端已不檢查（只在瀏覽器以 JS 導向）；爬蟲仍帶 `over18=1` cookie，parser 遇到確認頁會拋 `ParseError` |
 | LLM 免費額度不足或政策改變 | 標註進度變慢或成本上升 | 實測 `gemini-3.5-flash` 免費只有 20 次/天、`gemini-3.1-pro` 為 0；`Labeler` 介面可換服務商（Groq、OpenRouter、Gemini）或改付費 Batch API；backfill 可中斷續跑 |
 | 單機記憶體不足（設計估 6～7GB） | 服務被 OOM kill | JVM heap 上限；階段 2 完成時實測記憶體 |
-| PTT 回 HTTP 520（Cloudflare） | 該篇內頁本輪略過 | 24 小時驗收：520 ×23、525 ×14、521 ×4，佔請求 < 0.1%，之後的重爬會再抓到；**決定維持不重試**（重試會增加觸發 #11 的機會） |
+| PTT 回 HTTP 520（Cloudflare） | 該篇內頁本輪略過 | 24 小時驗收：520 ×23、525 ×14、521 ×4，佔請求 < 0.1%；**決定維持不重試**（重試會增加觸發 #11 的機會）。已在 PG 的文章由重爬補抓；新文章不記進列表快取，下一輪列表輪詢再抓（7.17）；單次記 WARNING，連續 20 次失敗才記 ERROR |
 | 開發機休眠 | 長時間驗收中斷、數據缺一段 | 驗收期間 `caffeinate -dims` 並接電源、不闔上螢幕（闔上仍會強制睡眠）；`cdc-watchdog` 的外部 heartbeat 停止時會寄 email（7.16）；上雲後（階段 8）不再依賴開發機 |
 | 標註的系統性偏差 | 模型學到錯誤標準，資料越多越確定 | 固定主要標註者、改 prompt 修偏差、兩個不同家族的標註者交叉比對、人工測試集裁決（7.11） |
 | Python 端讀不了 CDC 的 Avro | S3-08 串流標註、階段 4 推論卡住 | 採用 `confluent-kafka[avro]`（fastavro + 官方 schema registry client，打 Apicurio 的 ccompat API）；已用 mock schema registry 與 S2-01 實測的欄位驗證解碼，待以實際 CDC 訊息確認 |
