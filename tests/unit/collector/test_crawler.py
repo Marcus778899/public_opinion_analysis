@@ -145,6 +145,168 @@ def test_list_task_non_200_is_skipped(handler, fetcher, producer):
     assert producer.produced == []
 
 
+def test_list_task_post_fetch_error_is_refetched_on_next_poll(handler, fetcher, cache):
+    # #33：新文章第一次抓取失敗後被記進快取，推文數沒變就永遠不再抓
+    fetcher.errors[POST_URL] = FetchError("GET returned 520")
+    handler([list_task()])
+    del fetcher.errors[POST_URL]
+    fetcher.requested.clear()
+
+    handler([list_task()])
+
+    assert fetcher.post_requests() == [POST_URL]
+    assert POST_ID in cache
+
+
+class FakeLog:
+    def __init__(self) -> None:
+        self.records: list[tuple[str, str]] = []
+
+    def _add(self, level: str, msg: str, *args: object) -> None:
+        self.records.append((level, msg % args if args else msg))
+
+    def info(self, msg: str, *args: object) -> None:
+        self._add("INFO", msg, *args)
+
+    def warning(self, msg: str, *args: object) -> None:
+        self._add("WARNING", msg, *args)
+
+    def error(self, msg: str, *args: object) -> None:
+        self._add("ERROR", msg, *args)
+
+    def levels(self, *, skip_info: bool = True) -> list[str]:
+        return [lv for lv, _ in self.records if not (skip_info and lv == "INFO")]
+
+
+@pytest.fixture
+def fake_log(monkeypatch) -> FakeLog:
+    from radar.collector import crawler
+
+    fake = FakeLog()
+    monkeypatch.setattr(crawler, "log", fake)
+    return fake
+
+
+def test_list_task_post_fetch_error_gives_up_after_three_polls(handler, fetcher, cache, fake_log):
+    fetcher.errors[POST_URL] = FetchError("GET returned 525")
+
+    for _ in range(3):
+        handler([list_task()])
+    fetcher.requested.clear()
+    handler([list_task()])
+
+    assert POST_ID in cache
+    assert POST_URL not in fetcher.post_requests()
+    errors = [m for lv, m in fake_log.records if lv == "ERROR"]
+    assert len(errors) == 1 and POST_ID in errors[0]
+
+
+def test_list_task_success_after_failure_resets_failure_count(handler, fetcher, cache, fake_log):
+    fetcher.errors[POST_URL] = FetchError("GET returned 520")
+    handler([list_task()])
+    handler([list_task()])  # 連續失敗 2 輪
+    del fetcher.errors[POST_URL]
+    handler([list_task()])  # 成功，計數歸零
+    seed_cache(cache, POST_ID, 99)  # 推文數變了，之後的列表會再抓
+    fetcher.errors[POST_URL] = FetchError("GET returned 520")
+
+    handler([list_task()])
+    handler([list_task()])  # 再失敗 2 輪，未達 3 輪
+
+    assert handler._list_fetch_failures[POST_ID] == 2
+    assert "ERROR" not in fake_log.levels()
+
+
+def test_list_task_post_parse_error_is_remembered(handler, fetcher, cache):
+    fetcher.pages[POST_URL] = "<html>not a post</html>"
+
+    handler([list_task()])
+
+    assert POST_ID in cache
+
+
+def test_list_task_counts_only_published_posts(handler, fetcher):
+    fetcher.errors[POST_URL] = FetchError("GET returned 520")
+
+    assert handler.handle_list(list_task()) == 2
+
+
+def test_list_failure_tracking_is_capped(fetcher, producer, cache, monkeypatch):
+    json_producer = JsonProducer(KafkaSettings(bootstrap_servers="x"), producer=producer)
+    handler = CrawlHandler(
+        fetcher, json_producer, cache, RecentFetches(), clock=lambda: NOW,
+        max_tracked_list_failures=2,
+    )  # fmt: skip
+    real_fetch = fetcher.fetch
+
+    def fail_posts(url: str):
+        if "/M." in url:
+            raise FetchError(f"GET {url} returned 520")
+        return real_fetch(url)
+
+    monkeypatch.setattr(fetcher, "fetch", fail_posts)
+
+    handler([list_task()])  # list_stock.html 有 3 篇新文章，全部失敗
+
+    assert len(handler._list_fetch_failures) == 2
+
+
+def test_post_fetch_error_logs_warning_not_error(handler, fetcher, fake_log):
+    fetcher.errors[POST_URL] = FetchError("GET returned 520")
+
+    handler([post_task()])
+
+    assert fake_log.levels() == ["WARNING"]
+
+
+def test_list_page_fetch_error_logs_warning(handler, fetcher, fake_log):
+    fetcher.errors[INDEX_URL] = FetchError("GET returned 525")
+
+    handler([list_task()])
+
+    assert fake_log.levels() == ["WARNING"]
+
+
+def test_failure_streak_logs_error_once_and_info_on_recovery(fetcher, producer, cache, fake_log):
+    json_producer = JsonProducer(KafkaSettings(bootstrap_servers="x"), producer=producer)
+    handler = CrawlHandler(
+        fetcher, json_producer, cache, RecentFetches(), clock=lambda: NOW, failure_streak_alert=3
+    )
+    fetcher.errors[POST_URL] = FetchError("GET returned 520")
+    for _ in range(4):
+        handler([post_task()])
+    del fetcher.errors[POST_URL]
+
+    handler([post_task(created_at=NOW + timedelta(seconds=1))])
+
+    assert [lv for lv, _ in fake_log.records].count("ERROR") == 1
+    assert any(lv == "INFO" and "recovered after 4" in m for lv, m in fake_log.records)
+
+
+def test_failure_streak_resets_on_success_without_alert(handler, fetcher, fake_log):
+    fetcher.errors[POST_URL] = FetchError("GET returned 520")
+    handler([post_task()])
+    del fetcher.errors[POST_URL]
+
+    handler([post_task(created_at=NOW + timedelta(seconds=1))])
+
+    assert "ERROR" not in fake_log.levels()
+    assert handler._failure_streak == 0
+
+
+def test_transient_give_up_counts_toward_failure_streak(fetcher, producer, cache, fake_log):
+    json_producer = JsonProducer(KafkaSettings(bootstrap_servers="x"), producer=producer)
+    handler = CrawlHandler(
+        fetcher, json_producer, cache, RecentFetches(), clock=lambda: NOW,
+        max_transient_attempts=1, failure_streak_alert=1,
+    )  # fmt: skip
+    fetcher.errors[POST_URL] = TransientError("timeout")
+
+    handler([post_task()])
+
+    assert [lv for lv, _ in fake_log.records].count("ERROR") == 1
+
+
 # ---------- post 任務 ----------
 def test_post_task_publishes_raw_post_and_raw_html_keyed_by_post_id(handler, producer):
     handler([post_task()])

@@ -1,7 +1,9 @@
 """爬蟲：消費 crawl.tasks，抓 PTT 頁面，寫入 raw.posts 與 raw.html。不碰 PG（設計文件 4.6）。"""
 
+from collections import OrderedDict
 from collections.abc import Callable
 from datetime import UTC, datetime
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -10,6 +12,7 @@ from radar.collector.fetch_cache import RecentFetches
 from radar.collector.http import FetchError, FetchResult, PttClient, PttFetcher
 from radar.collector.list_cache import ListPushCache
 from radar.collector.parsers.ptt import (
+    ListEntry,
     ListPage,
     ParseError,
     parse_list_page,
@@ -29,6 +32,12 @@ from radar.common.schemas import CrawlTask, RawHtml, RawPost
 from radar.common.settings import CrawlerSettings, get_kafka_settings
 
 
+class PostOutcome(StrEnum):
+    PUBLISHED = "published"  # 含 404 的刪除快照
+    UNPARSABLE = "unparsable"
+    FETCH_FAILED = "fetch_failed"
+
+
 class CrawlHandler:
     """BatchConsumer 的 handler；HTTP 暫時性錯誤以 TransientError 往外拋，讓整批重試。"""
 
@@ -42,6 +51,9 @@ class CrawlHandler:
         clock: Callable[[], datetime],
         max_list_pages: int = 3,
         max_transient_attempts: int = 5,
+        max_list_fetch_failures: int = 3,
+        max_tracked_list_failures: int = 1_000,
+        failure_streak_alert: int = 20,
     ) -> None:
         self._fetcher = fetcher
         self._producer = producer
@@ -52,6 +64,13 @@ class CrawlHandler:
         self._max_transient_attempts = max_transient_attempts
         # 各網址連續暫時性失敗的次數；成功或略過後移除
         self._transient_attempts: dict[str, int] = {}
+        self._max_list_fetch_failures = max_list_fetch_failures
+        self._max_tracked_list_failures = max_tracked_list_failures
+        # 列表任務中抓取失敗、還沒記進快取的文章：post_id → 連續失敗輪數（#33）
+        self._list_fetch_failures: OrderedDict[str, int] = OrderedDict()
+        self._failure_streak_alert = failure_streak_alert
+        # 不分網址的連續抓取失敗次數；達門檻代表 PTT 或 Cloudflare 長時間無法連線
+        self._failure_streak = 0
 
     def __call__(self, tasks: list[CrawlTask]) -> None:
         for task in tasks:
@@ -83,7 +102,11 @@ class CrawlHandler:
             all_new = bool(linked) and all(e.post_id not in self._cache for e in linked)
             for entry in page.entries:
                 if entry.url and self._cache.should_fetch(entry):
-                    fetched += self.fetch_and_publish_post(entry.url, task.board, task.task_id)
+                    outcome = self.fetch_and_publish_post(entry.url, task.board, task.task_id)
+                    fetched += outcome is PostOutcome.PUBLISHED
+                    if outcome is PostOutcome.FETCH_FAILED and self._retry_on_next_poll(entry):
+                        continue
+                    self._list_fetch_failures.pop(entry.post_id or "", None)
                 self._cache.remember(entry)
             if cache_was_empty or not all_new:
                 break
@@ -100,14 +123,30 @@ class CrawlHandler:
         self.fetch_and_publish_post(task.url, task.board, task.task_id)
         return True
 
-    def fetch_and_publish_post(self, url: str, board: str, task_id: UUID) -> bool:
-        """成功送出 raw.posts 回傳 True；不可重試的失敗記 ERROR 後回傳 False。"""
+    def _retry_on_next_poll(self, entry: ListEntry) -> bool:
+        """新文章抓取失敗時不記進快取，讓下一輪列表再抓；連續失敗達上限就放棄（#33）。"""
+        post_id = entry.post_id or ""
+        failures = self._list_fetch_failures.pop(post_id, 0) + 1
+        if failures >= self._max_list_fetch_failures:
+            log.error(
+                "give up post %s after %d failed list polls; it may never be fetched",
+                post_id,
+                failures,
+            )
+            return False
+        self._list_fetch_failures[post_id] = failures
+        while len(self._list_fetch_failures) > self._max_tracked_list_failures:
+            self._list_fetch_failures.popitem(last=False)
+        return True
+
+    def fetch_and_publish_post(self, url: str, board: str, task_id: UUID) -> PostOutcome:
+        """抓取失敗記 WARNING 回傳 FETCH_FAILED；解析失敗記 ERROR 回傳 UNPARSABLE。"""
         post_id = post_id_from_url(url)
         try:
             result = self._fetch(url)
         except FetchError as e:
-            log.error("skip post %s: %s", post_id, e)
-            return False
+            log.warning("skip post %s: %s", post_id, e)
+            return PostOutcome.FETCH_FAILED
         crawled_at = self._clock()
         # 404、解析失敗也算抓過：再抓一次結果相同
         self._recent.remember(post_id, crawled_at)
@@ -115,7 +154,7 @@ class CrawlHandler:
             self._producer.send(
                 names.RAW_POSTS, post_id, deleted_post(post_id, board, url, task_id, crawled_at)
             )
-            return True
+            return PostOutcome.PUBLISHED
         html = RawHtml(post_id=post_id, url=url, crawled_at=crawled_at, html=result.html)
         self._producer.send(names.RAW_HTML, post_id, html)
         try:
@@ -125,9 +164,9 @@ class CrawlHandler:
         except (ParseError, ValidationError) as e:
             # raw.html 已送出，修好 parser 後可重新解析
             log.error("parse failed for %s: %s", post_id, e)
-            return False
+            return PostOutcome.UNPARSABLE
         self._producer.send(names.RAW_POSTS, post_id, post)
-        return True
+        return PostOutcome.PUBLISHED
 
     def _fetch(self, url: str) -> FetchResult:
         """同一網址連續 TransientError 達上限就改拋 FetchError（略過），避免卡住 partition。"""
@@ -137,11 +176,26 @@ class CrawlHandler:
             attempts = self._transient_attempts.get(url, 0) + 1
             if attempts >= self._max_transient_attempts:
                 self._transient_attempts.pop(url, None)
+                self._record_failure()
                 raise FetchError(f"{e} (gave up after {attempts} attempts)") from e
             self._transient_attempts[url] = attempts
             raise
+        except FetchError:
+            self._record_failure()
+            raise
         self._transient_attempts.pop(url, None)
+        self._record_success()
         return result
+
+    def _record_failure(self) -> None:
+        self._failure_streak += 1
+        if self._failure_streak == self._failure_streak_alert:
+            log.error("%d fetches failed in a row; PTT may be unreachable", self._failure_streak)
+
+    def _record_success(self) -> None:
+        if self._failure_streak >= self._failure_streak_alert:
+            log.info("fetch recovered after %d failures in a row", self._failure_streak)
+        self._failure_streak = 0
 
     def _fetch_list(self, url: str, board: str) -> ListPage | None:
         try:
@@ -151,7 +205,7 @@ class CrawlHandler:
             return parse_list_page(result.html, board)
         except (FetchError, ParseError) as e:
             # 不重試，避免卡住 partition；下一輪輪詢會再試
-            log.error("skip list %s: %s", url, e)
+            log.warning("skip list %s: %s", url, e)
             return None
 
 
