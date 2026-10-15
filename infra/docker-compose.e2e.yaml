@@ -54,6 +54,9 @@ services:
   label-stream:
     volumes:
       - e2e_app_logs:/app/log
+  inference:
+    volumes:
+      - e2e_app_logs:/app/log
 
   crawler:
     environment:

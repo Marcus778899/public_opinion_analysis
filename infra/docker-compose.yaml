@@ -200,6 +200,19 @@ services:
       <<: *app-env
       CONNECT_URL: 'http://connect:8083'
 
+  # 情緒推論（S4，設計文件 8.2）：需要先訓練好模型，獨立 profile，make up-inference 才啟動
+  inference:
+    <<: *app
+    container_name: radar_inference
+    profiles: ["inference"]
+    command: ["python", "-m", "radar.ml.inference.main"]
+    environment:
+      <<: *app-env
+      INFERENCE_MODEL_DIR: '/app/models/${INFERENCE_MODEL_VERSION:-}'
+    volumes:
+      - app_logs:/app/log
+      - ../models:/app/models:ro
+
   # 串流抽樣標註（S3-08）：會持續呼叫 LLM API，獨立 profile，make up-labeling 才啟動
   label-stream:
     <<: *app

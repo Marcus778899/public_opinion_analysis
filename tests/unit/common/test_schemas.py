@@ -5,8 +5,8 @@ from datetime import UTC, datetime, timedelta, timezone
 import pytest
 from pydantic import ValidationError
 
-from radar.common.enums import CommentType, CrawlReason, CrawlTaskType
-from radar.common.schemas import CrawlTask, RawComment, RawHtml, RawPost
+from radar.common.enums import CommentType, CrawlReason, CrawlTaskType, Polarity
+from radar.common.schemas import CrawlTask, Prediction, RawComment, RawHtml, RawPost
 
 TAIPEI = timezone(timedelta(hours=8))
 NOW = datetime(2026, 10, 7, 12, 0, tzinfo=UTC)
@@ -167,3 +167,53 @@ def test_raw_html_roundtrip():
     html = RawHtml(post_id=POST_ID, url="u", crawled_at=NOW, html="<html>推</html>")
 
     assert RawHtml.model_validate_json(html.model_dump_json()) == html
+
+
+def prediction(**overrides):
+    fields = {
+        "post_id": POST_ID,
+        "model_version": "tfidf-lr-20261016T0300",
+        "predicted_at": NOW,
+        "polarity": "negative",
+        "scores": {"positive": 0.1, "negative": 0.7, "neutral": 0.2},
+    }
+    return Prediction(**{**fields, **overrides})
+
+
+def test_prediction_valid_scores_accepted():
+    p = prediction()
+
+    assert p.polarity is Polarity.NEGATIVE
+    assert p.scores[Polarity.NEUTRAL] == 0.2
+
+
+def test_prediction_missing_polarity_key_rejected():
+    with pytest.raises(ValidationError, match="exactly"):
+        prediction(scores={"negative": 0.8, "neutral": 0.2})
+
+
+def test_prediction_scores_not_summing_to_one_rejected():
+    with pytest.raises(ValidationError, match="sum to 1"):
+        prediction(scores={"positive": 0.1, "negative": 0.7, "neutral": 0.5})
+
+
+def test_prediction_polarity_not_highest_score_rejected():
+    with pytest.raises(ValidationError, match="not the highest"):
+        prediction(polarity="positive")
+
+
+def test_prediction_tied_highest_score_accepted():
+    prediction(polarity="neutral", scores={"positive": 0.2, "negative": 0.4, "neutral": 0.4})
+
+
+def test_prediction_json_matches_spec_3_5():
+    data = json.loads(prediction().model_dump_json())
+
+    assert data == {
+        "schema_version": 1,
+        "post_id": POST_ID,
+        "model_version": "tfidf-lr-20261016T0300",
+        "predicted_at": "2026-10-07T12:00:00Z",
+        "polarity": "negative",
+        "scores": {"positive": 0.1, "negative": 0.7, "neutral": 0.2},
+    }
