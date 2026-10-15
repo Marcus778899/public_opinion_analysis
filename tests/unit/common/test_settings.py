@@ -1,8 +1,11 @@
+import os
+
 import pytest
 from pydantic import ValidationError
 
 from radar.common.settings import (
     ApiSettings,
+    CdcWatchdogSettings,
     ClickHouseSettings,
     ConnectSettings,
     CrawlerSettings,
@@ -150,3 +153,37 @@ def test_labeling_settings_defaults(monkeypatch):
     s = LabelingSettings()
 
     assert (s.primary, s.fallbacks, s.max_chars) == ("groq", ["gemini"], 2000)
+
+
+@pytest.fixture
+def no_watchdog_env(monkeypatch):
+    for key in [k for k in os.environ if k.startswith("CDC_WATCHDOG_")]:
+        monkeypatch.delenv(key)
+
+
+def test_cdc_watchdog_settings_defaults_match_dev_spec(no_watchdog_env):
+    s = CdcWatchdogSettings()
+
+    assert (s.connector_name, s.slot_name) == ("radar-cdc", "radar_cdc")
+    assert (s.interval_s, s.restart_backoff_initial_s, s.restart_backoff_max_s) == (30, 30, 600)
+    assert s.slot_inactive_alert_s == 300
+    assert s.slot_lag_alert_bytes == 256 * 1024 * 1024
+    assert s.heartbeat_url is None
+    assert s.request_timeout_s == 10
+
+
+def test_cdc_watchdog_settings_reads_env_prefix(no_watchdog_env, monkeypatch):
+    monkeypatch.setenv("CDC_WATCHDOG_INTERVAL_S", "5")
+    monkeypatch.setenv("CDC_WATCHDOG_HEARTBEAT_URL", "https://hc-ping.com/abc")
+
+    s = CdcWatchdogSettings()
+
+    assert s.interval_s == 5
+    assert s.heartbeat_url == "https://hc-ping.com/abc"
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_cdc_watchdog_settings_blank_heartbeat_url_is_none(no_watchdog_env, monkeypatch, blank):
+    monkeypatch.setenv("CDC_WATCHDOG_HEARTBEAT_URL", blank)
+
+    assert CdcWatchdogSettings().heartbeat_url is None
