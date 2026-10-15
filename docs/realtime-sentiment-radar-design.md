@@ -629,7 +629,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 | `cdc-watchdog` | `app` | 只能 1 個；多開會重複重啟 connector（6.4） |
 
 - `make up-app` 啟動整套；自寫服務等 `init` 成功結束後才啟動
-- 端到端測試另加 `infra/docker-compose.e2e.yaml`：假 PTT 伺服器、爬蟲改打它、重爬間隔縮短，並改用 e2e 專用的資料 volume，不碰開發資料
+- 端到端測試另加 `infra/docker-compose.e2e.yaml`：假 PTT 伺服器、爬蟲改打它、重爬間隔縮短，並改用 e2e 專用的資料與 log volume（`e2e_app_logs`），不碰開發資料；`make e2e-down` 的 `down -v` 只會刪到 e2e 專用的 volume（#29）
 - 所有服務 `restart: unless-stopped`（`init` 除外）
 
 ### 10.4 上雲

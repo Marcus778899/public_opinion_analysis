@@ -291,7 +291,8 @@
 - **端到端環境**：
   - 爬蟲以 `CRAWLER_PTT_BASE_URL` 改打假伺服器（只換主機，資料中的網址仍是 `www.ptt.cc`），任何請求都不會打到真的 PTT
   - Scheduler 以 `SCHEDULER_TIME_SCALE=0.05` 縮短重爬間隔
-  - Postgres 與 Kafka 改掛 e2e 專用的 volume，不碰開發資料
+  - Postgres、Kafka、ClickHouse 與自寫服務的 log（`/app/log`）都改掛 e2e 專用的 volume，不碰開發資料。`make e2e-down` 用 `down -v` 刪除這些 volume；log 原本與開發環境共用 `app_logs`，2026-10-10 因此刪掉開發環境 10/07～10/09 的 log（#29）。單元測試檢查開發環境中掛 `app_logs` 的服務在 e2e 都改掛 `e2e_app_logs`
+  - 開發環境與 e2e 共用容器名稱，`make e2e-up` 會取代開發環境的容器；跑 e2e 前要先停掉開發環境的長時間作業（例如驗收）
   - `.env` 與開發環境共用，但 e2e 會刻意製造故障：compose 覆寫檔把各服務的 `SLACK_*`、`CDC_WATCHDOG_HEARTBEAT_URL` 設成空字串，`tests/e2e/conftest.py` 也在測試程式內清掉，不送 Slack 與外部 heartbeat
   - 測試標記為 `e2e`，一般 `pytest` 與 CI 預設排除
 - **端到端情境**：新看板被排程並寫入 PG、新推文在重爬後反映、刪除文被標記、停用看板後停止爬取、爬蟲停止期間的任務在重啟後接續處理；階段 2 起加上 CDC：新文章進 `posts_latest`、推文數變化進 `posts_history`、推文帶看板進 `comments`、內容沒變的重爬不產生 CDC 事件、Apicurio 停機後 CDC 自動恢復（`tests/e2e/test_cdc.py`）
@@ -322,6 +323,7 @@
 | Ingest 逐筆隔離毒訊息（7.13） | ✅ 完成；整合測試以含 `\x00` 的文章重現（原本整批失敗、服務中止），修正後只有該筆進 DLQ | #12 |
 | 刪除標記可撤銷（7.14） | ✅ 完成；整合測試重現原本的兩個問題（較舊的 404 晚到會標記刪除、刪除後較舊的 200 會蓋掉內容），修正後刪除可被較新的快照撤銷 | #13 |
 | 推文同步（7.15） | ✅ 完成；整合測試重現中間推文被刪後的樓層位移；端到端測試確認 PG 的推文刪除經 CDC 反映到 `comments_latest FINAL`（`REPLICA IDENTITY FULL`） | #14 |
+| e2e 改用專用的 log volume（#29） | ✅ 完成；`docker compose config` 確認 e2e 不再引用開發環境的 `app_logs`。實際 `e2e-up`／`e2e-down` 等階段 2 驗收結束後跑 | #29 |
 | 抓取失敗的新文章不記進列表快取（7.17） | ✅ 完成；單元測試重現「失敗的新文章下一輪不再抓」後修正。尚未部署：等階段 2 驗收結束再重建爬蟲，並跑 e2e | #33 |
 | CDC 故障自動恢復（7.16） | ✅ 完成；e2e 重現兩種失敗（舊快取設定在刷新時失敗、沒有 watchdog 時 task 停在 `FAILED`），修正後通過。2026-10-15 開發環境重啟後，10/10 起積壓的 759 MB WAL 約 1 分鐘消化完，PG 與 ClickHouse 的 posts、comments 筆數一致 | #31 |
 | 階段 2 驗收（24 小時運作、WAL 延遲） | ⬜ 待重跑：2026-10-09 第一次執行，約 8 小時後 Debezium task 失敗而中斷（#31） | — |
