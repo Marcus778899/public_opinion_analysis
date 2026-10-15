@@ -1,5 +1,6 @@
 """端到端測試：需先 make e2e-up（整套 compose 加上假 PTT；init 會建表、topic 與 connector）。"""
 
+import os
 import time
 import uuid
 from collections.abc import Callable
@@ -16,6 +17,15 @@ from radar.common.settings import ClickHouseSettings, PostgresSettings
 E2E_DIR = Path(__file__).resolve().parent
 API_URL = "http://localhost:8000"
 FAKE_PTT_URL = "http://localhost:8081"
+CONNECT_URL = "http://localhost:8083"
+QUIET_ENV = ("SLACK_WEBHOOK_URL", "SLACK_BOT_TOKEN", "CDC_WATCHDOG_HEARTBEAT_URL")
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    # NOTE: make e2e 以 --env-file .env 執行；e2e 會刻意製造故障，不可送 Slack 或外部 heartbeat
+    # 空字串等同未設定（loggerhelper 與 CdcWatchdogSettings 皆是）
+    for key in QUIET_ENV:
+        os.environ[key] = ""
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:

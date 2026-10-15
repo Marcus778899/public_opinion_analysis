@@ -292,8 +292,9 @@
   - 爬蟲以 `CRAWLER_PTT_BASE_URL` 改打假伺服器（只換主機，資料中的網址仍是 `www.ptt.cc`），任何請求都不會打到真的 PTT
   - Scheduler 以 `SCHEDULER_TIME_SCALE=0.05` 縮短重爬間隔
   - Postgres 與 Kafka 改掛 e2e 專用的 volume，不碰開發資料
+  - `.env` 與開發環境共用，但 e2e 會刻意製造故障：compose 覆寫檔把各服務的 `SLACK_*`、`CDC_WATCHDOG_HEARTBEAT_URL` 設成空字串，`tests/e2e/conftest.py` 也在測試程式內清掉，不送 Slack 與外部 heartbeat
   - 測試標記為 `e2e`，一般 `pytest` 與 CI 預設排除
-- **端到端情境**：新看板被排程並寫入 PG、新推文在重爬後反映、刪除文被標記、停用看板後停止爬取、爬蟲停止期間的任務在重啟後接續處理；階段 2 起加上 CDC：新文章進 `posts_latest`、推文數變化進 `posts_history`、推文帶看板進 `comments`、內容沒變的重爬不產生 CDC 事件（`tests/e2e/test_cdc.py`）
+- **端到端情境**：新看板被排程並寫入 PG、新推文在重爬後反映、刪除文被標記、停用看板後停止爬取、爬蟲停止期間的任務在重啟後接續處理；階段 2 起加上 CDC：新文章進 `posts_latest`、推文數變化進 `posts_history`、推文帶看板進 `comments`、內容沒變的重爬不產生 CDC 事件、Apicurio 停機後 CDC 自動恢復（`tests/e2e/test_cdc.py`）
 - **LLM**：單元與整合測試一律用 `MockTransport` 或 fake，不呼叫真的 LLM API；prompt 調整才實際呼叫，結果存在 `data/prompt-tuning/`
 
 ---
@@ -321,7 +322,8 @@
 | Ingest 逐筆隔離毒訊息（7.13） | ✅ 完成；整合測試以含 `\x00` 的文章重現（原本整批失敗、服務中止），修正後只有該筆進 DLQ | #12 |
 | 刪除標記可撤銷（7.14） | ✅ 完成；整合測試重現原本的兩個問題（較舊的 404 晚到會標記刪除、刪除後較舊的 200 會蓋掉內容），修正後刪除可被較新的快照撤銷 | #13 |
 | 推文同步（7.15） | ✅ 完成；整合測試重現中間推文被刪後的樓層位移；端到端測試確認 PG 的推文刪除經 CDC 反映到 `comments_latest FINAL`（`REPLICA IDENTITY FULL`） | #14 |
-| 階段 2 驗收（24 小時運作、WAL 延遲） | ⬜ 待執行 | — |
+| CDC 故障自動恢復（7.16） | ✅ 完成；e2e 重現兩種失敗（舊快取設定在刷新時失敗、沒有 watchdog 時 task 停在 `FAILED`），修正後通過。2026-10-15 開發環境重啟後，10/10 起積壓的 759 MB WAL 約 1 分鐘消化完，PG 與 ClickHouse 的 posts、comments 筆數一致 | #31 |
+| 階段 2 驗收（24 小時運作、WAL 延遲） | ⬜ 待重跑：2026-10-09 第一次執行，約 8 小時後 Debezium task 失敗而中斷（#31） | — |
 | S3-01 標註準則與 prompt | ✅ 完成（prompt-v4，`docs/labeling-guideline.md`；15 篇實測選定標註者）；2026-10-08 依交叉比對升 prompt-v5（規則 11～13） | #10 |
 | S3-02～S3-08 標註、測試集、實驗、訓練、串流標註 | ✅ 程式完成；人工標註頁已在瀏覽器實測。實際標註、人工測試集、訓練待階段 2 累積資料後執行 | #10 |
 | 階段 3 驗收（≥ 3,000 篇且各看板達標、評估報告含各看板 F1、推噓比結論） | ⬜ 待執行 | — |
@@ -674,6 +676,41 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
   - DDL 沒有 transaction（設計文件 6.3）；複製資料那一步重跑時舊表可能已刪，失敗需手動處理
 - **驗證**：PG 刪除推文的 CDC 事件只能在端到端環境驗證（需要 Connect、Apicurio）；假 PTT 新增「刪除某一層推文」的控制端點，`tests/e2e/test_cdc.py` 驗證刪除與位移反映到 `comments_latest FINAL`
 
+### 7.16 CDC 故障自動恢復（fix，2026-10-15，#31）
+
+2026-10-10T05:53Z，階段 2 的 24 小時驗收進行約 8 小時後，Debezium task 進入 `FAILED`，之後約 6 小時 ClickHouse 停止更新，replication slot 累積約 380 MB 的 WAL，沒有任何警告。
+
+**原因**（從 log 與 converter 3.3.3 的 bytecode 確認）：
+- Converter 的 schema 快取預設 `check-period-ms=30000`。過期後下一筆訊息會同步呼叫 Apicurio `POST .../artifacts?ifExists=FIND_OR_CREATE_VERSION`，平時大約每 30 秒一次
+- 當時 Apicurio 收到的請求沒有 body，回了 400（`Request is missing a required parameter: body`），client 端看到的是 `HttpClosedException`
+- 快取層（`ERCache`）的 `retry-count` 只重試 HTTP 429；SDK 本身雖然把 `HttpClosedException` 視為可重試（預設 3 次），Apicurio 卻只收到一次請求。實際沒有重試的原因不明，不打算深究或依賴它
+- Connect 只重試 `RetriableException`，其他例外直接讓 task 失敗，而且不會自動恢復
+
+**修正**（設計文件 6.4）：
+- **Converter 設定**（`infra/debezium/radar-cdc.json`，key 與 value 都設）：
+  - `apicurio.registry.fault-tolerant-refresh=true`：刷新失敗時沿用已快取的 schema，只記 log
+  - `apicurio.registry.check-period-ms=3600000`：快取是依 schema 內容查找，內容變了一定查不到、會立即註冊，拉長過期時間不會讓新的 schema 晚生效
+  - **限制**：task 重啟（Connect 重啟、更新設定、watchdog 重啟）會清空快取，每種 schema 要等它第一次出現時才會快取。heartbeat 在 task 啟動後超過間隔、又有新事件時才送，comments 要等有新推文。這段期間 Apicurio 停機仍會讓 task 失敗，由 watchdog 在 Apicurio 恢復後重啟（2026-10-15 e2e 實測發現）
+- **`cdc-watchdog`**（`python -m radar.cdc.watchdog`，compose 的 `app` profile）：
+  - 每 `CDC_WATCHDOG_INTERVAL_S`（預設 30 秒）查一次 `GET /connectors/<name>/status`，task 或 connector 為 `FAILED` 時呼叫 `POST /connectors/<name>/restart?includeTasks=true&onlyFailed=true`
+  - 重啟後仍然失敗，下一次重啟的間隔加倍（30 秒起，最多 10 分鐘），不設次數上限
+  - 剛進入失敗、恢復正常時各記一次（ERROR／INFO）；每次重啟記 WARNING（`SLACK_LOG_LEVEL=ERROR` 時不送 Slack），避免洗版
+  - 同時查 `pg_replication_slots`：`active=false` 持續超過 `CDC_WATCHDOG_SLOT_INACTIVE_ALERT_S`（預設 300 秒），或 `pg_current_wal_lsn() - confirmed_flush_lsn` 超過 `CDC_WATCHDOG_SLOT_LAG_ALERT_BYTES`（預設 256 MB），記 ERROR；同樣只在狀態改變時記
+  - 狀態判斷寫成純函式（輸入狀態、時間 → 輸出動作），單元測試不需要 Connect 或 PG
+  - Connect REST API 連不上、查 slot 失敗時記 WARNING，下一輪再試，服務本身不中止
+- **外部 heartbeat**（`CDC_WATCHDOG_HEARTBEAT_URL`，選填）：
+  - 每輪檢查完 ping 一次：CDC 正常時 `GET <url>`；connector 處於失敗狀態，或 slot 有任何警示時 `GET <url>/fail`
+  - Connect REST API 連不上不算異常：Connect 停太久時 slot 會變成 inactive，由 slot 的警示涵蓋，避免 Connect 重啟的 1 分鐘內誤報
+  - ping 失敗只記 WARNING，不影響檢查；HTTP（Connect、heartbeat）與 PG 查詢都設 timeout，避免卡住後 heartbeat 照常送出，讓人誤以為正常
+  - healthchecks.io 只在狀態改變時（正常↔異常、逾時）寄信，不會每輪都寄
+  - 設定：在 healthchecks.io 建一個 check，Period 1 分鐘、Grace 5 分鐘，通知方式選 email，把 ping URL 填進 `.env`
+- **Slack**：沿用 loggerhelper 的串接（`SLACK_WEBHOOK_URL` 或 `SLACK_BOT_TOKEN` + `SLACK_CHANNEL`）。建議設 `SLACK_LOG_LEVEL=ERROR`：所有服務共用 `.env`，預設的 WARNING 會把爬蟲的 HTTP 520、重試等日常訊息也送出去
+- **只能 1 個 instance**：compose 固定 `container_name`。重複重啟只會讓 task 多重啟一次，不會造成資料錯誤，所以不像 Scheduler 那樣用 advisory lock
+- **驗證**（端到端，`tests/e2e/test_cdc.py`）：
+  - 先讓 posts、comments、heartbeat 的 schema 都進快取，再停掉 Apicurio 超過舊的快取期限，新文章仍然會進 `posts_latest`。舊設定下 task 在快取刷新時失敗（stack 經過 `ERCache.performRefresh`，與 2026-10-10 相同）
+  - Apicurio 停機時重啟 Connect（快取清空），讓 task 遇到快取裡沒有的 schema 而失敗；Apicurio 恢復後，不需要人工介入，新文章能進 `posts_latest`。停掉 watchdog 時，Apicurio 恢復後 task 仍停在 `FAILED`
+  - e2e 環境把 watchdog 的檢查間隔與退避時間縮短
+
 ---
 
 ## 8. 風險清單
@@ -684,13 +721,14 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 |---|---|---|
 | ~~ClickHouse 讀不了 Apicurio 的 Avro 格式~~ | 階段 2 卡住 | **已排除（S2-01，2026-10-07）**：可直接讀，條件見設計文件 6.2 |
 | Debezium / Apicurio 升級後行為改變 | CDC 或 ClickHouse 讀取中斷 | 版本固定在 `.env.example`；升級時重跑設計文件 6.2 的檢查（2.x → 3.x 時就發現設定名稱被移除且不報錯） |
+| Connect task 失敗後停止 | ClickHouse 停止更新、WAL 累積 | Converter 快取設定減少失敗；`cdc-watchdog` 自動重啟並監看 replication slot（7.16） |
 | PTT 封鎖 IP | 資料中斷 | 請求速率預算（≤ 1 次/秒）、隨機間隔、7.2 的重爬門檻 |
 | PTT 版面改版 | parser 失效 | `raw.html` 保留 3 天可重新解析；parser 失敗記 ERROR（可送 Slack），驗證失敗的訊息進 DLQ，`/status` 可看到 DLQ 數量 |
 | PTT 恢復伺服器端的 over18 檢查 | 列表頁變成確認頁 | 2026-10 實測伺服器端已不檢查（只在瀏覽器以 JS 導向）；爬蟲仍帶 `over18=1` cookie，parser 遇到確認頁會拋 `ParseError` |
 | LLM 免費額度不足或政策改變 | 標註進度變慢或成本上升 | 實測 `gemini-3.5-flash` 免費只有 20 次/天、`gemini-3.1-pro` 為 0；`Labeler` 介面可換服務商（Groq、OpenRouter、Gemini）或改付費 Batch API；backfill 可中斷續跑 |
 | 單機記憶體不足（設計估 6～7GB） | 服務被 OOM kill | JVM heap 上限；階段 2 完成時實測記憶體 |
 | PTT 回 HTTP 520（Cloudflare） | 該篇內頁本輪略過 | 24 小時驗收：520 ×23、525 ×14、521 ×4，佔請求 < 0.1%，之後的重爬會再抓到；**決定維持不重試**（重試會增加觸發 #11 的機會） |
-| 開發機休眠 | 長時間驗收中斷、數據缺一段 | 驗收期間 `caffeinate -dims` 並接電源、不闔上螢幕（闔上仍會強制睡眠）；上雲後（階段 8）不再依賴開發機 |
+| 開發機休眠 | 長時間驗收中斷、數據缺一段 | 驗收期間 `caffeinate -dims` 並接電源、不闔上螢幕（闔上仍會強制睡眠）；`cdc-watchdog` 的外部 heartbeat 停止時會寄 email（7.16）；上雲後（階段 8）不再依賴開發機 |
 | 標註的系統性偏差 | 模型學到錯誤標準，資料越多越確定 | 固定主要標註者、改 prompt 修偏差、兩個不同家族的標註者交叉比對、人工測試集裁決（7.11） |
 | Python 端讀不了 CDC 的 Avro | S3-08 串流標註、階段 4 推論卡住 | 採用 `confluent-kafka[avro]`（fastavro + 官方 schema registry client，打 Apicurio 的 ccompat API）；已用 mock schema registry 與 S2-01 實測的欄位驗證解碼，待以實際 CDC 訊息確認 |
 

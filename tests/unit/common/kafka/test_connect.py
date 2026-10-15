@@ -8,11 +8,13 @@ from radar.common.kafka import connect
 from radar.common.kafka.connect import (
     ConnectError,
     ConnectorConfigError,
+    ConnectorNotFoundError,
     ConnectorSpec,
     ConnectorStatus,
     get_status,
     load_connector_spec,
     put_connector,
+    restart_failed,
     wait_until_ready,
     wait_until_running,
 )
@@ -211,3 +213,63 @@ def test_wait_until_running_timeout_raises(monkeypatch):
 
     with pytest.raises(ConnectError, match="not running"):
         wait_until_running(client, "c", timeout_s=30)
+
+
+def test_load_connector_spec_repo_file_converter_cache_is_fault_tolerant():
+    env = {
+        v: "x" for v in ("CDC_DATABASE_HOST", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB")
+    }
+    env["CDC_REGISTRY_URL"] = "http://apicurio:8080/apis/registry/v3"
+
+    config = load_connector_spec(REPO_CONNECTOR, env).config
+
+    # 開發規格 7.16：刷新失敗沿用快取，且不再每 30 秒同步刷新
+    for side in ("key", "value"):
+        assert config[f"{side}.converter.apicurio.registry.fault-tolerant-refresh"] == "true"
+        assert config[f"{side}.converter.apicurio.registry.check-period-ms"] == "3600000"
+
+
+def test_connector_status_failed_task_is_failed():
+    assert ConnectorStatus("RUNNING", ["RUNNING", "FAILED"]).is_failed
+
+
+def test_connector_status_failed_connector_is_failed():
+    assert ConnectorStatus("FAILED", []).is_failed
+
+
+def test_connector_status_restarting_or_unassigned_is_not_failed():
+    assert not ConnectorStatus("RESTARTING", ["UNASSIGNED", "RESTARTING"]).is_failed
+
+
+def test_restart_failed_posts_include_tasks_only_failed():
+    seen: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        return httpx2.Response(202)
+
+    restart_failed(client_with(handler), "radar-cdc")
+
+    assert len(seen) == 1
+    assert seen[0].method == "POST"
+    assert seen[0].url.path == "/connectors/radar-cdc/restart"
+    assert dict(seen[0].url.params) == {"includeTasks": "true", "onlyFailed": "true"}
+
+
+@pytest.mark.parametrize("code", [200, 202, 204])
+def test_restart_failed_accepted_or_no_content_returns(code):
+    restart_failed(client_with(lambda r: httpx2.Response(code)), "radar-cdc")
+
+
+def test_restart_failed_unknown_connector_raises_not_found():
+    client = client_with(lambda r: httpx2.Response(404, text="no such connector"))
+
+    with pytest.raises(ConnectorNotFoundError):
+        restart_failed(client, "radar-cdc")
+
+
+def test_restart_failed_server_error_raises_with_body():
+    client = client_with(lambda r: httpx2.Response(500, text="boom"))
+
+    with pytest.raises(ConnectError, match="500 boom"):
+        restart_failed(client, "radar-cdc")
