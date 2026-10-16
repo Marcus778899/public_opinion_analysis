@@ -134,6 +134,30 @@ class Label(KafkaMessage):
         return self
 
 
+# predict_proba 的浮點誤差遠小於此值
+_SCORE_SUM_TOLERANCE = 1e-3
+
+
+class Prediction(KafkaMessage):
+    """topic: predictions；key: post_id（開發規格 3.5）。同一篇可能有多筆，下游取最新。"""
+
+    post_id: str
+    model_version: str
+    predicted_at: UtcDatetime
+    polarity: Polarity
+    scores: dict[Polarity, float]
+
+    @model_validator(mode="after")
+    def _check_scores(self) -> Self:
+        if set(self.scores) != set(Polarity):
+            raise ValueError(f"scores must have exactly {[p.value for p in Polarity]}")
+        if abs(sum(self.scores.values()) - 1.0) > _SCORE_SUM_TOLERANCE:
+            raise ValueError(f"scores must sum to 1, got {sum(self.scores.values())}")
+        if self.scores[self.polarity] < max(self.scores.values()):
+            raise ValueError(f"polarity {self.polarity} is not the highest score")
+        return self
+
+
 class CdcPost(BaseModel):
     """cdc.public.posts 經 ExtractNewRecordState 攤平後的 value（設計文件 6.1）；只取需要的欄位。"""
 

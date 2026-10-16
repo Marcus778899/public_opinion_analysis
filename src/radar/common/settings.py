@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated
 
 from pydantic import SecretStr, field_validator
@@ -74,6 +75,16 @@ class ConnectSettings(BaseSettings):
     url: str = "http://localhost:8083"
     # Kafka Connect 啟動要載入 plugin，冷啟動常需 1 分鐘以上
     ready_timeout_s: float = 180.0
+
+
+class InferenceSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="INFERENCE_")
+
+    # models/<model_version>/；compose 內為 /app/models/<model_version>
+    model_dir: Path
+    # 文章 → 模型輸入文字 hash 的 LRU 上限（開發規格 7.18）
+    cache_size: int = 200_000
+    batch_size: int = 100
 
 
 class CdcWatchdogSettings(BaseSettings):

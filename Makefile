@@ -2,7 +2,7 @@ COMPOSE := docker compose -f infra/docker-compose.yaml --env-file .env
 COMPOSE_E2E := docker compose -f infra/docker-compose.yaml -f infra/docker-compose.e2e.yaml --env-file .env
 UV_ENV := uv run --env-file .env
 
-.PHONY: up up-app up-labeling testset human-label down logs migrate topics connector ch-migrate seed api lint test test-int e2e-up e2e e2e-down
+.PHONY: up up-app up-labeling up-inference testset human-label down logs migrate topics connector ch-migrate seed api lint test test-int e2e-up e2e e2e-down
 
 up:  ## 啟動基礎設施
 	$(COMPOSE) up -d --wait
@@ -12,6 +12,9 @@ up-app:  ## 連同 api、scheduler、crawler ×3、ingest 一起啟動（會重�
 
 up-labeling:  ## 啟動串流抽樣標註（S3-08，會持續呼叫 LLM API）
 	$(COMPOSE) --profile app --profile labeling up -d --wait label-stream
+
+up-inference:  ## 啟動情緒推論（S4，需先在 .env 設 INFERENCE_MODEL_VERSION，模型放在 models/）
+	$(COMPOSE) --profile app --profile inference up -d --wait inference
 
 down:
 	$(COMPOSE) --profile app --profile labeling down --remove-orphans

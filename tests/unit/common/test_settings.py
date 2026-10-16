@@ -9,6 +9,7 @@ from radar.common.settings import (
     ClickHouseSettings,
     ConnectSettings,
     CrawlerSettings,
+    InferenceSettings,
     KafkaSettings,
     LabelingSettings,
     PostgresSettings,
@@ -187,3 +188,23 @@ def test_cdc_watchdog_settings_blank_heartbeat_url_is_none(no_watchdog_env, monk
     monkeypatch.setenv("CDC_WATCHDOG_HEARTBEAT_URL", blank)
 
     assert CdcWatchdogSettings().heartbeat_url is None
+
+
+@pytest.fixture
+def no_inference_env(monkeypatch):
+    for key in [k for k in os.environ if k.startswith("INFERENCE_")]:
+        monkeypatch.delenv(key)
+
+
+def test_inference_settings_requires_model_dir(no_inference_env):
+    with pytest.raises(ValidationError):
+        InferenceSettings()
+
+
+def test_inference_settings_defaults(no_inference_env, monkeypatch):
+    monkeypatch.setenv("INFERENCE_MODEL_DIR", "models/tfidf-lr-x")
+
+    s = InferenceSettings()
+
+    assert str(s.model_dir) == "models/tfidf-lr-x"
+    assert (s.cache_size, s.batch_size) == (200_000, 100)
