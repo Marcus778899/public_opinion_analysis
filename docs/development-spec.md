@@ -286,7 +286,7 @@
 |---|---|---|---|
 | 單元 | parser、upsert SQL 組裝、熱度計算、年齡分級 | pytest | 本地每次 commit；CI 於 PR 開到及合併到 `develop` / `main` 時 |
 | 整合 | 單一服務 + 真實 Kafka / PG / ClickHouse（單節點即可） | testcontainers | CI 於 PR 開到及合併到 `develop` / `main` 時；CI 以 `TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX=mirror.gcr.io/` 從 Google 的 Docker Hub 鏡像拉 image（runner 直連 Docker Hub 常撞到次數限制或逾時），並關閉 Ryuk（加前綴後會無限遞迴；runner 用完即丟） |
-| 端到端 | 整個 compose，用假 PTT 伺服器 | `make e2e-up && make e2e`（約 3～4 分鐘） | 每階段驗收 |
+| 端到端 | 整個 compose，用假 PTT 伺服器 | `make e2e-up && make e2e`（約 10 分鐘，見下方「端到端環境」） | 每階段驗收 |
 | 回放 | 把錄下來的 topic 資料重送，驗證熱度偵測 | 腳本 | 第 5 階段起 |
 
 - **PTT fixture**：每種頁面至少存一份 HTML（一般文、刪除文、爆文、含 IP 的推文、跨年推文、被編輯過的文章），parser 測試只讀 fixture
@@ -295,9 +295,12 @@
   - 爬蟲以 `CRAWLER_PTT_BASE_URL` 改打假伺服器（只換主機，資料中的網址仍是 `www.ptt.cc`），任何請求都不會打到真的 PTT
   - Scheduler 以 `SCHEDULER_TIME_SCALE=0.05` 縮短重爬間隔
   - Postgres、Kafka、ClickHouse 與自寫服務的 log（`/app/log`）都改掛 e2e 專用的 volume，不碰開發資料。`make e2e-down` 用 `down -v` 刪除這些 volume；log 原本與開發環境共用 `app_logs`，2026-10-10 因此刪掉開發環境 10/07～10/09 的 log（#29）。單元測試檢查開發環境中掛 `app_logs` 的服務在 e2e 都改掛 `e2e_app_logs`
-  - 開發環境與 e2e 共用容器名稱，`make e2e-up` 會取代開發環境的容器；跑 e2e 前要先停掉開發環境的長時間作業（例如驗收）
+  - 開發環境與 e2e 共用 compose 專案與容器名稱，不能同時運作。`make e2e-up` 先以 `down`（不加 `-v`）停掉開發環境，`make up`、`make up-app` 先以 `make e2e-down` 清掉 e2e 環境；跑 e2e 前要先停掉開發環境的長時間作業（例如驗收）
+    - 只靠 compose 自己判斷會出錯：設定在兩邊相同的服務（Apicurio、Kafka UI）不會被重建，沿用的舊 Apicurio 連線池指向已被取代的 Postgres，Debezium 註冊 schema 失敗、task 一啟動就 `FAILED`（#41）
+    - 判斷方式：`radar_fake_ptt` 容器存在 = e2e 環境
   - `.env` 與開發環境共用，但 e2e 會刻意製造故障：compose 覆寫檔把各服務的 `SLACK_*`、`CDC_WATCHDOG_HEARTBEAT_URL` 設成空字串，`tests/e2e/conftest.py` 也在測試程式內清掉，不送 Slack 與外部 heartbeat
   - 測試標記為 `e2e`，一般 `pytest` 與 CI 預設排除
+  - 耗時（2026-10-16，12 個測試約 10.5 分鐘）大多是刻意的等待，不是效能退化：#31 的兩個 Apicurio 停機測試約 3.7 分鐘（等 heartbeat 65 秒、停機 40 秒、等 watchdog 重啟 task）；停用看板的測試固定等 75 秒；其餘每個測試約 20～55 秒，主要在等列表輪詢（測試看板 `interval_sec` 30 秒）。原本的「3～4 分鐘」是 2026-10-08 只有 9 個測試時的數字
 - **端到端情境**：新看板被排程並寫入 PG、新推文在重爬後反映、刪除文被標記、停用看板後停止爬取、爬蟲停止期間的任務在重啟後接續處理；階段 2 起加上 CDC：新文章進 `posts_latest`、推文數變化進 `posts_history`、推文帶看板進 `comments`、內容沒變的重爬不產生 CDC 事件、Apicurio 停機後 CDC 自動恢復（`tests/e2e/test_cdc.py`）
 - **LLM**：單元與整合測試一律用 `MockTransport` 或 fake，不呼叫真的 LLM API；prompt 調整才實際呼叫，結果存在 `data/prompt-tuning/`
 
@@ -327,6 +330,7 @@
 | 刪除標記可撤銷（7.14） | ✅ 完成；整合測試重現原本的兩個問題（較舊的 404 晚到會標記刪除、刪除後較舊的 200 會蓋掉內容），修正後刪除可被較新的快照撤銷 | #13 |
 | 推文同步（7.15） | ✅ 完成；整合測試重現中間推文被刪後的樓層位移；端到端測試確認 PG 的推文刪除經 CDC 反映到 `comments_latest FINAL`（`REPLICA IDENTITY FULL`） | #14 |
 | e2e 改用專用的 log volume（#29） | ✅ 完成；`docker compose config` 確認 e2e 不再引用開發環境的 `app_logs`。實際 `e2e-up`／`e2e-down` 等階段 2 驗收結束後跑 | #29 |
+| 開發與 e2e 環境切換時先停掉另一邊（#41） | ✅ 完成；重現「開發環境運作中執行 `make e2e-up`」：修正後先 `make down` 再啟動，Apicurio 重建、connector RUNNING，e2e 12/12 通過；`make up-app` 會先 `make e2e-down`；`make down` 補上 `--profile inference` | #41 |
 | 抓取失敗的新文章不記進列表快取（7.17） | ✅ 完成；單元測試重現「失敗的新文章下一輪不再抓」後修正。尚未部署：等階段 2 驗收結束再重建爬蟲，並跑 e2e | #33 |
 | CDC 故障自動恢復（7.16） | ✅ 完成；e2e 重現兩種失敗（舊快取設定在刷新時失敗、沒有 watchdog 時 task 停在 `FAILED`），修正後通過。2026-10-15 開發環境重啟後，10/10 起積壓的 759 MB WAL 約 1 分鐘消化完，PG 與 ClickHouse 的 posts、comments 筆數一致 | #31 |
 | 階段 2 驗收（24 小時運作、WAL 延遲） | ✅ 通過（第 2 次，2026-10-16），紀錄見階段 2「驗收紀錄」；第 1 次（2026-10-09）約 8 小時後 Debezium task 失敗而中斷（#31） | — |
