@@ -349,6 +349,7 @@
 | 階段 4 驗收（推論延遲、不重複推論） | ✅ 通過（2026-10-16），紀錄見階段 4「驗收紀錄」：p95 10.2 秒；重新推論 7 次都對應文字變動 | — |
 | 推論快取重啟後從 ClickHouse 載入（7.19） | ✅ 完成；單元測試重現「重啟後快取空、既有文章被編輯不推論」；整合測試（真的 ClickHouse、PG）驗證 migration 0004、載入與補舊 hash。2026-10-16 部署：補 5,509 篇，重啟後 4 分鐘內 3 篇既有文章被編輯，都重新推論 | #37 |
 | S5-01～S5-05 熱度偵測、錄製回放（7.20） | ✅ 程式完成；加入 `quixstreams`，`confluent-kafka` 降到 2.12.x。整合測試（真實 Kafka、exactly-once）：暴增各單位只發一則、改寫不算新增、只靠 changelog 恢復後不重發、壞訊息進 DLQ。2026-10-17 實測推文進 PG 晚約 8 分鐘，時間基準由 `commented_at` 改成觀測時間（S5-02）。開發環境已部署 heat，待第 5 階段驗收 | — |
+| S5-06～S5-07 Telegram bot（7.21） | ✅ 完成；2026-10-16 在開發環境以真的 Telegram 實測指令與推送，修正 compose 漏掉 `app-env`。階段 5 驗收第 1 項（人工暴增約 10 秒收到通知）通過 | — |
 
 階段 1 拆成 5 個 PR；全部完成後依下方「驗收」逐項驗證，通過才把 `develop` 合進 `main` 並打 `stage-1` tag。之後各階段相同：驗收通過才打 `stage-<n>` tag。
 
@@ -515,6 +516,16 @@
 - 回放測試：注入一段人工製造的暴增，2 分鐘內收到 Telegram 通知
 - 連續運作 3 天：每個看板每天警示數 ≤ 10，人工檢查「值得看」的比例 ≥ 70%
 - 重啟 heat 服務後狀態可恢復，不會重新觸發已發過的警示
+
+**驗收紀錄**（進行中）
+
+| 項目 | 結果 |
+|---|---|
+| 回放測試：人工暴增 2 分鐘內收到 Telegram 通知 | ✅ 2026-10-16 18:55Z：錄下最近 75 分鐘的 `cdc.public.comments`（4,120 筆），以 300 倍速回放到 `replay.cdc.comments`，由另一個 heat（consumer group `heat-replay`、獨立的 state）建立基準；對 HatePolitics 一篇文章注入 2 分鐘 60 則推文，**約 10 秒**收到文章與看板兩則通知（使用者確認收到）。紀錄在 `log/acceptance/stage5/` |
+| 連續運作 3 天、每看板每天 ≤ 10 則、值得看 ≥ 70% | ⬜ 待執行（要開 caffeinate，避免停擺後的誤報，見 7.20） |
+| 重啟後不重發已發過的警示 | ⬜ 整合測試已驗證（只靠 changelog 恢復）；開發環境待實測 |
+
+- 第一次注入 Stock 時 heat 3 秒就發出警示，但使用者沒有訂閱 Stock，bot 正確地沒有推送
 
 ### 階段 6：Dashboard（S）
 
@@ -819,7 +830,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
   - 文章單位：與該看板的「文章基準」比較（設計文件 15.2，2026-10-17 決定）：每分鐘把該看板所有活躍文章（視窗內有推文）的視窗值餵進同一個基準。不用每篇自己的基準：文章通常在發文後 1 小時內爆，S5-04 的「累積 1 小時才啟用」會讓它永遠來不及
 - **觸發**（可設定）：z-score ≥ 3（`HEAT_Z_THRESHOLD`）且視窗內推文數 ≥ 30（`HEAT_MIN_COUNT`）；同一單位 30 分鐘內不重複（`HEAT_COOLDOWN_MIN`）；看板的基準累積滿 60 分鐘才啟用（`HEAT_WARMUP_MIN`）；標準差下限 1，避免變異數接近 0 時 z-score 爆大
 - **state 大小**：每個看板只留 watermark 前 10 + 5 分鐘內的分鐘計數，與這段時間有推文的文章；冷卻紀錄過期就刪
-- **部署**：compose 服務 `heat`，profile `alerting`（`make up-alerting`；Telegram bot 之後加入同一個 profile）；RocksDB 目錄掛 volume `heat_state`，沒有 volume 時從 changelog 恢復
+- **部署**：compose 服務 `heat`，profile `alerting`（與 bot 一起，`make up-alerting`）；RocksDB 目錄掛 volume `heat_state`，沒有 volume 時從 changelog 恢復
 - **已知限制：系統停擺後的誤報**（2026-10-17 實測，決定先不處理）：停擺期間沒有推文進來，基準被補 0 而降低；恢復後爬蟲補抓，停擺前 30 分鐘內的推文一起進來，看起來像暴增。開發機休眠 7 小時後醒來，4 個單位各發了一則誤報（看板 Stock 的基準降到 0.01）
   - 不處理的理由：主要原因是開發機休眠，第 8 階段上雲後不會發生；部署、重啟的停擺只有幾分鐘。第 5 階段的 3 天驗收開 caffeinate，若誤報明顯再加停擺偵測（觀測中斷超過一段時間就不補 0、恢復後暫停觸發）
 - **新的 consumer group 從頭讀**：歷史推文都比當下早超過 1 小時，只建立基準、不觸發，上線即可用歷史資料完成暖機
@@ -830,6 +841,28 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
   - `surge`：人工製造暴增：對指定文章在 N 分鐘內送 M 則 `op=c` 推文事件到 `replay.cdc.comments`，用 Apicurio 上 `cdc.public.comments-value` 的最新 schema 序列化；`commented_at` 與 `__source_ts_ms` 都分散在到當下為止的 N 分鐘
   - 回放與驗收時另開一個 heat：`HEAT_INPUT_TOPIC=replay.cdc.comments`、consumer group `heat-replay`，state 與正式的分開
   - `replay.cdc.comments` 列在 `topics.yaml`，保留 24 小時
+
+### 7.21 Telegram bot 的實作選擇（S5-06～S5-07）
+
+- **模組**：`bot/main.py`，`python -m radar.bot.main`；兩個 thread：Telegram long polling 處理指令；`BatchConsumer`（group `bot`）消費 `alerts` 推送
+- **Telegram API**：用 `httpx2` 直接呼叫 Bot API（`getUpdates`、`sendMessage`），不加 SDK（同 7.11 的 LLM 呼叫）；`TELEGRAM_BOT_TOKEN`
+  - 429 依 `retry_after` 等待後重試；5xx、連線錯誤為暫時性錯誤，退避重試；400 記 WARNING 略過；403（使用者封鎖 bot）刪掉該 chat 的訂閱
+- **允許的 chat**：`TELEGRAM_ALLOWED_CHAT_IDS`（逗號分隔）；空字串為不限制。其他 chat 的指令不回應
+- **指令**：
+  - `/start`：說明
+  - `/boards`：PG `boards` 中啟用的看板（只讀，寫入者仍是 API）
+  - `/subscribe <board>`：看板必須存在且啟用；重複訂閱不報錯
+  - `/unsubscribe [board]`：不帶參數時取消全部
+  - `/hot`：ClickHouse 最近 60 分鐘新增推文最多的 5 篇（`comments_latest FINAL` + `posts_latest FINAL` 的標題）
+- **推送**：訂閱以看板為單位，`alert.board` 相同就推送，`post`、`board` 兩種警示都推；訊息帶看板、標題（ClickHouse `posts_latest`）、推文數、基準、z-score、PTT 連結
+  - 冪等：同一個 `alert_id` 只推一次（記憶體 LRU）；整批重試時，已送到的 (alert, chat) 不重送；推送成功後才 commit，重啟時未 commit 的會再推一次
+  - 指令迴圈 thread 中止時讓 consumer 停止，main thread 再把例外拋出（`@log.catch` 記 CRITICAL、docker 重啟）；alerts consumer 在 main thread，才收得到 SIGTERM
+  - 例外訊息不帶 token：連線錯誤只留例外類別名稱（Bot API 的網址含 token）
+  - 壞的 `alerts` 訊息送 `dlq`
+- **`subscriptions` 表**（S5-06）：`(chat_id BIGINT, unit_type TEXT, unit_key TEXT, created_at)`，主鍵三欄；`unit_type` 以 CHECK 限制為 `board`（之後加 `post`、`entity` 再放寬）；寫入者 bot，不在 publication 裡（設計文件 5.4）；單筆 CRUD 用 ORM（2.4）
+- **部署**：compose 服務 `bot`，profile `alerting`；沒有 `TELEGRAM_BOT_TOKEN` 時啟動失敗
+  - 自寫服務都要帶 `app-env`（compose 內的 Kafka、PG、ClickHouse 位址）；bot 第一次部署時漏了，連到 localhost，單元測試現在檢查每個 `radar-app` 服務
+  - 推送成功記 INFO（`alert … sent to N chats`），用來量推送延遲
 
 ## 8. 風險清單
 
