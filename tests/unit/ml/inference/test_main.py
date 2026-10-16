@@ -6,11 +6,13 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 
+from radar.common.clickhouse import ClickHouseError
 from radar.common.enums import Polarity
 from radar.common.schemas import CdcPost, Prediction
 from radar.ml.inference.main import (
     HashCache,
     Predictor,
+    load_cache,
     predict,
     select_posts,
     should_predict,
@@ -77,6 +79,21 @@ def predictor(pipeline=None, sink=None, cache=None) -> tuple[Predictor, Sink, Ha
         pipeline or FakePipeline(), card(), cache, sink.publish, sink.flush, lambda: NOW
     )
     return handler, sink, cache
+
+
+class FakeClickHouse:
+    """query_rows 回傳固定的列並記錄參數；raise_error 時模擬 ClickHouse 連不上。"""
+
+    def __init__(self, rows=(), raise_error: Exception | None = None) -> None:
+        self.rows = list(rows)
+        self.raise_error = raise_error
+        self.calls: list[tuple[str, dict[str, str] | None]] = []
+
+    def query_rows(self, sql, params=None):
+        self.calls.append((sql, params))
+        if self.raise_error:
+            raise self.raise_error
+        return self.rows
 
 
 # --- text_hash / HashCache ---
@@ -315,3 +332,96 @@ def test_predictor_model_error_propagates():
 
     with pytest.raises(ValueError):
         handler([event(op="c")])
+
+
+# --- load_cache（#37）---
+
+H1, H2, H3 = "1" * 64, "2" * 64, "3" * 64
+
+
+def test_load_cache_puts_each_post_hash_and_returns_count():
+    ch = FakeClickHouse([{"post_id": "a", "latest_hash": H1}, {"post_id": "b", "latest_hash": H2}])
+    cache = HashCache(100)
+
+    loaded = load_cache(ch, "tfidf-lr-1", cache)
+
+    assert loaded == 2
+    assert (cache.get("a"), cache.get("b")) == (H1, H2)
+
+
+def test_load_cache_queries_only_current_model_version():
+    ch = FakeClickHouse()
+
+    load_cache(ch, "tfidf-lr-1", HashCache(10))
+
+    [(sql, params)] = ch.calls
+    assert params == {"model_version": "tfidf-lr-1"}
+    assert "model_version = {model_version:String}" in sql
+    assert "text_hash != ''" in sql
+
+
+def test_load_cache_no_rows_leaves_cache_empty():
+    cache = HashCache(10)
+
+    assert load_cache(FakeClickHouse(), "tfidf-lr-1", cache) == 0
+    assert len(cache) == 0
+
+
+def test_load_cache_rows_oldest_first_keep_newest_when_over_max_size():
+    rows = [{"post_id": p, "latest_hash": h} for p, h in [("old", H1), ("mid", H2), ("new", H3)]]
+    cache = HashCache(2)
+
+    load_cache(FakeClickHouse(rows), "tfidf-lr-1", cache)
+
+    assert cache.get("old") is None
+    assert (cache.get("mid"), cache.get("new")) == (H2, H3)
+
+
+def test_load_cache_clickhouse_error_propagates():
+    ch = FakeClickHouse(raise_error=ClickHouseError("503: unavailable"))
+
+    with pytest.raises(ClickHouseError):
+        load_cache(ch, "tfidf-lr-1", HashCache(10))
+
+
+def loaded_predictor(title: str, content: str) -> tuple[Predictor, Sink]:
+    """模擬重啟：快取由 ClickHouse 載入這篇上次推論的 hash。"""
+    cache = HashCache(100)
+    digest = text_hash(post_text(title, content, MAX_CHARS))
+    load_cache(FakeClickHouse([{"post_id": PID, "latest_hash": digest}]), "v", cache)
+    handler, sink, _ = predictor(cache=cache)
+    return handler, sink
+
+
+def test_restarted_predictor_with_loaded_cache_predicts_edited_existing_post():
+    handler, sink = loaded_predictor("t", "舊內文")
+
+    handler([event(op="u", content="編輯後的內文")])
+
+    assert [p.post_id for p in sink.published] == [PID]
+
+
+def test_restarted_predictor_with_loaded_cache_skips_push_count_only_update():
+    handler, sink = loaded_predictor("t", "內文")
+
+    handler([event(op="u", content="內文")])  # 只有推噓數變動，文字相同
+
+    assert sink.published == []
+
+
+def test_restarted_predictor_without_loaded_cache_misses_edit():
+    """修正前的行為：快取是空的時 op=u 不推論（#37 的現象，載入快取才解決）。"""
+    handler, sink, _ = predictor()
+
+    handler([event(op="u", content="編輯後的內文")])
+
+    assert sink.published == []
+
+
+def test_predictor_publishes_text_hash_of_model_input():
+    handler, sink, _ = predictor()
+
+    handler([event(op="c", title="標題", content="內文")])
+
+    [p] = sink.published
+    assert p.text_hash == text_hash(post_text("標題", "內文", MAX_CHARS))

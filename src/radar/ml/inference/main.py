@@ -1,6 +1,7 @@
 """[常駐] 情緒推論（S4-01～S4-03，設計文件 8.2）：消費 cdc.public.posts，推論後寫入 predictions。
 
-是否推論只看模型輸入文字的 hash，大部分只更新推噓數的事件不會重複推論（開發規格 7.18）。
+是否推論只看模型輸入文字的 hash，大部分只更新推噓數的事件不會重複推論（開發規格 7.18）；
+啟動時從 ClickHouse 載入 hash，重啟後被編輯的文章照常推論（開發規格 7.19）。
 """
 
 import hashlib
@@ -12,6 +13,7 @@ from datetime import UTC, datetime
 from confluent_kafka.schema_registry import SchemaRegistryClient
 from sklearn.pipeline import Pipeline
 
+from radar.common.clickhouse import ClickHouseClient
 from radar.common.enums import Polarity
 from radar.common.kafka import names
 from radar.common.kafka.avro import make_avro_decoder
@@ -20,7 +22,12 @@ from radar.common.kafka.dlq import DlqPublisher
 from radar.common.kafka.producer import JsonProducer
 from radar.common.log import log, setup_logging
 from radar.common.schemas import CdcPost, Prediction
-from radar.common.settings import InferenceSettings, SchemaRegistrySettings, get_kafka_settings
+from radar.common.settings import (
+    ClickHouseSettings,
+    InferenceSettings,
+    SchemaRegistrySettings,
+    get_kafka_settings,
+)
 from radar.ml.training.dataset import post_text
 from radar.ml.training.train import ModelCard, load_model
 
@@ -28,6 +35,15 @@ GROUP_ID = "inference"
 CREATE = "c"
 # PG 端刪除列時 __deleted 為 "true"（設計文件 6.1）
 PG_ROW_DELETED = "true"
+# 每篇取最新一筆；依 predicted_at 由舊到新回傳，放進 LRU 後最新的最不會被擠出
+# NOTE: 別名不可與欄位同名，否則 WHERE 的 text_hash 會指到 argMax(...)
+CACHE_QUERY = """
+SELECT post_id, argMax(text_hash, predicted_at) AS latest_hash, max(predicted_at) AS latest_at
+FROM predictions
+WHERE model_version = {model_version:String} AND text_hash != ''
+GROUP BY post_id
+ORDER BY latest_at
+"""
 
 
 def text_hash(text: str) -> str:
@@ -55,6 +71,15 @@ class HashCache:
 
     def __len__(self) -> int:
         return len(self._data)
+
+
+def load_cache(client: ClickHouseClient, model_version: str, cache: HashCache) -> int:
+    """把同一個模型版本每篇最新推論的 text_hash 放進快取；回傳載入的篇數。"""
+    # NOTE: ClickHouse 的錯誤直接往上拋：服務停止、由 docker 重啟，不以空快取開始消費
+    rows = client.query_rows(CACHE_QUERY, {"model_version": model_version})
+    for row in rows:
+        cache.put(str(row["post_id"]), str(row["latest_hash"]))
+    return len(rows)
 
 
 def should_predict(op: str | None, cached: str | None, digest: str) -> bool:
@@ -150,6 +175,7 @@ class Predictor:
                         predicted_at=predicted_at,
                         polarity=polarity,
                         scores=scores,
+                        text_hash=post.digest,
                     )
                 )
             # NOTE: flush 成功後才更新快取；整批重試時不會把沒送出的文章當成已推論
@@ -163,12 +189,19 @@ def main() -> None:
     setup_logging("inference")
     settings = InferenceSettings()
     pipeline, card = load_model(settings.model_dir)
+    cache = HashCache(settings.cache_size)
+    ch = ClickHouseClient(ClickHouseSettings())
+    try:
+        loaded = load_cache(ch, card.model_version, cache)
+    finally:
+        ch.close()
+    log.info("loaded %d post hashes from clickhouse", loaded)
     producer = JsonProducer(get_kafka_settings())
     registry = SchemaRegistryClient.new_client({"url": SchemaRegistrySettings().url})
     handler = Predictor(
         pipeline,
         card,
-        HashCache(settings.cache_size),
+        cache,
         publish=lambda p: producer.send(names.PREDICTIONS, p.post_id, p),
         flush=producer.flush,
         now=lambda: datetime.now(UTC),
