@@ -59,6 +59,37 @@ def test_added_comments_change_counts(ptt):
     assert parse_list_page(ptt.render_list("E2E"), "E2E").entries[0].list_push == 11
 
 
+def test_delete_comment_shifts_later_floors(ptt):
+    post = ptt.add_post(NewPost(board="E2E", title="t"))
+    ptt.add_comments(post.post_id, NewComments(pushes=3))
+
+    ptt.delete_comment(post.post_id, 2)
+
+    parsed = parse_post(ptt, post)
+    assert [(c.floor, c.user_id) for c in parsed.comments] == [(1, "user1"), (2, "user3")]
+    assert parsed.push_count == 2
+
+
+@pytest.mark.parametrize("floor", [0, 2])
+def test_delete_missing_comment_raises_key_error(ptt, floor):
+    post = ptt.add_post(NewPost(board="E2E", title="t"))
+    ptt.add_comments(post.post_id, NewComments(pushes=1))
+
+    with pytest.raises(KeyError):
+        ptt.delete_comment(post.post_id, floor)
+
+
+def test_delete_comment_endpoint_returns_count_and_404(client):
+    created = client.post("/_control/posts", json={"board": "E2E", "title": "t"}).json()
+    client.post(f"/_control/posts/{created['post_id']}/comments", json={"pushes": 2})
+
+    deleted = client.delete(f"/_control/posts/{created['post_id']}/comments/1")
+
+    assert deleted.json() == {"comments": 1}
+    assert client.delete(f"/_control/posts/{created['post_id']}/comments/5").status_code == 404
+    assert client.delete("/_control/posts/E2E.M.1.A.001/comments/1").status_code == 404
+
+
 def test_deleted_post_returns_404_and_list_shows_deleted(ptt, client):
     post = ptt.add_post(NewPost(board="E2E", title="t"))
 

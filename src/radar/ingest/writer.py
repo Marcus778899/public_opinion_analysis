@@ -6,25 +6,32 @@
 
 from dataclasses import dataclass
 
-from sqlalchemy import or_, update
+from sqlalchemy import DateTime, Integer, String, column, delete, false, or_, select, update, values
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 
 from radar.common.db.models import Comment, Post
+from radar.common.kafka.consumer import Rejection
 from radar.common.schemas import RawPost
+
+# 這筆資料本身有問題：逐筆寫入、送 DLQ（開發規格 7.13）；其他 DB 錯誤仍中止服務
+DATA_ERRORS = (IntegrityError, DataError)
 
 # NOTE: PG 單一語句參數上限 65535；comments 6 欄，每批 5000 列約 30000 個參數
 COMMENT_CHUNK_SIZE = 5000
 
 # 這些欄位變了才算「有變化」；crawled_at 不列入，否則每次重爬都會產生 CDC 事件
 _CHANGE_COLUMNS = ("push_count", "boo_count", "title", "content")
+_COMMENT_COLUMNS = ("type", "user_id", "content", "commented_at")
 
 
 @dataclass(frozen=True)
 class WriteStats:
     received: int
     posts_written: int
-    comments_inserted: int
+    comments_written: int
+    comments_deleted: int
     marked_deleted: int
 
 
@@ -43,16 +50,48 @@ def write_batch(session: Session, posts: list[RawPost]) -> WriteStats:
     unique = dedupe_posts(posts)
     live = [p for p in unique if not p.is_deleted]
     deleted = [p for p in unique if p.is_deleted]
+    posts_written = upsert_posts(session, live)
+    comments_written, comments_deleted = sync_comments(session, live)
     return WriteStats(
         received=len(posts),
-        posts_written=upsert_posts(session, live),
-        comments_inserted=insert_comments(session, live),
+        posts_written=posts_written,
+        comments_written=comments_written,
+        comments_deleted=comments_deleted,
         marked_deleted=mark_deleted(session, deleted),
     )
 
 
+def write_each(session: Session, posts: list[RawPost]) -> tuple[WriteStats, list[Rejection]]:
+    """逐筆模式（開發規格 7.13）：同批去重後每筆一個 savepoint，資料錯誤的回報 index。
+
+    呼叫端負責 commit；OperationalError 照常往外拋（整批重試）。
+    """
+    latest: dict[str, int] = {}
+    for i, post in enumerate(posts):
+        j = latest.get(post.post_id)
+        if j is None or post.crawled_at > posts[j].crawled_at:
+            latest[post.post_id] = i
+    written = comments = comments_deleted = deleted = 0
+    rejections: list[Rejection] = []
+    for i in latest.values():
+        try:
+            with session.begin_nested():
+                stats = write_batch(session, [posts[i]])
+        except DATA_ERRORS as e:
+            rejections.append(Rejection(i, e))
+            continue
+        written += stats.posts_written
+        comments += stats.comments_written
+        comments_deleted += stats.comments_deleted
+        deleted += stats.marked_deleted
+    return WriteStats(len(posts), written, comments, comments_deleted, deleted), rejections
+
+
 def upsert_posts(session: Session, posts: list[RawPost]) -> int:
-    """回傳實際寫入（新增或更新）的列數。"""
+    """回傳實際寫入（新增或更新）的列數。
+
+    已標記刪除的文章收到較新的快照算有變化，is_deleted 改回 false（開發規格 7.14）。
+    """
     if not posts:
         return 0
     stmt = insert(Post).values(
@@ -75,15 +114,38 @@ def upsert_posts(session: Session, posts: list[RawPost]) -> int:
     new = stmt.excluded
     stmt = stmt.on_conflict_do_update(
         index_elements=[Post.post_id],
-        set_={col: new[col] for col in (*_CHANGE_COLUMNS, "crawled_at")},
+        set_={**{col: new[col] for col in (*_CHANGE_COLUMNS, "crawled_at")}, "is_deleted": false()},
         where=(Post.crawled_at < new.crawled_at)
-        & or_(*(getattr(Post, col).is_distinct_from(new[col]) for col in _CHANGE_COLUMNS)),
+        & or_(
+            Post.is_deleted,
+            *(getattr(Post, col).is_distinct_from(new[col]) for col in _CHANGE_COLUMNS),
+        ),
     ).returning(Post.post_id)
     return len(session.execute(stmt).all())
 
 
-def insert_comments(session: Session, posts: list[RawPost]) -> int:
-    """ON CONFLICT (post_id, floor) DO NOTHING；回傳新增列數。"""
+def sync_comments(session: Session, posts: list[RawPost]) -> tuple[int, int]:
+    """推文同步（開發規格 7.15）；須在 upsert_posts 之後呼叫。回傳 (新增或更新, 刪除) 列數。"""
+    targets = comment_sync_targets(session, posts)
+    return upsert_comments(session, targets), delete_trailing_comments(session, targets)
+
+
+def comment_sync_targets(session: Session, posts: list[RawPost]) -> list[RawPost]:
+    """posts.crawled_at 不比快照新的文章；較舊的快照不碰推文，避免刪掉較新的推文。"""
+    if not posts:
+        return []
+    snapshots = values(
+        column("post_id", String), column("crawled_at", DateTime(timezone=True)), name="snapshots"
+    ).data([(p.post_id, p.crawled_at) for p in posts])
+    stmt = select(Post.post_id).where(
+        Post.post_id == snapshots.c.post_id, Post.crawled_at <= snapshots.c.crawled_at
+    )
+    eligible = set(session.scalars(stmt))
+    return [p for p in posts if p.post_id in eligible]
+
+
+def upsert_comments(session: Session, posts: list[RawPost]) -> int:
+    """同一樓層內容不同才更新；回傳新增或更新的列數。"""
     rows = [
         {
             "post_id": p.post_id,
@@ -96,28 +158,51 @@ def insert_comments(session: Session, posts: list[RawPost]) -> int:
         for p in posts
         for c in p.comments
     ]
-    inserted = 0
+    written = 0
     for start in range(0, len(rows), COMMENT_CHUNK_SIZE):
-        stmt = (
-            insert(Comment)
-            .values(rows[start : start + COMMENT_CHUNK_SIZE])
-            .on_conflict_do_nothing(index_elements=[Comment.post_id, Comment.floor])
-            .returning(Comment.post_id)
-        )
-        inserted += len(session.execute(stmt).all())
-    return inserted
+        stmt = insert(Comment).values(rows[start : start + COMMENT_CHUNK_SIZE])
+        new = stmt.excluded
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[Comment.post_id, Comment.floor],
+            set_={col: new[col] for col in _COMMENT_COLUMNS},
+            where=or_(
+                *(getattr(Comment, col).is_distinct_from(new[col]) for col in _COMMENT_COLUMNS)
+            ),
+        ).returning(Comment.post_id)
+        written += len(session.execute(stmt).all())
+    return written
+
+
+def delete_trailing_comments(session: Session, posts: list[RawPost]) -> int:
+    """刪掉超過新快照最大樓層的推文（沒推文時全刪）；回傳刪除列數。"""
+    if not posts:
+        return 0
+    snapshots = values(
+        column("post_id", String), column("max_floor", Integer), name="snapshots"
+    ).data([(p.post_id, max((c.floor for c in p.comments), default=0)) for p in posts])
+    stmt = delete(Comment).where(
+        Comment.post_id == snapshots.c.post_id, Comment.floor > snapshots.c.max_floor
+    )
+    return session.execute(stmt).rowcount
 
 
 def mark_deleted(session: Session, posts: list[RawPost]) -> int:
-    """只把既有文章的 is_deleted 設為 true，其他欄位保留最後一次的內容。
+    """把既有文章標記刪除並更新 crawled_at，其他欄位保留最後一次的內容。
 
-    從未見過的文章不新增；已標記過的不重複寫，避免多餘的 CDC 事件。
+    從未見過的、已標記過的、比 crawled_at 舊的都不寫（開發規格 7.14）。
     """
     if not posts:
         return 0
+    snapshots = values(
+        column("post_id", String), column("crawled_at", DateTime(timezone=True)), name="snapshots"
+    ).data([(p.post_id, p.crawled_at) for p in posts])
     stmt = (
         update(Post)
-        .where(Post.post_id.in_([p.post_id for p in posts]), Post.is_deleted.is_(False))
-        .values(is_deleted=True)
+        .where(
+            Post.post_id == snapshots.c.post_id,
+            Post.is_deleted.is_(False),
+            Post.crawled_at < snapshots.c.crawled_at,
+        )
+        .values(is_deleted=True, crawled_at=snapshots.c.crawled_at)
     )
     return session.execute(stmt).rowcount

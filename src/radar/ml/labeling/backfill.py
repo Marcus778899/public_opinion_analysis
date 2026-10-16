@@ -25,7 +25,7 @@ from radar.ml.labeling.llm import (
     RetryableLabelerError,
 )
 from radar.ml.labeling.prompt import PROMPT_VERSION, PostText
-from radar.ml.labeling.sampling import SampleSpec, sample_posts
+from radar.ml.labeling.sampling import SampleSpec, fetch_posts, labeled_post_ids, sample_posts
 from radar.ml.labeling.testset import TESTSET_DIR, load_post_ids
 
 PROGRESS_EVERY = 50
@@ -84,10 +84,25 @@ def run_backfill(
     return BackfillResult(labeled, skipped, stopped_by_quota=False)
 
 
+def select_testset_posts(
+    client: ClickHouseClient, post_ids: list[str], labeler: str, version: str
+) -> list[PostText]:
+    """人工測試集中尚未被這組 labeler + version 標過的文章，順序同 post_ids（開發規格 7.11）。"""
+    done = labeled_post_ids(client, labeler, version, post_ids)
+    pending = [pid for pid in post_ids if pid not in done]
+    found = fetch_posts(client, pending)
+    missing = [pid for pid in pending if pid not in found]
+    if missing:
+        log.warning("%d testset posts not found in clickhouse, skipped: %s", len(missing), missing)
+    return [found[pid] for pid in pending if pid in found]
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="LLM 批次標註（S3-02）")
     parser.add_argument("--labeler", help="服務商（gemini、groq、openrouter）；預設 LABEL_PRIMARY")
-    parser.add_argument("--per-board", type=int, required=True, help="每個看板標註篇數")
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--per-board", type=int, help="每個看板標註篇數")
+    target.add_argument("--testset", action="store_true", help="只標人工測試集（評估用）")
     parser.add_argument("--seed", type=int, default=20261007)
     parser.add_argument("--boards", nargs="*", help="只抽這些看板；預設全部")
     parser.add_argument("--dry-run", action="store_true", help="只印抽樣結果，不呼叫 LLM")
@@ -100,18 +115,23 @@ def main() -> None:
     args = parse_args()
     settings = LabelingSettings()
     labeler = build_labeler(args.labeler or settings.primary, settings.max_chars)
-    testset = set(load_post_ids(TESTSET_DIR))
-    spec = SampleSpec(
-        per_board=args.per_board,
-        seed=args.seed,
-        boards=args.boards,
-        skip_labeler=labeler.name,
-        skip_version=PROMPT_VERSION,
-        extra_per_board=len(testset),
-    )
+    testset = load_post_ids(TESTSET_DIR)
+    if args.testset and not testset:
+        raise SystemExit(f"no testset at {TESTSET_DIR}; run `make testset` first")
     ch = ClickHouseClient(ClickHouseSettings())
     try:
-        posts = sample_posts(ch, spec, exclude_ids=testset)
+        if args.testset:
+            posts = select_testset_posts(ch, testset, labeler.name, PROMPT_VERSION)
+        else:
+            spec = SampleSpec(
+                per_board=args.per_board,
+                seed=args.seed,
+                boards=args.boards,
+                skip_labeler=labeler.name,
+                skip_version=PROMPT_VERSION,
+                extra_per_board=len(testset),
+            )
+            posts = sample_posts(ch, spec, exclude_ids=set(testset))
     finally:
         ch.close()
     by_board: dict[str, int] = {}

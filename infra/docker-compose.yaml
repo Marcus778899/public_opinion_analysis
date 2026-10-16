@@ -179,6 +179,8 @@ services:
     command: ["python", "-m", "radar.collector.crawler"]
     environment:
       <<: *app-env
+    # 一個列表任務可能需要 1 分鐘以上；預設 10 秒會在批次中途被強制結束（開發規格 2.2）
+    stop_grace_period: 90s
     deploy:
       replicas: 3
 
@@ -188,6 +190,15 @@ services:
     command: ["python", "-m", "radar.ingest.main"]
     environment:
       <<: *app-env
+
+  # 只能 1 個（設計文件 6.4）：Connect task 失敗時自動重啟，replication slot 異常時記 ERROR
+  cdc-watchdog:
+    <<: *app
+    container_name: radar_cdc_watchdog
+    command: ["python", "-m", "radar.cdc.watchdog"]
+    environment:
+      <<: *app-env
+      CONNECT_URL: 'http://connect:8083'
 
   # 串流抽樣標註（S3-08）：會持續呼叫 LLM API，獨立 profile，make up-labeling 才啟動
   label-stream:

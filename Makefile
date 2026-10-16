@@ -16,7 +16,7 @@ up-labeling:  ## 啟動串流抽樣標註（S3-08，會持續呼叫 LLM API）
 down:
 	$(COMPOSE) --profile app --profile labeling down --remove-orphans
 
-e2e-down:  ## 停止 e2e 環境並刪除 e2e 專用的資料 volume
+e2e-down:  ## 停止 e2e 環境並刪除 e2e 專用的資料與 log volume（不碰開發環境的 volume）
 	$(COMPOSE_E2E) --profile app down -v --remove-orphans
 
 logs:
@@ -37,8 +37,8 @@ ch-migrate:  ## 套用 ClickHouse 尚未執行的 migration
 seed:  ## 透過 API 建立初始看板（需先 make api）
 	$(UV_ENV) python scripts/seed_boards.py
 
-testset:  ## 抽出 300 篇人工測試集（S3-04，只能抽一次）
-	$(UV_ENV) python -m radar.ml.labeling.testset --size 300 --boards Gossiping Stock Tech_Job
+testset:  ## 依看板配額抽出 300 篇人工測試集（S3-04，只能抽一次；配額見開發規格 7.11）
+	$(UV_ENV) python -m radar.ml.labeling.testset --counts Gossiping=180 Stock=90 Tech_Job=30
 
 human-label:  ## 本機人工標註頁（http://127.0.0.1:8090）
 	$(UV_ENV) python -m radar.ml.labeling.human_app
@@ -57,7 +57,7 @@ test:
 test-int:
 	uv run pytest tests/integration
 
-e2e-up:  ## 整套服務 + 假 PTT 伺服器，使用 e2e 專用的資料 volume（不碰開發資料、不連真的 PTT）
+e2e-up:  ## 整套服務 + 假 PTT 伺服器，使用 e2e 專用的 volume（不碰開發資料、不連真的 PTT）；容器名稱與開發環境相同，會取代開發環境的容器
 	$(COMPOSE_E2E) --profile app up -d --build --wait
 
 e2e:  ## 端到端測試，需先 make e2e-up

@@ -78,3 +78,8 @@ jobs:
       # ubuntu runner 內建 Docker，testcontainers 可直接啟動 Kafka / PG
       - name: Run integration tests
         run: uv run pytest tests/integration
+        env:
+          # NOTE: runner 連 Docker Hub 常撞到 rate limit 或逾時（2026-10-10，登入也逾時），改走 Google 鏡像
+          TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX: mirror.gcr.io/
+          # NOTE: 加前綴後 Ryuk 會無限遞迴建立自己（testcontainers 4.15）；runner 用完即丟，不需清理
+          TESTCONTAINERS_RYUK_DISABLED: "true"

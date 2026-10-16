@@ -23,9 +23,13 @@
     "key.converter.apicurio.registry.url": "${CDC_REGISTRY_URL}",
     "key.converter.apicurio.registry.auto-register": "true",
     "key.converter.apicurio.registry.use-id": "contentId",
+    "key.converter.apicurio.registry.fault-tolerant-refresh": "true",
+    "key.converter.apicurio.registry.check-period-ms": "3600000",
     "value.converter": "io.apicurio.registry.utils.converter.AvroConverter",
     "value.converter.apicurio.registry.url": "${CDC_REGISTRY_URL}",
     "value.converter.apicurio.registry.auto-register": "true",
-    "value.converter.apicurio.registry.use-id": "contentId"
+    "value.converter.apicurio.registry.use-id": "contentId",
+    "value.converter.apicurio.registry.fault-tolerant-refresh": "true",
+    "value.converter.apicurio.registry.check-period-ms": "3600000"
   }
 }

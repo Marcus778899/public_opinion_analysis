@@ -6,6 +6,7 @@ from confluent_kafka import Consumer
 from confluent_kafka.admin import AdminClient, NewTopic
 
 from radar.collector.crawler import CrawlHandler
+from radar.collector.fetch_cache import RecentFetches
 from radar.collector.list_cache import ListPushCache
 from radar.common.enums import CrawlReason, CrawlTaskType
 from radar.common.kafka import names
@@ -42,7 +43,9 @@ def read_all(settings, topic, model, expected):
 def test_crawl_task_to_raw_posts_through_kafka(kafka_settings):
     ensure_topics(kafka_settings)
     producer = JsonProducer(kafka_settings)
-    handler = CrawlHandler(FakeFetcher(), producer, ListPushCache(), clock=lambda: NOW)
+    handler = CrawlHandler(
+        FakeFetcher(), producer, ListPushCache(), RecentFetches(), clock=lambda: NOW
+    )
     task = CrawlTask(
         task_id=uuid.uuid4(),
         type=CrawlTaskType.LIST,

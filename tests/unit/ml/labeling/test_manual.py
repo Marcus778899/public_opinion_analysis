@@ -9,6 +9,8 @@ from radar.ml.labeling.manual import (
     BatchPost,
     batch_path_for,
     export_batch,
+    export_testset_batch,
+    export_testset_query,
     import_outputs,
     read_batch,
 )
@@ -95,3 +97,31 @@ def test_batch_path_for_output_name(tmp_path):
 def test_batch_path_for_wrong_name_raises(tmp_path):
     with pytest.raises(ValueError, match="out.jsonl"):
         batch_path_for(tmp_path / "batch-1.jsonl")
+
+
+def test_export_testset_query_filters_manual_labeler_version_and_ids():
+    sql = export_testset_query()
+
+    assert "post_id IN {ids:Array(String)}" in sql
+    assert "labeler = {manual:String} AND version = {version:String}" in sql
+    assert "{primary:String}" not in sql  # 不要求主要標註者先標
+
+
+def test_export_testset_batch_writes_unlabeled_testset_posts_truncated(tmp_path):
+    ch = FakeClickHouse([{**row("a"), "content": "一二三四五六"}, row("b")])
+
+    path = export_testset_batch(ch, ["a", "b", "c"], 10, 3, tmp_path, NOW)
+
+    assert path == tmp_path / "batch-20261007T120000.jsonl"
+    assert [(p.post_id, p.content) for p in read_batch(path)] == [("a", "一二三"), ("b", "c")]
+    assert ch.queries[0][1] == {
+        "ids": "['a','b','c']",
+        "manual": MANUAL_LABELER,
+        "version": PROMPT_VERSION,
+        "limit": "10",
+    }
+
+
+def test_export_testset_batch_nothing_left_returns_none(tmp_path):
+    assert export_testset_batch(FakeClickHouse([]), ["a"], 10, 3, tmp_path, NOW) is None
+    assert export_testset_batch(FakeClickHouse(), [], 10, 3, tmp_path, NOW) is None

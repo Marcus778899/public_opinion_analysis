@@ -45,6 +45,10 @@ class ConnectorStatus:
             and all(s == _RUNNING for s in self.task_states)
         )
 
+    @property
+    def is_failed(self) -> bool:
+        return _FAILED in [self.connector_state, *self.task_states]
+
 
 def load_connector_spec(path: Path, env: Mapping[str, str]) -> ConnectorSpec:
     try:
@@ -106,6 +110,18 @@ def get_status(client: httpx2.Client, name: str) -> ConnectorStatus:
     )
 
 
+def restart_failed(client: httpx2.Client, name: str) -> None:
+    """重啟 connector 與失敗的 task（`includeTasks=true&onlyFailed=true`）。"""
+    resp = client.post(
+        f"/connectors/{name}/restart", params={"includeTasks": "true", "onlyFailed": "true"}
+    )
+    if resp.status_code in (200, 202, 204):
+        return
+    if resp.status_code == 404:
+        raise ConnectorNotFoundError(f"restart {name} failed: 404 {resp.text}")
+    raise ConnectError(f"restart {name} failed: {resp.status_code} {resp.text}")
+
+
 def wait_until_running(
     client: httpx2.Client, name: str, timeout_s: float, poll_s: float = 2.0
 ) -> ConnectorStatus:
@@ -121,7 +137,7 @@ def wait_until_running(
         else:
             if status.is_running:
                 return status
-            if _FAILED in [status.connector_state, *status.task_states]:
+            if status.is_failed:
                 raise ConnectError(f"connector {name} failed: {status}")
         if time.monotonic() >= deadline:
             raise ConnectError(f"connector {name} not running after {timeout_s}s: {status}")

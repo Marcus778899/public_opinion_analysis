@@ -11,6 +11,8 @@ from radar.common.db.session import make_engine
 REPO = Path(__file__).resolve().parents[3]
 ALEMBIC_INI = REPO / "alembic.ini"
 CONNECTOR_FILE = REPO / "infra/debezium/radar-cdc.json"
+# 建立 publication 之前的版本；之後的 migration 增加時不必改這裡
+PUBLICATION_DOWN_REVISION = "4856307c62e5"
 
 
 @pytest.fixture
@@ -43,6 +45,24 @@ def test_publication_includes_only_posts_and_comments(engine):
 
 
 def test_downgrade_drops_publication(alembic_cfg, engine):
-    command.downgrade(alembic_cfg, "-1")
+    command.downgrade(alembic_cfg, PUBLICATION_DOWN_REVISION)
 
     assert _published_tables(engine, "radar_cdc") == set()
+
+
+def _replica_identity(engine: Engine, table: str) -> str:
+    with engine.connect() as conn:
+        return conn.execute(
+            text("SELECT relreplident FROM pg_class WHERE relname = :t"), {"t": table}
+        ).scalar_one()
+
+
+def test_comments_replica_identity_is_full(engine):
+    # f = FULL，d = DEFAULT；posts 不會被刪，維持預設
+    assert (_replica_identity(engine, "comments"), _replica_identity(engine, "posts")) == ("f", "d")
+
+
+def test_downgrade_restores_default_replica_identity(alembic_cfg, engine):
+    command.downgrade(alembic_cfg, "a3c1f0d2b7e4")
+
+    assert _replica_identity(engine, "comments") == "d"

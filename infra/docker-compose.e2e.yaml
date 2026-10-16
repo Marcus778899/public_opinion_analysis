@@ -1,8 +1,16 @@
 # 端到端測試用的覆寫檔（S1-07）：加上假 PTT 伺服器，爬蟲改打它，重爬間隔縮短
 # 用法：make e2e-up && make e2e；任何請求都不會打到真的 PTT
 #
-# NOTE: Postgres 與 Kafka 改掛 e2e 專用的 volume，不會碰到本機開發資料；
-# 否則 Scheduler 會對開發資料裡的真實文章派發重爬，假伺服器回 404 而被誤標為刪除
+# NOTE: 資料與 log 都改掛 e2e 專用的 volume，不會碰到本機開發資料；否則 Scheduler 會對
+# 開發資料裡的真實文章派發重爬（假伺服器回 404 而被誤標為刪除），e2e-down -v 也會刪掉開發的 log（#29）
+
+# NOTE: .env 與開發環境共用；e2e 會刻意製造故障（停掉 Apicurio），不可送 Slack 或外部 heartbeat
+# 空字串等同未設定（loggerhelper 與 CdcWatchdogSettings 皆是）
+x-e2e-quiet: &e2e-quiet
+  SLACK_WEBHOOK_URL: ''
+  SLACK_BOT_TOKEN: ''
+  CDC_WATCHDOG_HEARTBEAT_URL: ''
+
 services:
   postgres:
     volumes:
@@ -30,19 +38,52 @@ services:
     ports:
       - "127.0.0.1:8081:8080"
 
+  init:
+    environment:
+      <<: *e2e-quiet
+  api:
+    environment:
+      <<: *e2e-quiet
+    volumes:
+      - e2e_app_logs:/app/log
+  ingest:
+    environment:
+      <<: *e2e-quiet
+    volumes:
+      - e2e_app_logs:/app/log
+  label-stream:
+    volumes:
+      - e2e_app_logs:/app/log
+
   crawler:
     environment:
+      <<: *e2e-quiet
       CRAWLER_PTT_BASE_URL: 'http://fake-ptt:8080'
       CRAWLER_MIN_INTERVAL_S: '0.2'
       CRAWLER_JITTER_S: '0.1'
+    volumes:
+      - e2e_app_logs:/app/log
     depends_on:
       fake-ptt:
         condition: service_started
 
   scheduler:
     environment:
+      <<: *e2e-quiet
       SCHEDULER_TIME_SCALE: '0.05'
       SCHEDULER_DUE_POSTS_INTERVAL_SEC: '5'
+    volumes:
+      - e2e_app_logs:/app/log
+
+  # 自動恢復的端到端測試（tests/e2e/test_cdc.py）不必等到正式環境的間隔
+  cdc-watchdog:
+    environment:
+      <<: *e2e-quiet
+      CDC_WATCHDOG_INTERVAL_S: '5'
+      CDC_WATCHDOG_RESTART_BACKOFF_INITIAL_S: '5'
+      CDC_WATCHDOG_RESTART_BACKOFF_MAX_S: '20'
+    volumes:
+      - e2e_app_logs:/app/log
 
 volumes:
   e2e_postgres_data:
@@ -50,3 +91,4 @@ volumes:
   e2e_kafka_2_data:
   e2e_kafka_3_data:
   e2e_clickhouse_data:
+  e2e_app_logs:

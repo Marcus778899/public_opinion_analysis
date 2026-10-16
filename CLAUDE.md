@@ -111,6 +111,12 @@ make e2e-up && make e2e && make e2e-down  # 端到端測試（假 PTT，不碰�
 - Commit 使用 Conventional Commits：`feat(crawler): ...`、`test(ingest): ...`
 - 不提交 `.env`、爬下來的資料、模型檔
 
+### 同時有多個 PR 時（避免 docs 衝突）
+
+- 已有未合併的 PR、新分支又會改到 docs 時，新分支從**前一個分支**開（stacked），PR 的 base 設為前一個分支；前一個合併後 GitHub 會自動把 base 改回 `develop`，合併時照順序
+- 交給我 review 前，先在本機把所有未合併的 PR 模擬合併一次（`git merge --no-commit --no-ff`）；有衝突就先 rebase 該功能分支解決（只對功能分支 `--force-with-lease`），不把會衝突的 PR 交給我
+- 寫 docs 時避開熱點：進度表的新列放在相關階段的列旁邊；第 7 章新小節的標題寫上 issue 編號
+
 ## 文件同步
 
 - **文件必須與程式同步**：行為、資料流、表、topic、訊息格式、API、相依套件有變動時，在同一個 PR 內更新設計文件或開發規格

@@ -3,6 +3,7 @@ from radar.ml.labeling.sampling import (
     array_param,
     build_sample_query,
     fetch_posts,
+    labeled_post_ids,
     sample_posts,
 )
 from tests.unit.ml.fakes import FakeClickHouse, row
@@ -65,3 +66,21 @@ def test_fetch_posts_returns_by_id():
 
     assert set(posts) == {"a", "b"}
     assert ch.queries[0][1] == {"ids": "['a','b']"}
+
+
+def test_labeled_post_ids_queries_labeler_version_and_ids():
+    ch = FakeClickHouse([{"post_id": "a"}])
+
+    done = labeled_post_ids(ch, "groq:q", "prompt-v4", ["a", "b"])
+
+    sql, params = ch.queries[0]
+    assert done == {"a"}
+    assert "FROM labels" in sql
+    assert params == {"labeler": "groq:q", "version": "prompt-v4", "ids": "['a','b']"}
+
+
+def test_labeled_post_ids_empty_input_skips_query():
+    ch = FakeClickHouse()
+
+    assert labeled_post_ids(ch, "groq:q", "prompt-v4", []) == set()
+    assert ch.queries == []

@@ -18,7 +18,12 @@ from radar.common.log import log, setup_logging
 from radar.common.schemas import CdcPost, Label
 from radar.common.settings import LabelingSettings, SchemaRegistrySettings, get_kafka_settings
 from radar.ml.labeling.factory import build_labeler
-from radar.ml.labeling.llm import FallbackLabeler, LabelerError, RetryableLabelerError
+from radar.ml.labeling.llm import (
+    AllExhaustedError,
+    FallbackLabeler,
+    LabelerError,
+    RetryableLabelerError,
+)
 from radar.ml.labeling.prompt import PROMPT_VERSION, PostText
 
 SAMPLE_PERCENT = 5
@@ -62,6 +67,9 @@ class StreamLabeler:
             post = PostText(event.post_id, event.board, event.title, event.content)
             try:
                 labeler_name, sentiments = self._labeler.label_named(post)
+            except AllExhaustedError as e:
+                # consumer 暫停到最早的冷卻結束，不每 30 秒空轉（開發規格 7.11）
+                raise TransientError(str(e), retry_after_s=e.retry_after_s) from e
             except RetryableLabelerError as e:
                 raise TransientError(str(e)) from e
             except LabelerError as e:

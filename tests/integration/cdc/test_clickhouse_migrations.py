@@ -116,17 +116,25 @@ def _wait_rows(ch: ClickHouseClient, table: str, expected: int, timeout_s: float
 def test_apply_pending_creates_all_tables_and_views(ch):
     tables = {r[0] for r in _query(ch, "SELECT name FROM system.tables WHERE database = 'radar'")}
 
-    targets = {"posts_latest", "posts_history", "comments", "labels", "predictions", "alerts"}
+    targets = {
+        "posts_latest",
+        "posts_history",
+        "comments_latest",
+        "labels",
+        "predictions",
+        "alerts",
+    }
     queues = {"posts_queue", "comments_queue", "labels_queue", "predictions_queue", "alerts_queue"}
     views = {
         "posts_latest_mv",
         "posts_history_mv",
-        "comments_mv",
+        "comments_latest_mv",
         "labels_mv",
         "predictions_mv",
         "alerts_mv",
     }
     assert targets | queues | views <= tables
+    assert not {"comments", "comments_mv"} & tables  # 0003 已換成 comments_latest
 
 
 def test_apply_pending_twice_is_noop(ch):
@@ -149,6 +157,49 @@ def test_posts_latest_final_keeps_highest_lsn(ch):
     rows = _query(ch, "SELECT push_count FROM posts_latest FINAL WHERE post_id = 'Stock.M.9.A.1'")
 
     assert rows == [["30"]]
+
+
+COMMENT_COLS = "post_id, board, floor, type, changed_at, lsn"
+
+
+def test_comments_latest_final_keeps_highest_lsn_and_drops_deleted(ch):
+    ts = "'2026-10-07 00:00:00'"
+    ch.execute(
+        f"INSERT INTO comments_latest ({COMMENT_COLS}, user_id, is_deleted) VALUES "
+        f"('Stock.M.9.A.2', 'Stock', 1, 'push', {ts}, 100, 'old', 0), "
+        f"('Stock.M.9.A.2', 'Stock', 1, 'push', {ts}, 300, 'new', 0), "
+        f"('Stock.M.9.A.2', 'Stock', 2, 'push', {ts}, 100, 'gone', 0), "
+        f"('Stock.M.9.A.2', 'Stock', 2, 'push', {ts}, 300, 'gone', 1)"
+    )
+
+    rows = _query(
+        ch, "SELECT floor, user_id FROM comments_latest FINAL WHERE post_id = 'Stock.M.9.A.2'"
+    )
+
+    assert rows == [["1", "new"]]
+
+
+def test_migration_0003_copies_existing_comments(clickhouse_settings):
+    # 獨立的 database：先套到 0002、寫入舊的 comments，再套 0003
+    admin = ClickHouseClient(clickhouse_settings)
+    admin.execute("CREATE DATABASE IF NOT EXISTS copy_test")
+    client = ClickHouseClient(clickhouse_settings.model_copy(update={"db": "copy_test"}))
+    migrations = load_migrations(CLICKHOUSE_DIR / "migrations")
+    try:
+        apply_pending(client, [m for m in migrations if m.version < 3])
+        client.execute(
+            f"INSERT INTO comments ({COMMENT_COLS}) VALUES "
+            "('Stock.M.9.A.3', 'Stock', 1, 'push', '2026-10-07 00:00:00', 42)"
+        )
+
+        apply_pending(client, migrations)
+
+        rows = _query(client, "SELECT floor, lsn, is_deleted FROM comments_latest FINAL")
+        assert rows == [["1", "42", "0"]]
+    finally:
+        admin.execute("DROP DATABASE IF EXISTS copy_test")
+        client.close()
+        admin.close()
 
 
 def test_json_topic_rows_land_in_target_tables(kafka, ch):

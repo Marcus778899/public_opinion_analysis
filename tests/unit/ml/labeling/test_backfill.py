@@ -4,9 +4,9 @@ import pytest
 
 from radar.common.enums import Polarity
 from radar.common.schemas import Label, Sentiment
-from radar.ml.labeling.backfill import parse_args, run_backfill
+from radar.ml.labeling.backfill import parse_args, run_backfill, select_testset_posts
 from radar.ml.labeling.llm import LabelerError, QuotaExhaustedError, RetryableLabelerError
-from tests.unit.ml.fakes import ScriptedLabeler, post
+from tests.unit.ml.fakes import FakeClickHouse, ScriptedLabeler, post, row
 
 NOW = datetime(2026, 10, 7, 12, 0, tzinfo=UTC)
 WHOLE = [Sentiment(target=None, polarity=Polarity.NEUTRAL)]
@@ -87,3 +87,43 @@ def test_parse_args_defaults_and_choices():
 def test_parse_args_requires_per_board():
     with pytest.raises(SystemExit):
         parse_args([])
+
+
+def test_parse_args_requires_per_board_or_testset():
+    assert parse_args(["--testset"]).testset is True
+    assert parse_args(["--per-board", "5"]).testset is False
+
+
+def test_parse_args_rejects_per_board_with_testset():
+    with pytest.raises(SystemExit):
+        parse_args(["--per-board", "5", "--testset"])
+
+
+def clickhouse_for_testset(labeled: list[str], found: list[str]) -> FakeClickHouse:
+    """依序回傳：已標過的 post_id、fetch_posts 找到的文章。"""
+    return FakeClickHouse([{"post_id": p} for p in labeled], [row(p) for p in found])
+
+
+def test_select_testset_posts_skips_already_labeled():
+    ch = clickhouse_for_testset(labeled=["a"], found=["b", "c"])
+
+    posts = select_testset_posts(ch, ["a", "b", "c"], "groq:q", "prompt-v4")
+
+    assert [p.post_id for p in posts] == ["b", "c"]
+    assert ch.queries[1][1]["ids"] == "['b','c']"  # 已標過的不再取內容
+
+
+def test_select_testset_posts_keeps_testset_order():
+    ch = clickhouse_for_testset(labeled=[], found=["c", "a", "b"])
+
+    posts = select_testset_posts(ch, ["b", "c", "a"], "groq:q", "prompt-v4")
+
+    assert [p.post_id for p in posts] == ["b", "c", "a"]
+
+
+def test_select_testset_posts_missing_in_clickhouse_is_skipped():
+    ch = clickhouse_for_testset(labeled=[], found=["a"])
+
+    posts = select_testset_posts(ch, ["a", "gone"], "groq:q", "prompt-v4")
+
+    assert [p.post_id for p in posts] == ["a"]

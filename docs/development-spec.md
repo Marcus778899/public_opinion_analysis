@@ -67,6 +67,7 @@
 │   ├── debezium/            # Connect image（含 Apicurio converter）、connector 設定
 │   └── clickhouse/          # config.d、users.d、migrations/（編號 SQL）
 ├── docs/labeling-guideline.md  # 情緒標註準則（LLM、Claude、人工共用）
+├── docs/reports/            # 實驗與模型評估報告（model-evaluation.md 由人撰寫；s3-05-push-ratio.md），進 repo
 ├── .claude/skills/label-posts/ # Claude 手動標註的 skill
 ├── scripts/
 ├── tests/
@@ -87,7 +88,7 @@
 | `make topics` | 依 `topics.yaml` 建立或更新 topic（冪等） |
 | `make connector` | 註冊或更新 Debezium connector（冪等） |
 | `make up-labeling` | 啟動串流抽樣標註（S3-08，會持續呼叫 LLM API） |
-| `make testset` | 抽出 300 篇人工測試集（只能抽一次） |
+| `make testset` | 依看板配額抽出 300 篇人工測試集（Gossiping 180、Stock 90、Tech_Job 30；只能抽一次） |
 | `make human-label` | 本機人工標註頁（http://127.0.0.1:8090） |
 | `make ch-migrate` | 套用 ClickHouse 尚未執行的 migration |
 | `make api` | 本機啟動管理 API（http://localhost:8000/docs） |
@@ -126,8 +127,11 @@
 | Key | 依設計文件：`post_id`；`crawl.tasks` 的列表任務例外，用 `board`（見 7.1），且 partition 由送出端明確指定（見 7.10） |
 | Producer | `acks=all`、`enable.idempotence=true`、`compression.type=zstd`、`message.max.bytes=5MB`（`raw.html` 爆文可能超過預設 1MB） |
 | Consumer | 關閉 auto commit，處理完（含寫入下游）才 commit，at-least-once |
-| 錯誤處理 | 暫時性錯誤（網路、DB 斷線）：指數退避重試，不 commit；資料錯誤（解析、驗證失敗）：寫入 `dlq` 後 commit |
-| 優雅關閉 | 收到 SIGTERM 先處理完當前批次、commit、再關閉 |
+| 錯誤處理 | 暫時性錯誤（網路、DB 斷線）：指數退避重試，不 commit；資料錯誤（解析、驗證失敗，或 handler 回報寫不進下游的訊息）：寫入 `dlq` 後 commit（7.13） |
+| 重試期間 | `pause()` 已分配的 partition 並持續 `poll()`，維持 group 成員資格；重試不限時間，成功後 `resume()`（#11：只 sleep 不 poll 會超過 `max.poll.interval.ms` 被踢出 group） |
+| 重試上限 | 由各服務的 handler 決定，`BatchConsumer` 不設上限：爬蟲同一網址 5 次後略過；ingest 不設上限（PG 停機就等）；串流標註依服務商冷卻時間等待（`TransientError.retry_after_s`） |
+| commit 失敗 | 失去 assignment（`_ASSIGNMENT_LOST`、`UNKNOWN_MEMBER_ID`、`ILLEGAL_GENERATION`、`REBALANCE_IN_PROGRESS`）記 warning 後繼續，該批由下一個取得 partition 的成員重做（冪等）；其他錯誤照舊中止 |
+| 優雅關閉 | 收到 SIGTERM 先處理完當前批次、commit、再關閉；爬蟲一個列表任務可能需要 1 分鐘以上，compose 給 `stop_grace_period: 90s`，逾時被強制結束也只是該批重做 |
 
 ### 2.3 DLQ 訊息
 
@@ -213,7 +217,7 @@
 ```json
 {
   "schema_version": 1, "post_id": "...",
-  "labeler": "groq:qwen/qwen3.8-27b", "version": "prompt-v4", "labeled_at": "...",
+  "labeler": "groq:qwen/qwen3.8-27b", "version": "prompt-v5", "labeled_at": "...",
   "sentiments": [
     {"target": null, "polarity": "negative"},
     {"target": "台積電", "polarity": "positive"}
@@ -278,7 +282,7 @@
 | 層級 | 範圍 | 工具 | 執行時機 |
 |---|---|---|---|
 | 單元 | parser、upsert SQL 組裝、熱度計算、年齡分級 | pytest | 本地每次 commit；CI 於 PR 開到及合併到 `develop` / `main` 時 |
-| 整合 | 單一服務 + 真實 Kafka / PG / ClickHouse（單節點即可） | testcontainers | CI 於 PR 開到及合併到 `develop` / `main` 時 |
+| 整合 | 單一服務 + 真實 Kafka / PG / ClickHouse（單節點即可） | testcontainers | CI 於 PR 開到及合併到 `develop` / `main` 時；CI 以 `TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX=mirror.gcr.io/` 從 Google 的 Docker Hub 鏡像拉 image（runner 直連 Docker Hub 常撞到次數限制或逾時），並關閉 Ryuk（加前綴後會無限遞迴；runner 用完即丟） |
 | 端到端 | 整個 compose，用假 PTT 伺服器 | `make e2e-up && make e2e`（約 3～4 分鐘） | 每階段驗收 |
 | 回放 | 把錄下來的 topic 資料重送，驗證熱度偵測 | 腳本 | 第 5 階段起 |
 
@@ -287,9 +291,11 @@
 - **端到端環境**：
   - 爬蟲以 `CRAWLER_PTT_BASE_URL` 改打假伺服器（只換主機，資料中的網址仍是 `www.ptt.cc`），任何請求都不會打到真的 PTT
   - Scheduler 以 `SCHEDULER_TIME_SCALE=0.05` 縮短重爬間隔
-  - Postgres 與 Kafka 改掛 e2e 專用的 volume，不碰開發資料
+  - Postgres、Kafka、ClickHouse 與自寫服務的 log（`/app/log`）都改掛 e2e 專用的 volume，不碰開發資料。`make e2e-down` 用 `down -v` 刪除這些 volume；log 原本與開發環境共用 `app_logs`，2026-10-10 因此刪掉開發環境 10/07～10/09 的 log（#29）。單元測試檢查開發環境中掛 `app_logs` 的服務在 e2e 都改掛 `e2e_app_logs`
+  - 開發環境與 e2e 共用容器名稱，`make e2e-up` 會取代開發環境的容器；跑 e2e 前要先停掉開發環境的長時間作業（例如驗收）
+  - `.env` 與開發環境共用，但 e2e 會刻意製造故障：compose 覆寫檔把各服務的 `SLACK_*`、`CDC_WATCHDOG_HEARTBEAT_URL` 設成空字串，`tests/e2e/conftest.py` 也在測試程式內清掉，不送 Slack 與外部 heartbeat
   - 測試標記為 `e2e`，一般 `pytest` 與 CI 預設排除
-- **端到端情境**：新看板被排程並寫入 PG、新推文在重爬後反映、刪除文被標記、停用看板後停止爬取、爬蟲停止期間的任務在重啟後接續處理；階段 2 起加上 CDC：新文章進 `posts_latest`、推文數變化進 `posts_history`、推文帶看板進 `comments`、內容沒變的重爬不產生 CDC 事件（`tests/e2e/test_cdc.py`）
+- **端到端情境**：新看板被排程並寫入 PG、新推文在重爬後反映、刪除文被標記、停用看板後停止爬取、爬蟲停止期間的任務在重啟後接續處理；階段 2 起加上 CDC：新文章進 `posts_latest`、推文數變化進 `posts_history`、推文帶看板進 `comments`、內容沒變的重爬不產生 CDC 事件、Apicurio 停機後 CDC 自動恢復（`tests/e2e/test_cdc.py`）
 - **LLM**：單元與整合測試一律用 `MockTransport` 或 fake，不呼叫真的 LLM API；prompt 調整才實際呼叫，結果存在 `data/prompt-tuning/`
 
 ---
@@ -310,12 +316,20 @@
 | S1-06 Scheduler、S1-07 假 PTT 伺服器與端到端測試 | ✅ 完成 | #7 |
 | 階段 1 驗收（24 小時實際運作） | ✅ 通過（2026-10-08），紀錄見階段 1「驗收紀錄」；驗收中修正 #15、#16 | — |
 | 列表任務 partition 修正（7.10） | ✅ 完成；重跑「停掉爬蟲 10 分鐘」積壓 21 分鐘消化完（原 64 分鐘） | #9 |
+| Consumer 重試期間維持成員資格（2.2） | ✅ 完成：pause/resume、commit 失去 assignment 不中止、爬蟲同一網址 5 次略過、串流標註依冷卻時間等待；整合測試重現並驗證（重試 10 秒 > `max.poll.interval.ms` 6 秒） | #11 |
 | S2-01 Spike：ClickHouse 讀 Apicurio Avro | ✅ 完成（結論見設計文件 6.2；以 Debezium 3.7 / Apicurio 3.3 / ClickHouse 26.8 驗證） | #8 |
 | S2-02～S2-06 CDC 與 ClickHouse | ✅ 程式完成；端到端測試（`tests/e2e/test_cdc.py`）2026-10-08 通過（首次執行時發現 image 缺 `infra/` 檔案等 3 個問題，見 7.9） | #8、#15 |
-| 階段 2 驗收（24 小時運作、WAL 延遲） | ⬜ 待執行 | — |
-| S3-01 標註準則與 prompt | ✅ 完成（prompt-v4，`docs/labeling-guideline.md`；15 篇實測選定標註者） | #10 |
-| S3-02～S3-08 標註、測試集、實驗、訓練、串流標註 | ✅ 程式完成；人工標註頁已在瀏覽器實測。實際標註、人工測試集、訓練待階段 2 累積資料後執行 | #10 |
-| 階段 3 驗收（≥ 3,000 篇、人工測試集評估、推噓比結論） | ⬜ 待執行 | — |
+| 爬蟲略過重複的重爬任務（7.12） | ✅ 完成；2026-10-09 實測 `crawl.tasks` 積壓 10 分鐘內 3,355 → 1,709（部署前持續增加），期間略過約 1,500 個重複任務 | #21 |
+| Ingest 逐筆隔離毒訊息（7.13） | ✅ 完成；整合測試以含 `\x00` 的文章重現（原本整批失敗、服務中止），修正後只有該筆進 DLQ | #12 |
+| 刪除標記可撤銷（7.14） | ✅ 完成；整合測試重現原本的兩個問題（較舊的 404 晚到會標記刪除、刪除後較舊的 200 會蓋掉內容），修正後刪除可被較新的快照撤銷 | #13 |
+| 推文同步（7.15） | ✅ 完成；整合測試重現中間推文被刪後的樓層位移；端到端測試確認 PG 的推文刪除經 CDC 反映到 `comments_latest FINAL`（`REPLICA IDENTITY FULL`） | #14 |
+| e2e 改用專用的 log volume（#29） | ✅ 完成；`docker compose config` 確認 e2e 不再引用開發環境的 `app_logs`。實際 `e2e-up`／`e2e-down` 等階段 2 驗收結束後跑 | #29 |
+| 抓取失敗的新文章不記進列表快取（7.17） | ✅ 完成；單元測試重現「失敗的新文章下一輪不再抓」後修正。尚未部署：等階段 2 驗收結束再重建爬蟲，並跑 e2e | #33 |
+| CDC 故障自動恢復（7.16） | ✅ 完成；e2e 重現兩種失敗（舊快取設定在刷新時失敗、沒有 watchdog 時 task 停在 `FAILED`），修正後通過。2026-10-15 開發環境重啟後，10/10 起積壓的 759 MB WAL 約 1 分鐘消化完，PG 與 ClickHouse 的 posts、comments 筆數一致 | #31 |
+| 階段 2 驗收（24 小時運作、WAL 延遲） | ⬜ 待重跑：2026-10-09 第一次執行，約 8 小時後 Debezium task 失敗而中斷（#31） | — |
+| S3-01 標註準則與 prompt | ✅ 完成（prompt-v4，`docs/labeling-guideline.md`；15 篇實測選定標註者）；2026-10-08 依交叉比對升 prompt-v5（規則 11～13）；2026-10-15 依人工測試集升 prompt-v6（規則 11 改寫、新增 14～16；已標的 v5 資料不重標） | #10 |
+| S3-02～S3-08 標註、測試集、實驗、訓練、串流標註 | ✅ 程式完成；人工標註頁已在瀏覽器實測。人工測試集 300 篇 2026-10-15 標完；S3-05 推噓比實驗完成，結論「不採用」（`docs/reports/s3-05-push-ratio.md`）；LLM 標註與訓練進行中 | #10 |
+| 階段 3 驗收（≥ 3,000 篇且各看板達標、評估報告含各看板 F1、推噓比結論） | ⬜ 待執行 | — |
 
 階段 1 拆成 5 個 PR；全部完成後依下方「驗收」逐項驗證，通過才把 `develop` 合進 `main` 並打 `stage-1` tag。之後各階段相同：驗收通過才打 `stage-<n>` tag。
 
@@ -410,18 +424,21 @@
 | ID | 任務 |
 |---|---|
 | S3-01 | 標註 prompt 與輸出 JSON schema（3.4 格式，含對象），10～20 篇手動調整到穩定 |
-| S3-02 | `ml/labeling/backfill.py`：從 ClickHouse 依看板分層抽樣，主要標註者（`LABEL_PRIMARY`，目前 Groq qwen）標註，限速、可中斷續跑 |
-| S3-03 | 第二個標註者（Claude，skill `/label-posts`）交叉標註；`cross_check` 輸出一致率、kappa 與不一致清單 CSV |
-| S3-04 | 人工測試集：300 篇（`make testset`），以本機標註頁標註（`make human-label`），**不給任何模型訓練** |
+| S3-02 | `ml/labeling/backfill.py`：從 ClickHouse 依看板分層抽樣，主要標註者（`LABEL_PRIMARY`，目前 Groq qwen）標註，限速、可中斷續跑；`--testset` 只標人工測試集（見 7.11） |
+| S3-03 | 第二個標註者（Claude，skill `/label-posts`）交叉標註；`cross_check` 輸出一致率、kappa 與不一致清單 CSV；`manual export --testset` 匯出人工測試集給 Claude 標 |
+| S3-04 | 人工測試集：300 篇，依看板配額抽樣（`make testset`，見 7.11），以本機標註頁標註（`make human-label`），**不給任何模型訓練** |
 | S3-05 | 推噓比弱標註實驗（設計文件 15.6），結論寫成短報告 |
-| S3-06 | `ml/training/`：export → train → evaluate；TF-IDF（字元 n-gram，免斷詞）+ Logistic Regression |
+| S3-06 | `ml/training/`：export → train → evaluate；TF-IDF（字元 n-gram，免斷詞）+ Logistic Regression；evaluate 依看板分開計算；依結果撰寫評估報告（見 7.11） |
 | S3-07 | 模型產物：`models/<model_version>/`，含模型檔與 `model_card.json`（訓練資料版本、指標） |
 | S3-08 | `ml/labeling/stream.py`：只處理 `op=c` 事件，用 `crc32(post_id) % 100 < 5` 抽樣（重跑結果一致；不用內建 `hash()`，它每個 process 結果不同）；`make up-labeling` 啟動 |
 
 **驗收**
-- 標註資料 ≥ 3,000 篇，三個看板都有
-- 在人工測試集上回報：LLM 標註 vs 人工的一致率、baseline 的 macro-F1
-- 推噓比實驗有明確結論（採用 / 改當特徵 / 不採用）
+- 主要標註者的標註資料（不含測試集）合計 ≥ 3,000 篇，且各看板達到最低篇數：Gossiping ≥ 1,500、HatePolitics ≥ 600、Stock ≥ 400；Boy-Girl、Tech_Job 文章少（每天個位數），不設固定數字，截止時可用的文章全部標完
+- 手寫的評估報告 `docs/reports/model-evaluation.md` 有這一版 baseline 的一節（內容要求見 7.11），涵蓋人工測試集上的：
+  - baseline 的 macro-F1 與各類別 F1，整體與各看板（Gossiping、Stock、Tech_Job）分開列
+  - LLM 標註者（主要標註者、Claude）與人工的一致率與 Cohen's kappa，整體與各看板分開列
+  - 錯誤分析與結論
+- 推噓比實驗報告 `docs/reports/s3-05-push-ratio.md` 有明確結論（採用 / 改當特徵 / 不採用）
 
 ### 階段 4：推論 consumer（S）
 
@@ -474,7 +491,7 @@
 | S7-02 | 新 inference instance 用新 consumer group 與新 `model_version` 並行 |
 | S7-03 | ClickHouse 查詢比較兩版：與人工測試集的 macro-F1、兩版不一致的文章、推論延遲 |
 
-**驗收**：產出比較報告，決定是否切換預設模型。
+**驗收**：比較結果寫入手寫的評估報告 `docs/reports/model-evaluation.md`（與階段 3 的 baseline 同一份），決定是否切換預設模型。
 
 ### 階段 8：上雲（M）
 
@@ -501,7 +518,7 @@
 
 ## 7. 設計補充
 
-寫規格與實作時發現設計文件沒說清楚的地方，以下是決定。**7.1～7.8 皆已回寫設計文件（2026-10-07）；7.9 部分已寫入設計文件 6.1～6.3，其餘待階段 2 驗收後回寫；7.10 已回寫設計文件 3.1；7.11 部分已寫入設計文件 7.4，其餘待階段 3 驗收後回寫**，本章保留決策理由。
+寫規格與實作時發現設計文件沒說清楚的地方，以下是決定。**7.1～7.8 皆已回寫設計文件（2026-10-07）；7.9 部分已寫入設計文件 6.1～6.3，其餘待階段 2 驗收後回寫；7.10 已回寫設計文件 3.1；7.11 部分已寫入設計文件 7.4，其餘待階段 3 驗收後回寫；7.12 已回寫設計文件 4.5、4.6；7.13 已回寫設計文件 5.1；7.14 已回寫設計文件 5.1、5.2、6.3、12.2；7.15 已回寫設計文件 5.1、5.2、6.1、6.3、8.3、12.2**，本章保留決策理由。
 
 ### 7.1 爬蟲如何判斷「推文數沒變就不抓內頁」
 
@@ -530,9 +547,13 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 
 `floor` 是推文在頁面中的順序。作者編輯文章時可能刪改推文，導致樓層位移、新舊推文對不上。MVP 接受此誤差；若實測影響明顯，再改用 `(user_id, commented_at, content)` 的 hash 當推文識別。
 
+2026-10-10 改為重爬時同步推文，見 7.15。
+
 ### 7.5 刪除文的處理（S1-04、S1-05）
 
 文章頁 404 時，爬蟲送出刪除快照；若 Ingest 直接 upsert，推噓數會被清成 0、內文會被清空。因此 Ingest 只把既有文章的 `is_deleted` 設為 true，保留刪除前的內容；從未見過的文章略過。
+
+刪除標記可被較新的正常快照撤銷，見 7.14。
 
 ### 7.6 標題列入變化判斷（S1-05）
 
@@ -586,12 +607,24 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - **抽樣**：`posts_latest FINAL`，排除刪除文與空內文，依看板分層，以 `cityHash64(post_id, seed)` 排序取前 N 篇（同一個 seed 重跑結果一致）
 - **送給模型的文字**：標題 + 內文，內文超過 `LABEL_MAX_CHARS`（預設 2,000 字）截斷，控制 token
 - **人工測試集**：先抽 300 篇，`post_id` 清單存 `data/testset/post_ids.txt`，人工標註存 `data/testset/human_labels.jsonl`（`data/` 不進 repo）；訓練匯出一律排除這些文章
+  - 依看板指定配額（`--counts Gossiping=180 Stock=90 Tech_Job=30`），不平均分配：Tech_Job 每天約 3 篇，抽太多就沒有文章可訓練；Stock 每天約 90 篇，留給訓練的會持續增加
+  - 任一看板可用文章不足配額時直接報錯，不默默少抽
+  - 只從階段 1 的三個看板抽；階段 3 新增的看板不在測試集內，沒有各自的 F1
+  - 主要標註者與 Claude **也要標測試集**（`backfill --testset`、`manual export --testset`），才算得出「LLM vs 人工」一致率；這些標註照樣送 `labels`，但 export 一律排除測試集，不會進訓練資料。一般抽樣（backfill、manual export）仍排除測試集，避免佔用額度
+- **階段 3 新增看板**（透過 API，不改程式）：`HatePolitics`（`interval_sec` 120、`recrawl_min_push` 10）、`Boy-Girl`（男女版，300、0），增加輿情話題的多樣性；只進 LLM 標註與訓練資料
 - **人工標註頁**：`python -m radar.ml.labeling.human_app`，只綁 `127.0.0.1`，一篇一頁、鍵盤選情緒，可補對象
 - **訓練資料**：每篇取主要標註者的整篇情緒（`target IS NULL`）；兩個標註者整篇情緒不一致的文章不進訓練集，改列入 S3-03 的人工檢查 CSV
+- **評估報告**：`docs/reports/model-evaluation.md`（進 repo）**由人撰寫**，不由程式產生；所有模型版本的分數與分析集中在這一份，之後的模型（階段 7）也寫在這裡。**報告寫完，模型的評估才算完成**
+  - 數字來源：`evaluate` 輸出的 `models/<model_version>/evaluation.md`（不進 repo），含整體與各看板（Gossiping、Stock、Tech_Job）的 macro-F1、各類別 F1、整體混淆矩陣，以及 LLM 標註者 vs 人工（整體與各看板）的一致率與 kappa
+  - 每個模型版本一節，至少寫：訓練資料（篇數、各類別數、標註者與 prompt 版本）、上述分數、錯誤分析（看幾篇判錯的文章，歸納原因）、結論與下一步
+  - Tech_Job 只有 30 篇，F1 誤差大，只供參考
 - **模型產物**：`models/<model_version>/model.joblib` 與 `model_card.json`（`models/` 不進 repo）；`model_version` = `tfidf-lr-<UTC 日期時間>`
 - **S3-08 串流標註**用 `confluent-kafka[avro]` 解 Apicurio 序列化的 Avro（schema registry client 打 Apicurio 的 ccompat API）；階段 4 推論沿用同一套
 - **服務商輪替**：`FallbackLabeler` 依序嘗試多個 `Labeler`，遇到每日額度用完換下一個；只用在串流標註（S3-08）。backfill 固定主要標註者，額度用完就停、隔天續跑
-- **標註準則**（prompt-v4，全文與修訂紀錄見 `docs/labeling-guideline.md`）：
+- **標註準則**（prompt-v6，全文與修訂紀錄見 `docs/labeling-guideline.md`）：
+  - v6（2026-10-15，依人工測試集修訂）：提問文改依語氣判斷（說反話、嘲諷、抱怨、指責或挑釁才算表態）；股票看多看空算正負面；正負混合時整篇跟著作者主張的對象；忽略簽名檔與無關內容；規則 7 補上「備註」
+  - 提問文分真心發問（整篇 neutral、被評價的對象照列）與反問酸人（依規則 5 判斷語氣）；未指名的對象不列；只有表情符號或一兩個字 → neutral（v5）
+  - 升版時已標的 v4 資料保留、不自動重標，各查詢以 `version` 區分；Groq v4 的 240 篇是否重標另行決定
   - 標題為 `[新聞]` 的文章只看作者的「心得/評論」段落；沒有或空白 → 整篇 neutral
   - 心得用了帶評價的字眼（例如「慘敗」「被打爆」「笑死」）即視為表態，整篇與該對象都依字眼的語氣判斷；只是中性摘要 → neutral。v2、v3 曾規定「整篇 neutral、對象另判」，三個模型都無法遵守，v4 改成人與模型都能一致遵守的版本
   - 轉貼他人貼文時，被轉貼者的立場不是作者的立場；只被提及、被詢問的對象不列
@@ -601,7 +634,97 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - **限速器**：`RateLimiter` 從 `collector/` 搬到 `common/rate_limit.py`，爬蟲與標註共用
 - **模型實測**（2026-10-07，prompt 調整用的 15 篇）：主要標註者 `groq: qwen/qwen3.8-27b`；`gemini-3.1-flash-lite` 當串流備援；`gemini-3.5-flash` 免費 20 次/天、`gemini-3.1-pro` 免費額度為 0、`gemma-4` 在 Gemini 回 500、OpenRouter 免費模型全部被限速
 - **錯誤分類**：每分鐘限速、5xx、連線錯誤可重試；每日額度用完停止（backfill）或換下一個（串流）；輸出格式不符重送一次（qwen 偶爾漏掉整篇那一筆）；API key、模型名稱錯誤直接中止，不逐篇略過
-- **串流標註**：`FallbackLabeler` 依 `LABEL_PRIMARY`、`LABEL_FALLBACKS` 順序嘗試，額度用完的冷卻 1 小時；`Label.labeler` 記錄實際使用的模型。Schema registry 連不上時服務停止、由 docker 重啟，不送 DLQ（否則暫時故障會讓所有訊息進 DLQ）
+- **串流標註**：`FallbackLabeler` 依 `LABEL_PRIMARY`、`LABEL_FALLBACKS` 順序嘗試，額度用完的冷卻 1 小時；全部用完時拋出帶 `retry_after_s`（最早結束冷卻的時間）的錯誤，consumer 暫停到那時再試，不每 30 秒空轉；`Label.labeler` 記錄實際使用的模型。Schema registry 連不上時服務停止、由 docker 重啟，不送 DLQ（否則暫時故障會讓所有訊息進 DLQ）
+
+### 7.12 爬蟲略過重複的重爬任務（fix，2026-10-09，#21）
+
+2026-10-08 新增 HatePolitics、Boy-Girl 後，`crawl.tasks` 每分鐘流入約 43 個任務，超過 3 個爬蟲的消化量。Scheduler 派發時就推進 `next_crawl_at`，任務在佇列裡等超過重爬間隔，同一篇會再派一次（一輪曾派 78 個），積壓越多重複越多。
+
+- **不在 Scheduler 端判斷**：Ingest 只在內容有變化時寫 `posts`（7.7），推文數沒變的重爬不會更新 `crawled_at`，Scheduler 分不出「還在佇列」與「抓過但沒變」
+- 爬蟲以 LRU（`RecentFetches`）記住 `post_id → 最後一次收到內頁回應的時間`（含 404、解析失敗；連線錯誤不算）；文章任務的 `created_at` 早於這個時間就略過，不發請求
+- 文章任務以 `post_id` 為 key，同一篇固定落在同一個 partition；列表任務順帶抓的內頁也記錄，同一個爬蟲收到的重爬可一併略過
+- 判斷用 Scheduler 的時鐘（`created_at`）比爬蟲的時鐘（抓取時間），兩者在同一台主機，誤差可忽略；誤差只會讓少數任務多抓或少抓一次
+- 重啟或 rebalance 後清空，只會多抓幾次，結果仍正確
+- 去重後若消化量仍不足，先透過 API 調整看板的 `interval_sec`、`recrawl_min_push`；不放寬限速，也暫不加 Scheduler 端背壓
+
+### 7.13 Ingest 逐筆隔離毒訊息（fix，2026-10-09，#12）
+
+能通過 `RawPost` 驗證、寫入 PG 時卻觸發 DB 錯誤的訊息，原本會讓 ingest 停止；Docker 重啟後讀到同一批又失敗，無限 crash，整個 partition 卡住。
+
+- **錯誤分類**：`IntegrityError`、`DataError` 視為該筆資料有問題（2026-10-09 實測文字含 `\x00` 時 psycopg 拋 `DataError`）；`OperationalError` 仍是暫時性錯誤；其他 DB 錯誤仍中止服務
+- **逐筆模式**：整批寫入遇到資料錯誤 → rollback → 每筆在自己的 savepoint 寫入；失敗的回報給 consumer，其他照常 commit
+- **介面**：`BatchConsumer` 的 handler 可回傳 `list[Rejection]`（`index` 對應傳入的第幾筆、`error`），consumer 依 index 找回原始 `Message` 送 `dlq` 後才 commit；回傳 `None` 等同全部成功，既有 handler 不必改
+- 同批去重（7.3）後才逐筆寫入；被去重掉的重複訊息不送 DLQ
+
+### 7.14 刪除標記可撤銷（fix，2026-10-10，#13）
+
+原本 `is_deleted` 一旦設為 true 就不會改回來，Scheduler 也不再重爬；PTT 或 Cloudflare 暫時回錯誤的 404 時，文章會被永久誤判為刪除。另外 `mark_deleted` 不看時間，較舊的 404 晚到會把已抓到 200 的文章誤標為刪除。
+
+- **撤銷**：`upsert_posts` 收到比 `posts.crawled_at` 新的正常快照，且文章已標記刪除時，視為有變化：寫入新內容並把 `is_deleted` 改回 false
+- **刪除也比時間**：`mark_deleted` 只在刪除快照比 `posts.crawled_at` 新時才標記，並把 `crawled_at` 更新為刪除快照的時間，之後較舊的 200 晚到也不會撤銷刪除
+- **復原途徑**：Scheduler 照舊排除已刪除的文章，不為真正的刪文浪費請求。被誤判的文章若還在列表上，推文數一變或爬蟲重啟（列表快取清空）就會由列表任務重抓內頁而復原；已掉出列表、推文又不再變動的無法復原，可接受
+- **不採用「連續 N 次 404 才算刪除」**：要在 Scheduler 或 Ingest 多存 404 次數，複雜度不值得
+- **下游**：撤銷是一般的 UPDATE，CDC 產生 `is_deleted=false` 的事件，`posts_latest` 以 LSN 取代；串流標註只處理新文章（`op=c`），不受影響
+
+### 7.15 推文同步（fix，2026-10-10，#14）
+
+推文以頁面順序編樓層、`ON CONFLICT DO NOTHING` 寫入；中間的推文被刪時後面全部往前移，PG 的舊樓層不會更新，最後幾則可能永遠寫不進去，`comments` 與 `posts.push_count` 對不上。
+
+- **同步而非重寫**：同一樓層內容不同才更新，超過新快照最大樓層的刪除。一般重爬只有新推文接在後面，不多寫、不多產生 CDC 事件；只有位移的那幾層會改寫
+- **只同步不舊的快照**：`upsert_posts` 之後，`posts.crawled_at <= 快照的 crawled_at` 的文章才同步（新文章、有變化而寫入的、沒變化的都算）；比較舊的快照不碰推文。刪除快照照舊不碰推文
+- **不改用 hash 識別**（issue 方案 B）：PTT 推文時間只到分鐘，同一人同一分鐘的相同推文會碰撞；且仍需處理刪除
+- **統計**：`WriteStats.comments_inserted` 改為 `comments_written`（新增＋更新）與 `comments_deleted`
+- **PG**：Alembic migration 對 `comments` 設 `REPLICA IDENTITY FULL`。代價是 `comments` 的更新、刪除在 WAL 多存整列舊值；這兩種事件只在樓層位移時發生，量很少
+- **ClickHouse**：migration `0003` 新建 `comments_latest`（`ReplacingMergeTree(lsn, is_deleted)`，`is_deleted` 由 `__deleted` 轉成 `UInt8`），複製舊 `comments` 的資料後刪除舊表與 MV。用新表名而不是原地換 engine，是因為 ClickHouse 不能改 engine，`EXCHANGE TABLES` 重跑又會換回來
+  - 先刪舊 MV 再建新 MV：中間 Kafka engine 表沒有 MV 就不消費，consumer group 的 offset 不動，不會漏訊息
+  - DDL 沒有 transaction（設計文件 6.3）；複製資料那一步重跑時舊表可能已刪，失敗需手動處理
+- **驗證**：PG 刪除推文的 CDC 事件只能在端到端環境驗證（需要 Connect、Apicurio）；假 PTT 新增「刪除某一層推文」的控制端點，`tests/e2e/test_cdc.py` 驗證刪除與位移反映到 `comments_latest FINAL`
+
+### 7.16 CDC 故障自動恢復（fix，2026-10-15，#31）
+
+2026-10-10T05:53Z，階段 2 的 24 小時驗收進行約 8 小時後，Debezium task 進入 `FAILED`，之後約 6 小時 ClickHouse 停止更新，replication slot 累積約 380 MB 的 WAL，沒有任何警告。
+
+**原因**（從 log 與 converter 3.3.3 的 bytecode 確認）：
+- Converter 的 schema 快取預設 `check-period-ms=30000`。過期後下一筆訊息會同步呼叫 Apicurio `POST .../artifacts?ifExists=FIND_OR_CREATE_VERSION`，平時大約每 30 秒一次
+- 當時 Apicurio 收到的請求沒有 body，回了 400（`Request is missing a required parameter: body`），client 端看到的是 `HttpClosedException`
+- 快取層（`ERCache`）的 `retry-count` 只重試 HTTP 429；SDK 本身雖然把 `HttpClosedException` 視為可重試（預設 3 次），Apicurio 卻只收到一次請求。實際沒有重試的原因不明，不打算深究或依賴它
+- Connect 只重試 `RetriableException`，其他例外直接讓 task 失敗，而且不會自動恢復
+
+**修正**（設計文件 6.4）：
+- **Converter 設定**（`infra/debezium/radar-cdc.json`，key 與 value 都設）：
+  - `apicurio.registry.fault-tolerant-refresh=true`：刷新失敗時沿用已快取的 schema，只記 log
+  - `apicurio.registry.check-period-ms=3600000`：快取是依 schema 內容查找，內容變了一定查不到、會立即註冊，拉長過期時間不會讓新的 schema 晚生效
+  - **限制**：task 重啟（Connect 重啟、更新設定、watchdog 重啟）會清空快取，每種 schema 要等它第一次出現時才會快取。heartbeat 在 task 啟動後超過間隔、又有新事件時才送，comments 要等有新推文。這段期間 Apicurio 停機仍會讓 task 失敗，由 watchdog 在 Apicurio 恢復後重啟（2026-10-15 e2e 實測發現）
+- **`cdc-watchdog`**（`python -m radar.cdc.watchdog`，compose 的 `app` profile）：
+  - 每 `CDC_WATCHDOG_INTERVAL_S`（預設 30 秒）查一次 `GET /connectors/<name>/status`，task 或 connector 為 `FAILED` 時呼叫 `POST /connectors/<name>/restart?includeTasks=true&onlyFailed=true`
+  - 重啟後仍然失敗，下一次重啟的間隔加倍（30 秒起，最多 10 分鐘），不設次數上限
+  - 剛進入失敗、恢復正常時各記一次（ERROR／INFO）；每次重啟記 WARNING（`SLACK_LOG_LEVEL=ERROR` 時不送 Slack），避免洗版
+  - 同時查 `pg_replication_slots`：`active=false` 持續超過 `CDC_WATCHDOG_SLOT_INACTIVE_ALERT_S`（預設 300 秒），或 `pg_current_wal_lsn() - confirmed_flush_lsn` 超過 `CDC_WATCHDOG_SLOT_LAG_ALERT_BYTES`（預設 256 MB），記 ERROR；同樣只在狀態改變時記
+  - 狀態判斷寫成純函式（輸入狀態、時間 → 輸出動作），單元測試不需要 Connect 或 PG
+  - Connect REST API 連不上、查 slot 失敗時記 WARNING，下一輪再試，服務本身不中止
+- **外部 heartbeat**（`CDC_WATCHDOG_HEARTBEAT_URL`，選填）：
+  - 每輪檢查完 ping 一次：CDC 正常時 `GET <url>`；connector 處於失敗狀態，或 slot 有任何警示時 `GET <url>/fail`
+  - Connect REST API 連不上不算異常：Connect 停太久時 slot 會變成 inactive，由 slot 的警示涵蓋，避免 Connect 重啟的 1 分鐘內誤報
+  - ping 失敗只記 WARNING，不影響檢查；HTTP（Connect、heartbeat）與 PG 查詢都設 timeout，避免卡住後 heartbeat 照常送出，讓人誤以為正常
+  - healthchecks.io 只在狀態改變時（正常↔異常、逾時）寄信，不會每輪都寄
+  - 設定：在 healthchecks.io 建一個 check，Period 1 分鐘、Grace 5 分鐘，通知方式選 email，把 ping URL 填進 `.env`
+- **Slack**：沿用 loggerhelper 的串接（`SLACK_WEBHOOK_URL` 或 `SLACK_BOT_TOKEN` + `SLACK_CHANNEL`）。建議設 `SLACK_LOG_LEVEL=ERROR`：所有服務共用 `.env`，預設的 WARNING 會把爬蟲的 HTTP 520、重試等日常訊息也送出去
+- **只能 1 個 instance**：compose 固定 `container_name`。重複重啟只會讓 task 多重啟一次，不會造成資料錯誤，所以不像 Scheduler 那樣用 advisory lock
+- **驗證**（端到端，`tests/e2e/test_cdc.py`）：
+  - 先讓 posts、comments、heartbeat 的 schema 都進快取，再停掉 Apicurio 超過舊的快取期限，新文章仍然會進 `posts_latest`。舊設定下 task 在快取刷新時失敗（stack 經過 `ERCache.performRefresh`，與 2026-10-10 相同）
+  - Apicurio 停機時重啟 Connect（快取清空），讓 task 遇到快取裡沒有的 schema 而失敗；Apicurio 恢復後，不需要人工介入，新文章能進 `posts_latest`。停掉 watchdog 時，Apicurio 恢復後 task 仍停在 `FAILED`
+  - e2e 環境把 watchdog 的檢查間隔與退避時間縮短
+
+### 7.17 抓取失敗的新文章不記進列表快取（fix，2026-10-15，#33）
+
+2026-10-15 14:30～16:20（台北）的 18 次 520／525 涉及 15 篇文章，其中 `HatePolitics.M.1792046614.A.30B` 一直沒有進 PG。列表任務不論內頁抓取成功與否都把推文數記進 `ListPushCache`，之後推文數沒變就不再抓；這篇又還不在 PG，Scheduler 也不會重爬。8.1 原本寫的「之後的重爬會再抓到」只對已在 PG 的文章成立。
+
+- **不記進快取**：列表任務抓內頁遇到 `FetchError`（含暫時性錯誤重試 5 次後放棄）時，不呼叫 `remember`，下一輪列表輪詢會再抓
+- **最多重試 3 輪**：同一篇在列表任務中連續失敗 3 次就照常記進快取並記 ERROR（可能永久漏抓），避免一篇一直失敗的文章每輪都多發請求；計數存在 handler 內，最多記 1,000 篇（超過丟最舊的），重啟後清空
+- **解析失敗、404 照舊記進快取**：重抓結果相同
+- **`fetch_and_publish_post` 改回傳結果種類**（`PostOutcome`：送出、解析失敗、抓取失敗），列表任務據此決定要不要記進快取；文章任務照舊不需要
+- **log 等級**：單次抓取失敗（列表頁、內頁）改記 WARNING；連續 20 次抓取失敗（不分網址）記一次 ERROR、之後第一次成功記 INFO。日常 0.4% 的 52x 幾乎不可能連續 20 次，連續失敗代表 PTT 或 Cloudflare 長時間無法連線，需要人處理
+- 門檻（3 輪、1,000 篇、20 次）是 `CrawlHandler` 的建構參數，與既有的 `max_list_pages`、`max_transient_attempts` 一致，不另開環境變數
 
 ---
 
@@ -613,13 +736,14 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 |---|---|---|
 | ~~ClickHouse 讀不了 Apicurio 的 Avro 格式~~ | 階段 2 卡住 | **已排除（S2-01，2026-10-07）**：可直接讀，條件見設計文件 6.2 |
 | Debezium / Apicurio 升級後行為改變 | CDC 或 ClickHouse 讀取中斷 | 版本固定在 `.env.example`；升級時重跑設計文件 6.2 的檢查（2.x → 3.x 時就發現設定名稱被移除且不報錯） |
+| Connect task 失敗後停止 | ClickHouse 停止更新、WAL 累積 | Converter 快取設定減少失敗；`cdc-watchdog` 自動重啟並監看 replication slot（7.16） |
 | PTT 封鎖 IP | 資料中斷 | 請求速率預算（≤ 1 次/秒）、隨機間隔、7.2 的重爬門檻 |
 | PTT 版面改版 | parser 失效 | `raw.html` 保留 3 天可重新解析；parser 失敗記 ERROR（可送 Slack），驗證失敗的訊息進 DLQ，`/status` 可看到 DLQ 數量 |
 | PTT 恢復伺服器端的 over18 檢查 | 列表頁變成確認頁 | 2026-10 實測伺服器端已不檢查（只在瀏覽器以 JS 導向）；爬蟲仍帶 `over18=1` cookie，parser 遇到確認頁會拋 `ParseError` |
 | LLM 免費額度不足或政策改變 | 標註進度變慢或成本上升 | 實測 `gemini-3.5-flash` 免費只有 20 次/天、`gemini-3.1-pro` 為 0；`Labeler` 介面可換服務商（Groq、OpenRouter、Gemini）或改付費 Batch API；backfill 可中斷續跑 |
 | 單機記憶體不足（設計估 6～7GB） | 服務被 OOM kill | JVM heap 上限；階段 2 完成時實測記憶體 |
-| PTT 回 HTTP 520（Cloudflare） | 該篇內頁本輪略過 | 24 小時驗收：520 ×23、525 ×14、521 ×4，佔請求 < 0.1%，之後的重爬會再抓到；**決定維持不重試**（重試會增加觸發 #11 的機會） |
-| 開發機休眠 | 長時間驗收中斷、數據缺一段 | 驗收期間 `caffeinate -dims` 並接電源、不闔上螢幕（闔上仍會強制睡眠）；上雲後（階段 8）不再依賴開發機 |
+| PTT 回 HTTP 520（Cloudflare） | 該篇內頁本輪略過 | 24 小時驗收：520 ×23、525 ×14、521 ×4，佔請求 < 0.1%；**決定維持不重試**（重試會增加觸發 #11 的機會）。已在 PG 的文章由重爬補抓；新文章不記進列表快取，下一輪列表輪詢再抓（7.17）；單次記 WARNING，連續 20 次失敗才記 ERROR |
+| 開發機休眠 | 長時間驗收中斷、數據缺一段 | 驗收期間 `caffeinate -dims` 並接電源、不闔上螢幕（闔上仍會強制睡眠）；`cdc-watchdog` 的外部 heartbeat 停止時會寄 email（7.16）；上雲後（階段 8）不再依賴開發機 |
 | 標註的系統性偏差 | 模型學到錯誤標準，資料越多越確定 | 固定主要標註者、改 prompt 修偏差、兩個不同家族的標註者交叉比對、人工測試集裁決（7.11） |
 | Python 端讀不了 CDC 的 Avro | S3-08 串流標註、階段 4 推論卡住 | 採用 `confluent-kafka[avro]`（fastavro + 官方 schema registry client，打 Apicurio 的 ccompat API）；已用 mock schema registry 與 S2-01 實測的欄位驗證解碼，待以實際 CDC 訊息確認 |
 

@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from confluent_kafka import KafkaError
+from confluent_kafka import KafkaError, TopicPartition
 
 
 class FakeError:
@@ -104,6 +104,16 @@ class FakeProducer:
         return self.remaining_on_flush
 
 
+class FakeClock:
+    """poll(timeout) 會推進時間，等待不必真的 sleep。"""
+
+    def __init__(self) -> None:
+        self.t = 0.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
 @dataclass
 class FakeConsumer:
     """依序回傳 batches；用完後呼叫 on_exhausted（通常是 BatchConsumer.stop）。"""
@@ -111,11 +121,22 @@ class FakeConsumer:
     batches: list[list[FakeMessage]]
     on_exhausted: Callable[[], None] | None = None
     subscribed: list[str] = field(default_factory=list)
+    on_assign: Callable[..., None] | None = None
     commits: int = 0
+    commit_errors: list[Exception] = field(default_factory=list)
     closed: bool = False
+    assigned: list[TopicPartition] = field(default_factory=lambda: [TopicPartition("in", 0)])
+    paused: set[tuple[str, int]] = field(default_factory=set)
+    pause_calls: int = 0
+    resume_calls: int = 0
+    poll_results: list[FakeMessage | None] = field(default_factory=list)
+    polls: list[float] = field(default_factory=list)
+    seeks: list[tuple[str, int, int]] = field(default_factory=list)
+    clock: FakeClock | None = None
 
-    def subscribe(self, topics: list[str]) -> None:
+    def subscribe(self, topics: list[str], on_assign: Callable[..., None] | None = None) -> None:
         self.subscribed = topics
+        self.on_assign = on_assign
 
     def consume(self, num_messages: int, timeout: float) -> list[FakeMessage]:
         if self.batches:
@@ -124,7 +145,32 @@ class FakeConsumer:
             self.on_exhausted()
         return []
 
+    def poll(self, timeout: float = -1) -> FakeMessage | None:
+        self.polls.append(timeout)
+        if self.clock is not None:
+            self.clock.t += timeout
+        return self.poll_results.pop(0) if self.poll_results else None
+
+    def assignment(self) -> list[TopicPartition]:
+        return list(self.assigned)
+
+    def assign(self, partitions: list[TopicPartition]) -> None:
+        self.assigned = list(partitions)
+
+    def pause(self, partitions: list[TopicPartition]) -> None:
+        self.pause_calls += 1
+        self.paused |= {(p.topic, p.partition) for p in partitions}
+
+    def resume(self, partitions: list[TopicPartition]) -> None:
+        self.resume_calls += 1
+        self.paused -= {(p.topic, p.partition) for p in partitions}
+
+    def seek(self, partition: TopicPartition) -> None:
+        self.seeks.append((partition.topic, partition.partition, partition.offset))
+
     def commit(self, asynchronous: bool = True) -> None:
+        if self.commit_errors:
+            raise self.commit_errors.pop(0)
         self.commits += 1
 
     def close(self) -> None:

@@ -89,6 +89,7 @@
 | Ingest consumer | 1+ | 批次 upsert 進 PG，把快照轉成差異 |
 | PostgreSQL | 1 | Source of truth |
 | Debezium | 1 | 把 PG 的變化轉成事件 |
+| CDC watchdog | 1 | 監看 connector 與 replication slot，task 失敗時自動重啟（6.4） |
 | Apicurio | 1 | Schema Registry |
 | ClickHouse | 1 | OLAP 分析、熱度曲線、訓練資料來源 |
 | Telegram bot | 1 | 推送警示與每日摘要、接收訂閱指令 |
@@ -240,6 +241,7 @@ LIMIT 500;                                               -- 其餘留到下一�
 
 - 先送出任務並 flush，成功後才依文章年齡算出新的 `next_crawl_at` 寫回 `crawl_state`：送出失敗就不推進排程，下一輪重試；寫入失敗只會重複派發，無害
 - 超過 24 小時的文章把 `next_crawl_at` 設到一年後，不會再被查到
+- 派發時就推進 `next_crawl_at`，不等爬蟲處理完：`crawl.tasks` 積壓超過重爬間隔時，同一篇會再派一次。Scheduler 拿不到爬取結果（Ingest 只在內容有變化時寫 PG），重複的任務由爬蟲略過（4.6）
 
 #### 為什麼獨立成 `crawl_state` 表
 
@@ -250,11 +252,16 @@ LIMIT 500;                                               -- 其餘留到下一�
 - 屬於同一個 consumer group，消費 `crawl.tasks`，結果寫入 `raw.posts` 與 `raw.html`（皆以 `post_id` 為 key）
 - 不碰 PG、不讀設定
 - 一次處理一個任務：一個列表任務可能牽動約 20 次請求，整批重試代價高
+- **略過重複的重爬任務**：爬蟲以 LRU 記住 `post_id → 最後一次抓內頁的時間`；文章任務的 `created_at` 早於這個時間，代表派發之後已經抓過，不發請求直接略過
+  - 文章任務的 key 是 `post_id`，同一篇固定由同一個爬蟲處理，記錄在本機就夠
+  - 重啟或 rebalance 後清空，只會多抓幾次
 - **速率限制**：每次請求間隔 2 秒 + 0～2 秒隨機，平均約 3 秒一次；3 個爬蟲合計約 1 次/秒
 - **HTTP 回應**：
   - 200、404 正常處理；文章頁 404 視為被刪除，送出 `is_deleted=true` 的快照（推噓數為 0、沒有推文）
-  - 429、5xx、逾時、連線錯誤 → 整批重試，不 commit
-  - 其他狀態（403、3xx）與解析失敗 → 記錄 ERROR 後略過，不重試，避免卡住 partition
+  - 429、5xx、逾時、連線錯誤 → 整批重試，不 commit；同一個網址連續 5 次仍失敗就略過（同 403），避免一篇卡住整個 partition
+  - 其他狀態（403、3xx、Cloudflare 的 520／525）→ 記 WARNING 後略過，不重試；解析失敗記 ERROR（重抓結果相同，需要修 parser）
+  - **略過之後誰補抓**：已在 PG 的文章由 Scheduler 的重爬補抓；列表任務裡的新文章還不在 PG，抓取失敗時**不記進列表快取**，下一輪列表輪詢會再抓，連續 3 輪都失敗才放棄並記 ERROR（這篇可能永久漏抓，#33）
+  - 連續 20 次抓取失敗（PTT 或 Cloudflare 長時間無法連線）記一次 ERROR，恢復後記 INFO；單次失敗只記 WARNING，避免 Slack 被日常的 52x 淹沒
 - 文章頁先送 `raw.html` 再解析，解析失敗時仍可在修好 parser 後重新解析
 - 每批結束 flush producer，訊息落地後才 commit
 - 每次請求帶 `over18=1` cookie；2026-10 實測 PTT 伺服器端已不擋未帶 cookie 的請求（只在瀏覽器以 JS 導向），parser 仍會對 `/ask/over18` 頁面拋錯以防恢復
@@ -270,8 +277,14 @@ LIMIT 500;                                               -- 其餘留到下一�
 - upsert 冪等，at-least-once 即可
 - **同批去重**：同一個 `post_id` 只留 `crawled_at` 最新的一筆；`ON CONFLICT DO UPDATE` 不能在同一個語句更新同一列兩次
 - **推文分段**：每 5000 列送一次，避開 PG 單一語句 65535 個參數的上限
-- **刪除快照**：只把既有文章的 `is_deleted` 設為 true，保留刪除前的內容；從未見過的文章略過，已標記的不重複寫
-- **錯誤處理**：DB 連線錯誤 → 整批重試；其他 DB 錯誤（例如約束違反）直接中止服務，避免資料靜默遺失；格式不合法的訊息由 consumer 送 `dlq`
+- **刪除快照**：只把既有文章的 `is_deleted` 設為 true 並更新 `crawled_at`，保留刪除前的內容；從未見過的文章略過，已標記的不重複寫；比 `posts.crawled_at` 舊的刪除快照略過（較晚到的舊 404 不可蓋掉較新的 200）
+- **推文同步**：推文以頁面上的順序編樓層，中間有推文被刪時後面全部往前移一層。快照不比 `posts.crawled_at` 舊時才同步：同一樓層內容不同就更新，超過新快照最大樓層的刪除；比較舊的快照不碰推文（否則晚到、推文較少的舊快照會刪掉新推文）。一般重爬只是新推文接在後面，舊樓層不變，不會多寫
+- **撤銷刪除**：已標記刪除的文章收到比 `crawled_at` 新的正常快照時，`is_deleted` 改回 false 並寫入新內容，避免 PTT／Cloudflare 暫時性的錯誤 404 讓文章被永久誤判為刪除。Scheduler 照舊不重爬已刪除的文章；被誤判的文章若還在列表上，推文數一變（或爬蟲重啟、快取清空）列表任務就會重抓內頁而復原。真的被刪的文章在列表上沒有連結，不會被重抓
+- **錯誤處理**：
+  - DB 連線錯誤（`OperationalError`）→ 整批重試
+  - 資料錯誤（`IntegrityError`、`DataError`，例如約束違反、文字含 `\x00`）→ rollback 後改成逐筆寫入（每筆一個 savepoint），寫不進去的送 `dlq`，其餘照常寫入並 commit；只在出錯時逐筆，平常仍整批寫入
+  - 其他 DB 錯誤（例如 schema 與程式不一致）→ 中止服務，避免資料靜默遺失
+  - 格式不合法的訊息由 consumer 送 `dlq`
 
 ### 5.2 帶條件的 upsert
 
@@ -284,16 +297,35 @@ ON CONFLICT (post_id) DO UPDATE SET
   boo_count  = EXCLUDED.boo_count,
   title      = EXCLUDED.title,
   content    = EXCLUDED.content,
-  crawled_at = EXCLUDED.crawled_at
+  crawled_at = EXCLUDED.crawled_at,
+  is_deleted = FALSE                                          -- 撤銷刪除
 WHERE posts.crawled_at < EXCLUDED.crawled_at                  -- 舊快照不覆蓋新的
-  AND (posts.push_count IS DISTINCT FROM EXCLUDED.push_count
+  AND (posts.is_deleted
+    OR posts.push_count IS DISTINCT FROM EXCLUDED.push_count
     OR posts.boo_count  IS DISTINCT FROM EXCLUDED.boo_count
     OR posts.title      IS DISTINCT FROM EXCLUDED.title       -- 作者可能改標題
     OR posts.content    IS DISTINCT FROM EXCLUDED.content);   -- 沒變化就不寫
 
+-- 推文：只處理快照不比 posts.crawled_at 舊的文章
 INSERT INTO comments (post_id, floor, type, user_id, content, commented_at)
 VALUES (...)
-ON CONFLICT (post_id, floor) DO NOTHING;
+ON CONFLICT (post_id, floor) DO UPDATE SET
+  type = EXCLUDED.type, user_id = EXCLUDED.user_id,
+  content = EXCLUDED.content, commented_at = EXCLUDED.commented_at
+WHERE (comments.type, comments.user_id, comments.content, comments.commented_at)
+  IS DISTINCT FROM
+  (EXCLUDED.type, EXCLUDED.user_id, EXCLUDED.content, EXCLUDED.commented_at);
+
+DELETE FROM comments
+USING (VALUES (...)) AS v(post_id, max_floor)                 -- 新快照的最大樓層，沒推文為 0
+WHERE comments.post_id = v.post_id AND comments.floor > v.max_floor;
+
+-- 刪除快照
+UPDATE posts SET is_deleted = TRUE, crawled_at = v.crawled_at
+FROM (VALUES (...)) AS v(post_id, crawled_at)
+WHERE posts.post_id = v.post_id
+  AND NOT posts.is_deleted
+  AND posts.crawled_at < v.crawled_at;
 ```
 
 沒有變化就不寫入，也就不產生 CDC 事件。
@@ -367,7 +399,8 @@ CREATE INDEX ON crawl_state (next_crawl_at);
 - `table.include.list` 只包含 `posts`、`comments`；publication `radar_cdc` 由 Alembic migration 建立，Debezium 不自動建立（`publication.autocreate.mode=disabled`）
 - Avro 格式，schema 由 Apicurio 管理；Apicurio 使用同一個 PG instance 裡**獨立的 database** `apicurio`
 - 開啟 `heartbeat.interval.ms`，避免冷門時段 replication slot 停滯、WAL 累積；broker 關閉了自動建立 topic，heartbeat topic 要列在 `topics.yaml`
-- `ExtractNewRecordState` 攤平訊息，附加 `__op`、`__source_ts_ms`、`__source_lsn`；PG 端的刪除以 `delete.tombstone.handling.mode=rewrite` 改寫成 `__deleted=true`（與 PTT 刪文的 `is_deleted` 是兩回事，系統不會刪 PG 的列）
+- `ExtractNewRecordState` 攤平訊息，附加 `__op`、`__source_ts_ms`、`__source_lsn`；PG 端的刪除以 `delete.tombstone.handling.mode=rewrite` 改寫成 `__deleted=true`（與 PTT 刪文的 `is_deleted` 是兩回事）。`posts` 的列不會被刪；`comments` 在推文樓層位移時會被改寫或刪除（5.1），因此設 `REPLICA IDENTITY FULL`，刪除事件才帶完整的舊列（預設只帶主鍵，其他欄位是 null，ClickHouse 的非 Nullable 欄位會解析失敗）
+- Converter 的 schema 快取：`fault-tolerant-refresh=true`、`check-period-ms` 拉長到 1 小時。預設每 30 秒過期，過期後下一筆訊息就要同步向 Apicurio 註冊 schema，任何一次失敗都會讓 task 永久停止（6.4）
 - 版本：Debezium 3.7.0.Final（`quay.io/debezium/connect`，Docker Hub 的 `debezium/connect` 已停止更新）、Apicurio Registry 3.3.3
 
 ### 6.2 ClickHouse 讀取 Avro 的方式（S2-01 驗證結果）
@@ -397,16 +430,37 @@ ClickHouse 的 `AvroConfluent` 格式能直接讀 Apicurio 序列化的訊息，
 |---|---|---|---|
 | `posts_latest` | `ReplacingMergeTree(lsn)` | `cdc.public.posts` | 最新狀態 |
 | `posts_history` | `MergeTree` | `cdc.public.posts` | 推噓數變化歷程 |
-| `comments` | `MergeTree` | `cdc.public.comments` | 每分鐘新增推文數；多一個 `board` 欄位（從 `post_id` 取出，PG 的 `comments` 沒有），依看板統計時不必 join |
+| `comments_latest` | `ReplacingMergeTree(lsn, is_deleted)` | `cdc.public.comments` | 每分鐘新增推文數；多一個 `board` 欄位（從 `post_id` 取出，PG 的 `comments` 沒有），依看板統計時不必 join；PG 端的改寫、刪除以 LSN 取代，`is_deleted` 來自 `__deleted`，查詢加 `FINAL` 才會去掉已刪除的列 |
 | `labels` | `MergeTree` | `labels` | 標註結果；一則訊息的 `sentiments` 以 `ARRAY JOIN` 攤成一列一個 (target, polarity)（15.3） |
 | `predictions` | `MergeTree` | `predictions` | 推論結果（含 `model_version`） |
 | `alerts` | `MergeTree` | `alerts` | 警示紀錄 |
 
 - `posts_latest` 的 version 用 `__source_lsn`：同一列的後續變更 LSN 一定較大；`ts_ms` 是毫秒，同一毫秒內多次變更會分不出先後
-- 查詢 `posts_latest` 加 `FINAL` 或用 `argMax`
-- PTT 刪文以 `is_deleted` 處理
+- 查詢 `posts_latest`、`comments_latest` 加 `FINAL` 或用 `argMax`
+- PTT 刪文以 `is_deleted` 處理；撤銷刪除只是 `is_deleted` 改回 false 的一般更新，`posts_latest` 以較大的 LSN 取代即可
 - JSON topic 同樣用 named collection（`json_kafka`），並設 `input_format_skip_unknown_fields=1`：訊息只做加欄位的相容變更（開發規格 2.2），新欄位不會讓 ClickHouse 卡住
 - ClickHouse 的 schema 以 `infra/clickhouse/migrations/` 的編號 SQL 檔管理，已合併的檔案不可修改（同 Alembic）
+
+### 6.4 故障處理
+
+Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED`，不會自動恢復，要手動重啟。這時爬蟲與 Ingest 照常運作，所以 consumer lag、DLQ 都看不出異常；但 ClickHouse 會停止更新，replication slot 沒人讀，PG 的 WAL 持續累積（2026-10-10 驗收時發生，約 70 MB/小時，#31）。
+
+分三層處理：
+
+| 層 | 作法 | 處理的情況 |
+|---|---|---|
+| 減少失敗 | Converter 快取設定（6.1） | 快取過期後，向 Apicurio 刷新時偶發的連線錯誤 |
+| 自動恢復 | 常駐服務 `cdc-watchdog` 定期查 connector 狀態，`FAILED` 時呼叫 Connect REST API 重啟失敗的 task，間隔以指數退避拉長 | 其他原因造成的 task 失敗（例如 Apicurio 停機期間遇到新的 schema） |
+| 讓人知道 | `cdc-watchdog` 同時檢查 replication slot：`active=false` 持續太久，或 WAL 延遲超過門檻，就記 ERROR，由 loggerhelper 送到 Slack | 自動恢復失敗、PG 端的問題 |
+| 監看 watchdog 本身 | `cdc-watchdog` 每輪 ping 外部的 heartbeat 服務（healthchecks.io）；CDC 異常時改 ping `/fail`。外部服務超過期限沒收到 ping，或收到 `/fail`，就寄 email | watchdog crash、卡住、開發機睡眠或 Docker 停止；Slack 漏看 |
+
+- **為什麼要外部服務**：監控程式和被監控的服務在同一台機器上，無法回報「整台機器停了」（2026-10-10 的驗收監控腳本就是無聲無息地停了 10 小時）；只有「該收到卻沒收到就通知」的外部服務能涵蓋這種情況
+- **heartbeat 只帶 URL，不送任何資料內容**；沒設定 URL 就不送（測試與 e2e 環境都不設）
+
+- **不用 Connect 內建的錯誤處理**：`errors.retry.timeout` 只重試 `RetriableException`；`errors.tolerance=all` 會丟掉訊息，資料不完整
+- **不設 `max_slot_wal_keep_size`**：超過上限時 PG 會讓 slot 失效，必須重新 snapshot；寧可記 ERROR 讓人處理
+- **重啟後會重送**：Debezium 從最後一次 flush 的 offset 接續，之後的事件會再送一次。`posts_latest`、`comments_latest` 以 LSN 去重不受影響；`posts_history` 是 `MergeTree`，會出現 `(post_id, lsn)` 相同的重複列，畫曲線時要以 LSN 去重
+- `cdc-watchdog` 只讀 PG 的系統表，不寫入任何表（5.4）
 
 ---
 
@@ -481,7 +535,7 @@ ClickHouse 的 `AvroConfluent` 格式能直接讀 Apicurio 序列化的訊息，
 
 ### 8.3 熱度偵測
 
-- 輸入：`cdc.public.comments`、`cdc.public.posts`
+- 輸入：`cdc.public.comments`、`cdc.public.posts`；`comments` 的事件除了新增（`c`）也有改寫（`u`）、刪除（`d`），計算新增推文數時只算 `c`
 - 依文章 / 看板做滑動視窗統計（每 1 分鐘、視窗 10 分鐘），之後擴充到實體、主題（見 15.2）
 - 與歷史基準比較（z-score / EWMA），超過門檻寫入 `alerts`
 - Quix Streams：純 Python、狀態存 RocksDB 並備份到 changelog topic
@@ -522,6 +576,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 │   │   ├── crawler.py       # [常駐 ×N]（http、list_cache）
 │   │   └── parsers/         # PTT 列表頁與文章頁解析
 │   ├── ingest/              # [常駐] main、writer
+│   ├── cdc/watchdog.py      # [常駐 ×1] 監看 Debezium connector 與 replication slot
 │   ├── ml/
 │   │   ├── labeling/
 │   │   │   ├── prompt.py    # 標註準則（RULES）與輸出格式，對應 docs/labeling-guideline.md
@@ -550,7 +605,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 
 | 類型 | 程式 | 執行方式 |
 |---|---|---|
-| 常駐 | api、scheduler、crawler、ingest、labeling/stream、inference、heat、bot | docker-compose service |
+| 常駐 | api、scheduler、crawler、ingest、cdc/watchdog、labeling/stream、inference、heat、bot | docker-compose service |
 | 一次性 | labeling/backfill、manual、cross_check、testset、experiments/*、training/* | 手動執行或 Colab |
 | 本機 | labeling/human_app | 人工標註時執行，只綁 127.0.0.1 |
 
@@ -571,9 +626,10 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 | `scheduler` | `app` | 只能 1 個；多開時其餘的待命 |
 | `crawler` | `app` | `replicas: 3` |
 | `ingest` | `app` | |
+| `cdc-watchdog` | `app` | 只能 1 個；多開會重複重啟 connector（6.4） |
 
 - `make up-app` 啟動整套；自寫服務等 `init` 成功結束後才啟動
-- 端到端測試另加 `infra/docker-compose.e2e.yaml`：假 PTT 伺服器、爬蟲改打它、重爬間隔縮短，並改用 e2e 專用的資料 volume，不碰開發資料
+- 端到端測試另加 `infra/docker-compose.e2e.yaml`：假 PTT 伺服器、爬蟲改打它、重爬間隔縮短，並改用 e2e 專用的資料與 log volume（`e2e_app_logs`），不碰開發資料；`make e2e-down` 的 `down -v` 只會刪到 e2e 專用的 volume（#29）
 - 所有服務 `restart: unless-stopped`（`init` 除外）
 
 ### 10.4 上雲
@@ -627,8 +683,13 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 - [ ] `crawled_at` 列入變化判斷 → 每次重爬都產生事件
 - [ ] 同一批有重複的 `post_id` 沒先去重 → `ON CONFLICT DO UPDATE` 直接報錯
 - [ ] 刪除快照直接 upsert → 推噓數被清成 0、內文被清空
+- [ ] 刪除標記不可逆、不比較 `crawled_at` → 暫時性的 404 或晚到的舊 404 讓文章被永久誤判為刪除
 - [ ] 一次 INSERT 太多推文 → 超過 PG 65535 個參數上限
+- [ ] 推文只新增不同步 → 中間的推文被刪後樓層位移，`comments` 與頁面、推噓數對不上
+- [ ] 會被刪除的表沒設 `REPLICA IDENTITY FULL` → Debezium 刪除事件只帶主鍵，下游的非 Nullable 欄位解析失敗
 - [ ] Debezium 沒開 heartbeat → WAL 塞滿硬碟
+- [ ] Connect task `FAILED` 沒人重啟、只看 consumer lag → CDC 停了好幾個小時都沒發現，WAL 持續累積
+- [ ] Apicurio converter 用預設的快取設定 → 每 30 秒同步刷新一次 schema，一次連線失敗就讓 task 永久停止
 - [ ] ClickHouse 用一般 MergeTree 存最新狀態 → 重複列
 
 ### 12.3 排程
@@ -640,6 +701,8 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 - [ ] 服務比 topic 先啟動 → 派發逾時、consumer 訂閱不到 topic（由 `init` 先建好）
 - [ ] 看板頻率沒有下限 → IP 被封鎖
 - [ ] 每篇文章都依年齡重爬 → Gossiping 的請求量超出預算（用 `recrawl_min_push` 門檻）
+- [ ] 積壓時同一篇被重複派發，每個重複任務都發請求 → 積壓自我放大（爬蟲略過派發後已抓過的文章，4.6）
+- [ ] 抓取失敗的新文章也記進列表快取 → 推文數沒變就不再抓，又還不在 PG、沒有重爬，永久漏抓（4.6）
 
 ### 12.4 ML 與資源
 

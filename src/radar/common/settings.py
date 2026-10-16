@@ -76,6 +76,30 @@ class ConnectSettings(BaseSettings):
     ready_timeout_s: float = 180.0
 
 
+class CdcWatchdogSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="CDC_WATCHDOG_")
+
+    connector_name: str = "radar-cdc"
+    slot_name: str = "radar_cdc"
+    interval_s: float = 30.0
+    restart_backoff_initial_s: float = 30.0
+    restart_backoff_max_s: float = 600.0
+    slot_inactive_alert_s: float = 300.0
+    slot_lag_alert_bytes: int = 256 * 1024 * 1024
+    # healthchecks.io 的 ping URL；None 時不送 heartbeat（測試與 e2e 不設）
+    heartbeat_url: str | None = None
+    # Connect、heartbeat、PG 查詢共用；卡住時 heartbeat 會停，外部服務才會發現
+    request_timeout_s: float = 10.0
+
+    @field_validator("heartbeat_url", mode="before")
+    @classmethod
+    def _blank_heartbeat_is_none(cls, value: object) -> object:
+        # NOTE: e2e 以空字串覆寫 .env 的值來關閉 heartbeat（infra/docker-compose.e2e.yaml）
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+
 class SchemaRegistrySettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SCHEMA_REGISTRY_")
 
