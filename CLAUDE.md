@@ -113,8 +113,9 @@ make e2e-up && make e2e && make e2e-down  # 端到端測試（假 PTT，不碰�
 
 ### 同時有多個 PR 時（避免 docs 衝突）
 
-- 已有未合併的 PR、新分支又會改到 docs 時，新分支從**前一個分支**開（stacked），PR 的 base 設為前一個分支；前一個合併後 GitHub 會自動把 base 改回 `develop`，合併時照順序
-- 交給我 review 前，先在本機把所有未合併的 PR 模擬合併一次（`git merge --no-commit --no-ff`）；有衝突就先 rebase 該功能分支解決（只對功能分支 `--force-with-lease`），不把會衝突的 PR 交給我
+- 每個功能分支都從 `develop` 開、各自 rebase 到 `develop`、各自開 PR 到 `develop`；**不把分支疊在另一個未合併的功能分支上**（PR 會夾帶前一個的 commit，分開 PR 就失去意義）
+- 多個 PR 改到同一份 docs 而互相衝突時，在 PR 說明寫明合併順序；先合併的進去後，再把後面的分支 rebase 到 `develop` 解衝突
+- 交給我 review 前，先在本機把所有未合併的 PR 模擬合併一次（`git merge --no-commit --no-ff`）；和 `develop` 衝突就先 rebase 該功能分支解決（只對功能分支 `--force-with-lease`），不把和 `develop` 衝突的 PR 交給我；PR 之間避不開的 docs 衝突照上一條處理
 - 寫 docs 時避開熱點：進度表的新列放在相關階段的列旁邊；第 7 章新小節的標題寫上 issue 編號
 
 ## 文件同步
