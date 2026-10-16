@@ -111,6 +111,31 @@ class CdcWatchdogSettings(BaseSettings):
         return value
 
 
+class HeatSettings(BaseSettings):
+    """熱度偵測（開發規格 7.20）；門檻預設值見 S5-04。"""
+
+    model_config = SettingsConfigDict(env_prefix="HEAT_")
+
+    # 回放與驗收時改成 replay.cdc.comments，並換 consumer_group，state 才不會和正式的混在一起
+    input_topic: str = "cdc.public.comments"
+    consumer_group: str = "heat"
+    state_dir: Path = Path("state")
+    window_min: int = 10
+    grace_min: int = 2
+    # 推文時間比觀測時間早超過這麼久的不計入（補抓、舊爆文；開發規格 7.20）
+    max_delay_min: int = 30
+    # 觀測時間比處理當下早超過這麼久的只更新基準、不觸發警示
+    stale_after_min: int = 60
+    ewma_alpha: float = 0.02
+    # watermark 一次前進超過這麼多分鐘時，只補最後這幾分鐘的 0
+    max_gap_min: int = 1440
+    z_threshold: float = 3.0
+    min_count: int = 30
+    cooldown_min: int = 30
+    warmup_min: int = 60
+    min_std: float = 1.0
+
+
 class SchemaRegistrySettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SCHEMA_REGISTRY_")
 

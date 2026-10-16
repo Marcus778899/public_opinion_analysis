@@ -8,5 +8,7 @@ CDC_COMMENTS = "cdc.public.comments"
 LABELS = "labels"
 PREDICTIONS = "predictions"
 ALERTS = "alerts"
+# 熱度偵測的回放與人工暴增（開發規格 7.20）
+REPLAY_COMMENTS = "replay.cdc.comments"
 DLQ = "dlq"
 CDC_HEARTBEAT = "__debezium-heartbeat.cdc"

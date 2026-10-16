@@ -213,6 +213,19 @@ services:
       - app_logs:/app/log
       - ../models:/app/models:ro
 
+  # 熱度偵測（S5-01～S5-04，開發規格 7.20）：make up-alerting 才啟動
+  heat:
+    <<: *app
+    container_name: radar_heat
+    profiles: ["alerting"]
+    command: ["python", "-m", "radar.streaming.heat"]
+    environment:
+      <<: *app-env
+      HEAT_STATE_DIR: '/app/state'
+    volumes:
+      - app_logs:/app/log
+      - heat_state:/app/state
+
   # 串流抽樣標註（S3-08）：會持續呼叫 LLM API，獨立 profile，make up-labeling 才啟動
   label-stream:
     <<: *app
@@ -351,6 +364,7 @@ services:
 
 volumes:
   app_logs:
+  heat_state:
   kafka_1_data:
   kafka_2_data:
   kafka_3_data:

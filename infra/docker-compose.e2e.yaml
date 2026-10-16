@@ -57,6 +57,10 @@ services:
   inference:
     volumes:
       - e2e_app_logs:/app/log
+  heat:
+    volumes:
+      - e2e_app_logs:/app/log
+      - e2e_heat_state:/app/state
 
   crawler:
     environment:
@@ -95,3 +99,4 @@ volumes:
   e2e_kafka_3_data:
   e2e_clickhouse_data:
   e2e_app_logs:
+  e2e_heat_state:

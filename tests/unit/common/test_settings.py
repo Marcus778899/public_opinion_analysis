@@ -9,6 +9,7 @@ from radar.common.settings import (
     ClickHouseSettings,
     ConnectSettings,
     CrawlerSettings,
+    HeatSettings,
     InferenceSettings,
     KafkaSettings,
     LabelingSettings,
@@ -208,3 +209,14 @@ def test_inference_settings_defaults(no_inference_env, monkeypatch):
 
     assert str(s.model_dir) == "models/tfidf-lr-x"
     assert (s.cache_size, s.batch_size) == (200_000, 100)
+
+
+def test_heat_settings_defaults_match_dev_spec(monkeypatch):
+    for key in [k for k in os.environ if k.startswith("HEAT_")]:
+        monkeypatch.delenv(key)
+
+    s = HeatSettings()
+
+    assert (s.input_topic, s.consumer_group) == ("cdc.public.comments", "heat")
+    assert (s.window_min, s.grace_min, s.max_delay_min, s.stale_after_min) == (10, 2, 30, 60)
+    assert (s.z_threshold, s.min_count, s.cooldown_min, s.warmup_min) == (3.0, 30, 30, 60)
