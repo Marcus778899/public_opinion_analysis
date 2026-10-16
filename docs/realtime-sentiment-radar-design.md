@@ -545,7 +545,11 @@ Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED
 - 輸入：`cdc.public.comments`、`cdc.public.posts`；`comments` 的事件除了新增（`c`）也有改寫（`u`）、刪除（`d`），計算新增推文數時只算 `c`
 - 依文章 / 看板做滑動視窗統計（每 1 分鐘、視窗 10 分鐘），之後擴充到實體、主題（見 15.2）
 - 與歷史基準比較（z-score / EWMA），超過門檻寫入 `alerts`
-- Quix Streams：純 Python、狀態存 RocksDB 並備份到 changelog topic
+- Quix Streams：純 Python、狀態存 RocksDB 並備份到 changelog topic；以 exactly-once 處理，重啟後不重送已發過的警示
+- 以看板為 key 分組，文章與看板兩種單位在同一份 state 計算（文章要和看板的基準比較）
+- 時間基準用觀測時間（推文進 PG 的時間），寬限 2 分鐘：推文要等爬蟲抓到才看得到，進 PG 時已晚約 8 分鐘，用推文時間會把大部分推文當成遲到丟掉（開發規格 7.20）
+- 推文時間比觀測時間早超過 30 分鐘的不計入（補抓、舊爆文）；比當下早超過 1 小時的舊事件只更新基準、不觸發
+- 細節見開發規格 7.20；回放與人工暴增工具 `streaming/replay.py`
 
 ### 8.4 Shadow 比較
 
@@ -597,7 +601,9 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 │   │   ├── experiments/     # [一次性] push_ratio（推噓比弱標註實驗）
 │   │   ├── training/        # [一次性] export / train / evaluate
 │   │   └── inference/main.py  # [常駐]
-│   ├── streaming/heat.py    # [常駐] Quix Streams
+│   ├── streaming/
+│   │   ├── heat.py          # [常駐] Quix Streams
+│   │   └── replay.py        # [一次性] 錄製、回放、人工暴增
 │   └── bot/main.py          # [常駐] Telegram bot
 ├── infra/
 │   ├── docker-compose.yaml
@@ -613,7 +619,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 | 類型 | 程式 | 執行方式 |
 |---|---|---|
 | 常駐 | api、scheduler、crawler、ingest、cdc/watchdog、labeling/stream、inference、heat、bot | docker-compose service |
-| 一次性 | labeling/backfill、manual、cross_check、testset、experiments/*、training/* | 手動執行或 Colab |
+| 一次性 | labeling/backfill、manual、cross_check、testset、experiments/*、training/*、inference/backfill_hash、streaming/replay | 手動執行或 Colab |
 | 本機 | labeling/human_app | 人工標註時執行，只綁 127.0.0.1 |
 
 不使用系統 cron，定時行為都在常駐程式內用 APScheduler 處理。
@@ -628,6 +634,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 | `apicurio-db-init`、`apicurio`、`connect`、`clickhouse` | （預設） | 階段 2 起屬於資料流的一部分，`make up` 一併啟動；`apicurio-db-init` 是一次性服務 |
 | `label-stream` | `labeling` | 串流抽樣標註，會持續呼叫 LLM API，`make up-labeling` 才啟動 |
 | `inference` | `inference` | 情緒推論（8.2），需要先訓練好模型；`make up-inference` 才啟動，以唯讀方式掛載 `models/` |
+| `heat` | `alerting` | 熱度偵測（8.3），`make up-alerting` 才啟動；RocksDB 掛 volume `heat_state` |
 | `kafka-ui` | （預設） | 開發期間預設啟動（http://localhost:8089，只綁本機），部署前移除（S8-06） |
 | `init` | `app` | 一次性：Alembic、建立 topic、ClickHouse migration、註冊 connector（皆冪等）；唯一負責建置 `radar-app` image 的服務 |
 | `api` | `app` | 只綁 `127.0.0.1:8000` |

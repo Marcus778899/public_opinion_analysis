@@ -6,7 +6,15 @@ import pytest
 from pydantic import ValidationError
 
 from radar.common.enums import CommentType, CrawlReason, CrawlTaskType, Polarity
-from radar.common.schemas import CrawlTask, Prediction, RawComment, RawHtml, RawPost
+from radar.common.schemas import (
+    Alert,
+    CdcComment,
+    CrawlTask,
+    Prediction,
+    RawComment,
+    RawHtml,
+    RawPost,
+)
 
 TAIPEI = timezone(timedelta(hours=8))
 NOW = datetime(2026, 10, 7, 12, 0, tzinfo=UTC)
@@ -235,3 +243,86 @@ def test_prediction_missing_text_hash_rejected():
 
     with pytest.raises(ValidationError, match="text_hash"):
         Prediction(**fields)
+
+
+# --- CdcComment ---
+
+
+def test_cdc_comment_parses_debezium_flattened_record():
+    c = CdcComment.model_validate(
+        {
+            "post_id": POST_ID,
+            "floor": 3,
+            "type": "push",
+            "user_id": "u",
+            "content": "c",
+            "commented_at": "2026-10-16T02:03:00Z",
+            "__op": "c",
+            "__source_ts_ms": 1792116180000,
+            "__deleted": "false",
+        }
+    )
+
+    assert (c.floor, c.type, c.op, c.deleted) == (3, CommentType.PUSH, "c", "false")
+    assert c.commented_at == datetime(2026, 10, 16, 2, 3, tzinfo=UTC)
+    assert c.source_ts_ms == 1792116180000
+
+
+def test_cdc_comment_without_commented_at_accepted():
+    c = CdcComment.model_validate({"post_id": POST_ID, "floor": 1, "type": "arrow", "__op": "c"})
+
+    assert c.commented_at is None
+
+
+def test_cdc_comment_unknown_type_rejected():
+    with pytest.raises(ValidationError):
+        CdcComment.model_validate({"post_id": POST_ID, "floor": 1, "type": "like"})
+
+
+# --- Alert ---
+
+
+def alert(**overrides):
+    fields = {
+        "alert_id": uuid.UUID(int=1),
+        "unit_type": "post",
+        "unit_key": POST_ID,
+        "board": "Stock",
+        "window_start": NOW - timedelta(minutes=10),
+        "window_end": NOW,
+        "value": 85,
+        "baseline": 6.2,
+        "zscore": 7.4,
+        "sample_post_ids": [POST_ID],
+        "created_at": NOW,
+    }
+    return Alert(**{**fields, **overrides})
+
+
+def test_alert_json_matches_spec_3_6():
+    data = json.loads(alert().model_dump_json())
+
+    assert data == {
+        "schema_version": 1,
+        "alert_id": "00000000-0000-0000-0000-000000000001",
+        "unit_type": "post",
+        "unit_key": POST_ID,
+        "board": "Stock",
+        "window_start": "2026-10-07T11:50:00Z",
+        "window_end": "2026-10-07T12:00:00Z",
+        "value": 85,
+        "baseline": 6.2,
+        "zscore": 7.4,
+        "sample_post_ids": [POST_ID],
+        "created_at": "2026-10-07T12:00:00Z",
+    }
+
+
+def test_alert_unit_type_outside_mvp_rejected():
+    with pytest.raises(ValidationError):
+        alert(unit_type="entity")
+
+
+def test_alert_negative_value_rejected():
+    with pytest.raises(ValidationError):
+        alert(value=-1)

@@ -259,6 +259,12 @@
 }
 ```
 
+- pydantic model：`common/schemas.py` 的 `Alert`；寫入者只有 heat（7.20）
+- `alert_id`：以 `uuid5` 由 `unit_type`、`unit_key`、`window_end` 算出；同一個警示重送時 id 相同，下游可去重
+- MVP 只有 `post`（單篇文章的推文暴增）與 `board`（看板整體推文量暴增）
+- `value`：視窗內新增推文數；`baseline`、`zscore`：觸發時的 EWMA 平均與 z-score
+- `sample_post_ids`：`post` 為該篇；`board` 為視窗內推文最多的前 3 篇
+
 ---
 
 ## 4. 開發流程
@@ -342,6 +348,7 @@
 | S4-01～S4-03 推論 consumer | ✅ 程式完成；單元測試、整合測試（真實 Kafka：新文章、重啟後只改推噓數、重複事件、壞訊息進 DLQ）通過。2026-10-16 以 `tfidf-lr-202610151237` 部署（`make up-inference`） | — |
 | 階段 4 驗收（推論延遲、不重複推論） | ✅ 通過（2026-10-16），紀錄見階段 4「驗收紀錄」：p95 10.2 秒；重新推論 7 次都對應文字變動 | — |
 | 推論快取重啟後從 ClickHouse 載入（7.19） | ✅ 完成；單元測試重現「重啟後快取空、既有文章被編輯不推論」；整合測試（真的 ClickHouse、PG）驗證 migration 0004、載入與補舊 hash。2026-10-16 部署：補 5,509 篇，重啟後 4 分鐘內 3 篇既有文章被編輯，都重新推論 | #37 |
+| S5-01～S5-05 熱度偵測、錄製回放（7.20） | ✅ 程式完成；加入 `quixstreams`，`confluent-kafka` 降到 2.12.x。整合測試（真實 Kafka、exactly-once）：暴增各單位只發一則、改寫不算新增、只靠 changelog 恢復後不重發、壞訊息進 DLQ。2026-10-17 實測推文進 PG 晚約 8 分鐘，時間基準由 `commented_at` 改成觀測時間（S5-02）。開發環境已部署 heat，待第 5 階段驗收 | — |
 
 階段 1 拆成 5 個 PR；全部完成後依下方「驗收」逐項驗證，通過才把 `develop` 合進 `main` 並打 `stage-1` tag。之後各階段相同：驗收通過才打 `stage-<n>` tag。
 
@@ -496,8 +503,8 @@
 | ID | 任務 |
 |---|---|
 | S5-01 | `streaming/heat.py`（Quix Streams）：依 `post_id` 與 `board` 統計推文數，視窗 10 分鐘、每 1 分鐘滑動 |
-| S5-02 | 時間基準用 `commented_at`（event time），寬限 5 分鐘；超過 1 小時的舊推文只更新基準、不觸發警示（避免 CDC 初始 snapshot 或首次爬到爆文時誤報） |
-| S5-03 | 基準：每個 key 用 EWMA 維護平均與變異數，存在 Quix state |
+| S5-02 | 時間基準用觀測時間（推文進 PG 的時間 `__source_ts_ms`），寬限 2 分鐘；推文時間比觀測時間早超過 30 分鐘的不計入，超過 1 小時的舊事件只更新基準、不觸發警示（避免 CDC 初始 snapshot、補抓或首次爬到爆文時誤報）。2026-10-17 由 `commented_at` 改成觀測時間，理由見 7.20 |
+| S5-03 | 基準：EWMA 維護平均與變異數，存在 Quix state；看板用自己的基準，文章用該看板活躍文章共用的基準（設計文件 15.2、7.20） |
 | S5-04 | 觸發條件（可設定）：z-score ≥ 3 **且** 視窗內推文數 ≥ 30；同一 key 30 分鐘內不重複警示；新 key 需累積 1 小時才啟用 |
 | S5-05 | 錄製與回放工具：把真實的 `cdc.public.comments` 存成檔案，可重送到測試 topic |
 | S5-06 | Migration：`subscriptions(chat_id, unit_type, unit_key)`，寫入者 bot，不被 Debezium 監聽 |
@@ -792,6 +799,37 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
   - 只更新 `text_hash = ''` 的列，可重跑；PG 已沒有這篇或已刪除的跳過；`--dry-run` 只統計要補的篇數
   - 部署順序：停推論服務 → `make up-app`（自動跑 `0004`）→ 補舊資料 → `make up-inference`
   - 2026-10-16 實際部署：補 5,509 篇（PG 已刪除的 41 篇跳過），約 4 秒；推論服務啟動時載入 5,509 篇
+
+### 7.20 熱度偵測的實作選擇（S5-01～S5-05）
+
+- **模組**：`streaming/heat.py`，`python -m radar.streaming.heat`；Quix Streams `Application`，consumer group `heat`，`processing_guarantee="exactly-once"`：輸出的警示、state 的 changelog 與 offset 在同一個 transaction，重啟後不會重送已發過的警示（階段 5 驗收）
+- **相依套件**：`quixstreams` 3.28 要求 `confluent-kafka<2.13`，全專案降到 2.12.x（原本 2.15 只是當時的最新版；用到的 API 2.12 都有，降版後單元、整合測試全過）
+- **輸入**：`cdc.public.comments`（`HEAT_INPUT_TOPIC` 可改成回放 topic）。Avro 用自訂的 Quix `Deserializer` 包 `make_avro_decoder(CdcComment)`；解析失敗的送 `dlq` 並略過（`on_consumer_error`）
+  - 只計 `op=c`；`u`（樓層位移的改寫）、`d`、`r`（snapshot）略過，避免同一則推文被算兩次（設計文件 8.3）
+- **分組**：`group_by(board)`，每個看板一份 state，文章與看板兩種單位都在同一份 state 裡算（文章要和看板的基準比較，見下方）。Quix 會建立 repartition 與 changelog 兩種內部 topic（以 Admin API 建立，broker 關閉自動建立不影響），不列在 `topics.yaml`
+  - 以看板當 key 會讓 Gossiping 的 partition 較忙；推文量每秒個位數，不是瓶頸（設計文件 11.2）
+- **時間**：用觀測時間（推文進 PG 的時間 `__source_ts_ms`），不用推文時間 `commented_at`；以分鐘為單位。沒有 `__source_ts_ms` 時改用 `commented_at`
+  - 理由（2026-10-17 實測）：推文要等列表輪詢或重爬才會被抓到，進 PG 時已比推文時間晚 p50 約 8 分鐘、p90 約 14 分鐘，5 分鐘內進來的只有約 22%。以推文時間加 5 分鐘寬限會丟掉約 78% 的推文；拉長寬限又要等更久才能判斷。偵測的是「我們看到的推文增加速度」，分批到達的波動基準也會學到
+  - 太舊的推文不計入：推文時間比觀測時間早超過 30 分鐘（`HEAT_MAX_DELAY_MIN`）的推文不計數、也不進基準（開發機休眠後補抓、第一次爬到的舊爆文），否則補抓時會像暴增
+  - watermark：該看板看過最大的觀測分鐘；比 watermark 早超過寬限（2 分鐘）的事件丟棄。觀測時間在同一個 partition 內幾乎遞增，寬限只處理不同 partition 之間的順序差異
+  - 舊事件：觀測時間比處理當下早超過 1 小時的只更新計數與基準，不觸發警示（新的 consumer group 從頭讀歷史、服務停機後補消費）
+- **視窗**：10 分鐘、每 1 分鐘滑動；每則推文進來就用「到 watermark 為止的 10 分鐘」評估，不等視窗結束才判斷，延遲才符合「2 分鐘內收到通知」
+- **基準**（EWMA 平均與變異數，`HEAT_EWMA_ALPHA`）：watermark 每前進一分鐘，用剛結束的那個 10 分鐘視窗的值更新一次；中間沒有推文的分鐘補 0（最多補 `HEAT_MAX_GAP_MIN` 分鐘）
+  - 看板單位：自己的視窗值
+  - 文章單位：與該看板的「文章基準」比較（設計文件 15.2，2026-10-17 決定）：每分鐘把該看板所有活躍文章（視窗內有推文）的視窗值餵進同一個基準。不用每篇自己的基準：文章通常在發文後 1 小時內爆，S5-04 的「累積 1 小時才啟用」會讓它永遠來不及
+- **觸發**（可設定）：z-score ≥ 3（`HEAT_Z_THRESHOLD`）且視窗內推文數 ≥ 30（`HEAT_MIN_COUNT`）；同一單位 30 分鐘內不重複（`HEAT_COOLDOWN_MIN`）；看板的基準累積滿 60 分鐘才啟用（`HEAT_WARMUP_MIN`）；標準差下限 1，避免變異數接近 0 時 z-score 爆大
+- **state 大小**：每個看板只留 watermark 前 10 + 5 分鐘內的分鐘計數，與這段時間有推文的文章；冷卻紀錄過期就刪
+- **部署**：compose 服務 `heat`，profile `alerting`（`make up-alerting`；Telegram bot 之後加入同一個 profile）；RocksDB 目錄掛 volume `heat_state`，沒有 volume 時從 changelog 恢復
+- **已知限制：系統停擺後的誤報**（2026-10-17 實測，決定先不處理）：停擺期間沒有推文進來，基準被補 0 而降低；恢復後爬蟲補抓，停擺前 30 分鐘內的推文一起進來，看起來像暴增。開發機休眠 7 小時後醒來，4 個單位各發了一則誤報（看板 Stock 的基準降到 0.01）
+  - 不處理的理由：主要原因是開發機休眠，第 8 階段上雲後不會發生；部署、重啟的停擺只有幾分鐘。第 5 階段的 3 天驗收開 caffeinate，若誤報明顯再加停擺偵測（觀測中斷超過一段時間就不補 0、恢復後暫停觸發）
+- **新的 consumer group 從頭讀**：歷史推文都比當下早超過 1 小時，只建立基準、不觸發，上線即可用歷史資料完成暖機
+- **測試**：整合測試用真的 Kafka（transaction log 副本數設 1，exactly-once 才能跑）與 confluent-kafka 的 `mock://` schema registry；Quix 會註冊 signal handler，`app.run` 只能在 main thread 執行
+- **錄製與回放**（S5-05，`python -m radar.streaming.replay`，一次性工具）：
+  - `record`：依時間範圍把 topic 的原始訊息（key、value 的 bytes，base64）存成 JSONL（`data/replay/`，不進 repo）
+  - `replay`：把檔案依原本的間隔（可加速）重送到 `replay.cdc.comments`；Avro bytes 原封不動，schema ID 在同一個 Apicurio 仍有效
+  - `surge`：人工製造暴增：對指定文章在 N 分鐘內送 M 則 `op=c` 推文事件到 `replay.cdc.comments`，用 Apicurio 上 `cdc.public.comments-value` 的最新 schema 序列化；`commented_at` 與 `__source_ts_ms` 都分散在到當下為止的 N 分鐘
+  - 回放與驗收時另開一個 heat：`HEAT_INPUT_TOPIC=replay.cdc.comments`、consumer group `heat-replay`，state 與正式的分開
+  - `replay.cdc.comments` 列在 `topics.yaml`，保留 24 小時
 
 ## 8. 風險清單
 

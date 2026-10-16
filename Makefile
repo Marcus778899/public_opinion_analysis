@@ -4,7 +4,7 @@ UV_ENV := uv run --env-file .env
 # NOTE: 開發與 e2e 共用 compose 專案與容器名稱，不能同時運作；以假 PTT 容器判斷目前是哪一個（#41）
 E2E_RUNNING := docker ps -aq --filter name=^radar_fake_ptt$$
 
-.PHONY: stop-e2e stop-dev up up-app up-labeling up-inference testset human-label down logs migrate topics connector ch-migrate seed api lint test test-int e2e-up e2e e2e-down
+.PHONY: stop-e2e stop-dev up up-app up-labeling up-inference up-alerting testset human-label down logs migrate topics connector ch-migrate seed api lint test test-int e2e-up e2e e2e-down
 
 up: stop-e2e  ## 啟動基礎設施
 	$(COMPOSE) up -d --wait
@@ -18,8 +18,11 @@ up-labeling: stop-e2e  ## 啟動串流抽樣標註（S3-08，會持續呼叫 LLM
 up-inference: stop-e2e  ## 啟動情緒推論（S4，需先在 .env 設 INFERENCE_MODEL_VERSION，模型放在 models/）
 	$(COMPOSE) --profile app --profile inference up -d --wait inference
 
+up-alerting: stop-e2e  ## 啟動熱度偵測（S5；Telegram bot 另一個 PR 加入）
+	$(COMPOSE) --profile app --profile alerting up -d --wait heat
+
 down:
-	$(COMPOSE) --profile app --profile labeling --profile inference down --remove-orphans
+	$(COMPOSE) --profile app --profile labeling --profile inference --profile alerting down --remove-orphans
 
 stop-e2e:  ## e2e 環境運作中就先清掉（make e2e-down），避免開發環境沿用 e2e 的容器
 	@if [ -n "$$($(E2E_RUNNING))" ]; then echo "e2e 環境運作中，先執行 make e2e-down"; $(MAKE) e2e-down; fi
