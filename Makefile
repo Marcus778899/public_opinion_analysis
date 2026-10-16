@@ -1,23 +1,32 @@
 COMPOSE := docker compose -f infra/docker-compose.yaml --env-file .env
 COMPOSE_E2E := docker compose -f infra/docker-compose.yaml -f infra/docker-compose.e2e.yaml --env-file .env
 UV_ENV := uv run --env-file .env
+# NOTE: 開發與 e2e 共用 compose 專案與容器名稱，不能同時運作；以假 PTT 容器判斷目前是哪一個（#41）
+E2E_RUNNING := docker ps -aq --filter name=^radar_fake_ptt$$
 
-.PHONY: up up-app up-labeling up-inference testset human-label down logs migrate topics connector ch-migrate seed api lint test test-int e2e-up e2e e2e-down
+.PHONY: stop-e2e stop-dev up up-app up-labeling up-inference testset human-label down logs migrate topics connector ch-migrate seed api lint test test-int e2e-up e2e e2e-down
 
-up:  ## 啟動基礎設施
+up: stop-e2e  ## 啟動基礎設施
 	$(COMPOSE) up -d --wait
 
-up-app:  ## 連同 api、scheduler、crawler ×3、ingest 一起啟動（會重新建 image，並自動建表與 topic）
+up-app: stop-e2e  ## 連同 api、scheduler、crawler ×3、ingest 一起啟動（會重新建 image，並自動建表與 topic）
 	$(COMPOSE) --profile app up -d --build --wait
 
-up-labeling:  ## 啟動串流抽樣標註（S3-08，會持續呼叫 LLM API）
+up-labeling: stop-e2e  ## 啟動串流抽樣標註（S3-08，會持續呼叫 LLM API）
 	$(COMPOSE) --profile app --profile labeling up -d --wait label-stream
 
-up-inference:  ## 啟動情緒推論（S4，需先在 .env 設 INFERENCE_MODEL_VERSION，模型放在 models/）
+up-inference: stop-e2e  ## 啟動情緒推論（S4，需先在 .env 設 INFERENCE_MODEL_VERSION，模型放在 models/）
 	$(COMPOSE) --profile app --profile inference up -d --wait inference
 
 down:
-	$(COMPOSE) --profile app --profile labeling down --remove-orphans
+	$(COMPOSE) --profile app --profile labeling --profile inference down --remove-orphans
+
+stop-e2e:  ## e2e 環境運作中就先清掉（make e2e-down），避免開發環境沿用 e2e 的容器
+	@if [ -n "$$($(E2E_RUNNING))" ]; then echo "e2e 環境運作中，先執行 make e2e-down"; $(MAKE) e2e-down; fi
+
+stop-dev:  ## 開發環境運作中就先停掉（make down，不刪 volume），避免 e2e 沿用開發環境的容器
+	@if [ -z "$$($(E2E_RUNNING))" ] && [ -n "$$(docker ps -aq --filter label=com.docker.compose.project=radar)" ]; then \
+		echo "開發環境運作中，先執行 make down（不刪 volume）"; $(MAKE) down; fi
 
 e2e-down:  ## 停止 e2e 環境並刪除 e2e 專用的資料與 log volume（不碰開發環境的 volume）
 	$(COMPOSE_E2E) --profile app down -v --remove-orphans
@@ -60,7 +69,7 @@ test:
 test-int:
 	uv run pytest tests/integration
 
-e2e-up:  ## 整套服務 + 假 PTT 伺服器，使用 e2e 專用的 volume（不碰開發資料、不連真的 PTT）；容器名稱與開發環境相同，會取代開發環境的容器
+e2e-up: stop-dev  ## 整套服務 + 假 PTT 伺服器，使用 e2e 專用的 volume（不碰開發資料、不連真的 PTT）；會先停掉開發環境（不刪 volume）
 	$(COMPOSE_E2E) --profile app up -d --build --wait
 
 e2e:  ## 端到端測試，需先 make e2e-up
