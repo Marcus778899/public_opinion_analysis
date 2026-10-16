@@ -236,12 +236,14 @@
 {
   "schema_version": 1, "post_id": "...", "model_version": "tfidf-lr-20261020",
   "predicted_at": "...", "polarity": "negative",
-  "scores": {"positive": 0.1, "negative": 0.7, "neutral": 0.2}
+  "scores": {"positive": 0.1, "negative": 0.7, "neutral": 0.2},
+  "text_hash": "<64 字元 hex>"
 }
 ```
 
 - pydantic model：`common/schemas.py` 的 `Prediction`；`scores` 的 key 恰好是三個 `polarity`，值的總和為 1（容許浮點誤差），`polarity` 為分數最高的類別
 - 同一篇文章、同一個模型版本可能有多筆（內文被編輯後重新推論），下游取 `predicted_at` 最新的一筆
+- `text_hash`：這次推論的模型輸入文字的 SHA-256（hex）；推論服務重啟時用來重建快取（7.19）。2026-10-16 新增，之前的訊息沒有這個欄位，ClickHouse 存成空字串
 
 ### 3.6 `alerts`
 
@@ -339,6 +341,7 @@
 | 階段 3 驗收（≥ 3,000 篇且各看板達標、評估報告含各看板 F1、推噓比結論） | ⬜ 除 Stock 外皆達標：Stock 286／400 篇，等新文章累積後補標並重新訓練（逐項見評估報告「階段 3 驗收狀態」） | — |
 | S4-01～S4-03 推論 consumer | ✅ 程式完成；單元測試、整合測試（真實 Kafka：新文章、重啟後只改推噓數、重複事件、壞訊息進 DLQ）通過。2026-10-16 以 `tfidf-lr-202610151237` 部署（`make up-inference`） | — |
 | 階段 4 驗收（推論延遲、不重複推論） | ✅ 通過（2026-10-16），紀錄見階段 4「驗收紀錄」：p95 10.2 秒；重新推論 7 次都對應文字變動 | — |
+| 推論快取重啟後從 ClickHouse 載入（7.19） | ✅ 完成；單元測試重現「重啟後快取空、既有文章被編輯不推論」；整合測試（真的 ClickHouse、PG）驗證 migration 0004、載入與補舊 hash。2026-10-16 部署：補 5,509 篇，重啟後 4 分鐘內 3 篇既有文章被編輯，都重新推論 | #37 |
 
 階段 1 拆成 5 個 PR；全部完成後依下方「驗收」逐項驗證，通過才把 `develop` 合進 `main` 並打 `stage-1` tag。之後各階段相同：驗收通過才打 `stage-<n>` tag。
 
@@ -763,7 +766,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - **模組**：`ml/inference/main.py`，`python -m radar.ml.inference.main`；consumer group `inference`，沿用 `BatchConsumer` 與 Avro 解碼（同 S3-08）
 - **模型**：`INFERENCE_MODEL_DIR` 指向 `models/<model_version>/`，用 `train.load_model` 載入；輸入文字用 `dataset.post_text(title, content, card.max_chars)`，與訓練、評估相同
 - **是否推論**（`should_predict`，純函式）：hash 為模型輸入文字的 SHA-256；快取有這篇 → hash 不同才推論；快取沒有 → 只有 `op=c` 推論，`op=u`、`op=r` 只記下 hash。刪除的文章、`__deleted` 的事件跳過，也不記 hash
-- **快取**：程序內 LRU（`INFERENCE_CACHE_SIZE`，預設 200,000 篇；目前約 5,000 篇、每天增加數百篇），重啟後清空；不讀 ClickHouse，服務只依賴 Kafka
+- **快取**：程序內 LRU（`INFERENCE_CACHE_SIZE`，預設 200,000 篇；目前約 6,000 篇、每天增加數百篇）；啟動時從 ClickHouse 載入（7.19，#37）
 - **批次推論**：一批事件中要推論的文字一次送進 `predict_proba`；同一批內同一篇有多筆事件時只推論最後一筆，其中有任何一筆是 `op=c` 就當成新文章（新文章後面緊接著推噓數更新時，最後一筆是 `op=u`）
 - **commit 與冪等**：推論結果 flush 到 Kafka 後才 commit；重送的訊息因 hash 相同而跳過。快取在 flush 成功後才更新，整批重試時不會誤判為已推論
 - **錯誤**：模型檔不存在或無法載入 → 啟動失敗（`CRITICAL`）；推論時的例外視為程式錯誤，讓服務中止，不送 DLQ（資料本身沒有問題）；解碼失敗由 `BatchConsumer` 送 DLQ
@@ -771,6 +774,24 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - **服務上線前的文章**：不在這個服務內處理；需要時另外寫一次性的補跑工具（不在階段 4 範圍）
 
 ---
+
+### 7.19 推論快取重啟後從 ClickHouse 載入（fix，2026-10-16，#37）
+
+原本快取只在記憶體，重啟後清空；快取沒有的文章被編輯（`op=u`）時只記下 hash、不推論，編輯後的版本就不會被推論。階段 4 驗收期間 1 小時內有 7 次編輯（多在發文後幾分鐘內），推論服務一天因部署重啟數次，決定修正。
+
+- **訊息**：`Prediction` 新增 `text_hash`（3.5），值與快取用的 hash 相同
+- **ClickHouse**：migration `0004` 在 `predictions` 新增 `text_hash String DEFAULT ''`。Kafka engine 表不能加欄位，`predictions_queue` 與 `predictions_mv` 刪掉重建；consumer group 不變，offset 存在 Kafka，不掉資料也不重複。Kafka engine 不支援欄位 `DEFAULT`，queue 的 `text_hash` 不寫預設值，舊訊息缺這個欄位時 JSONEachRow 填型別預設值（空字串）
+- **啟動載入**（`load_cache`）：查 `predictions` 中**同一個 `model_version`**、`text_hash` 不是空字串的列，每篇取 `predicted_at` 最新的一筆，依 `predicted_at` 由舊到新放進快取（LRU 保留最新的）；`should_predict` 不變
+  - 換模型版本時不載入舊版本的 hash，新模型的快取是空的（與修正前相同）
+  - 啟動時 ClickHouse 連不上 → 服務停止、由 docker 重啟（同 schema registry），不在快取是空的狀態下開始消費
+  - 推論服務改為依賴 ClickHouse；compose 已有 `CLICKHOUSE_URL`，帳號密碼沿用 `.env` 的 `CLICKHOUSE_USER`、`CLICKHOUSE_PASSWORD`
+- **已知空窗**：重啟前幾秒送出、ClickHouse 還沒寫入的推論載不到，這幾篇回到修正前的行為
+- **補舊資料**（一次性，`python -m radar.ml.inference.backfill_hash`）：`text_hash` 為空的推論，每篇只補 `predicted_at` 最新的一筆，用 PG `posts` 目前的標題與內文算 hash（`post_text` 與模型的 `max_chars`，與推論相同）
+  - 用 PG 目前的文字：推論之後若有編輯被漏掉（就是 #37 的情況），補上的 hash 會是編輯後的版本，這篇仍停留在舊的預測；無法從現有資料分辨，接受這個誤差
+  - 寫入方式是 ClickHouse 的 `ALTER TABLE ... UPDATE`（mutation），不經 Kafka：重送訊息會在 `predictions` 多出重複的列，影響以列數比對的查詢（例如階段 4 驗收）
+  - 只更新 `text_hash = ''` 的列，可重跑；PG 已沒有這篇或已刪除的跳過；`--dry-run` 只統計要補的篇數
+  - 部署順序：停推論服務 → `make up-app`（自動跑 `0004`）→ 補舊資料 → `make up-inference`
+  - 2026-10-16 實際部署：補 5,509 篇（PG 已刪除的 41 篇跳過），約 4 秒；推論服務啟動時載入 5,509 篇
 
 ## 8. 風險清單
 

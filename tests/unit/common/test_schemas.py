@@ -169,6 +169,9 @@ def test_raw_html_roundtrip():
     assert RawHtml.model_validate_json(html.model_dump_json()) == html
 
 
+TEXT_HASH = "a" * 64
+
+
 def prediction(**overrides):
     fields = {
         "post_id": POST_ID,
@@ -176,6 +179,7 @@ def prediction(**overrides):
         "predicted_at": NOW,
         "polarity": "negative",
         "scores": {"positive": 0.1, "negative": 0.7, "neutral": 0.2},
+        "text_hash": TEXT_HASH,
     }
     return Prediction(**{**fields, **overrides})
 
@@ -216,4 +220,18 @@ def test_prediction_json_matches_spec_3_5():
         "predicted_at": "2026-10-07T12:00:00Z",
         "polarity": "negative",
         "scores": {"positive": 0.1, "negative": 0.7, "neutral": 0.2},
+        "text_hash": TEXT_HASH,
     }
+
+
+@pytest.mark.parametrize("bad", ["", "a" * 63, "A" * 64, "g" * 64])
+def test_prediction_text_hash_not_sha256_hex_rejected(bad):
+    with pytest.raises(ValidationError, match="text_hash"):
+        prediction(text_hash=bad)
+
+
+def test_prediction_missing_text_hash_rejected():
+    fields = prediction().model_dump(exclude={"text_hash"})
+
+    with pytest.raises(ValidationError, match="text_hash"):
+        Prediction(**fields)

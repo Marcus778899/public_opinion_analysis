@@ -146,6 +146,8 @@ class Prediction(KafkaMessage):
     predicted_at: UtcDatetime
     polarity: Polarity
     scores: dict[Polarity, float]
+    # 模型輸入文字的 SHA-256 hex；推論服務重啟時用來重建快取（開發規格 7.19）
+    text_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def _check_scores(self) -> Self:

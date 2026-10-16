@@ -256,9 +256,57 @@ def test_json_topic_rows_land_in_target_tables(kafka, ch):
         ["<whole>", "negative"],
         ["台積電", "positive"],
     ]
-    assert _query(ch, "SELECT predicted_at, scores['negative'] FROM predictions") == [
-        ["2026-10-07 06:00:00.123456", "0.7"]
+    # 0004 之前的訊息沒有 text_hash，存成空字串（開發規格 3.5）
+    assert _query(ch, "SELECT predicted_at, scores['negative'], text_hash FROM predictions") == [
+        ["2026-10-07 06:00:00.123456", "0.7", ""]
     ]
     assert _query(ch, "SELECT unit_key, window_end, zscore FROM alerts") == [
         ["Stock.M.1.A.1", "2026-10-07 06:00:00.000000", "7.4"]
     ]
+
+
+def test_predictions_text_hash_lands_in_table(kafka, ch):
+    producer = Producer({"bootstrap.servers": kafka.get_bootstrap_server()})
+    body = {
+        "schema_version": 1,
+        "post_id": "Stock.M.2.A.2",
+        "model_version": "tfidf-lr-1",
+        "predicted_at": "2026-10-16T06:00:00+00:00",
+        "polarity": "neutral",
+        "scores": {"positive": 0.1, "negative": 0.2, "neutral": 0.7},
+        "text_hash": "a" * 64,
+    }
+    producer.produce("predictions", key=body["post_id"], value=json.dumps(body).encode())
+    producer.flush(10)
+
+    deadline = time.monotonic() + 60
+    sql = "SELECT text_hash FROM predictions WHERE post_id = 'Stock.M.2.A.2'"
+    while not (rows := _query(ch, sql)) and time.monotonic() < deadline:
+        time.sleep(1)
+    assert rows == [["a" * 64]]
+
+
+def test_migration_0004_keeps_existing_predictions_with_empty_hash(clickhouse_settings):
+    # 獨立的 database：先套到 0003、寫入舊的 predictions，再套 0004
+    admin = ClickHouseClient(clickhouse_settings)
+    admin.execute("CREATE DATABASE IF NOT EXISTS hash_test")
+    client = ClickHouseClient(clickhouse_settings.model_copy(update={"db": "hash_test"}))
+    migrations = load_migrations(CLICKHOUSE_DIR / "migrations")
+    try:
+        apply_pending(client, [m for m in migrations if m.version < 4])
+        client.execute(
+            "INSERT INTO predictions (post_id, model_version, predicted_at, polarity, scores) "
+            "VALUES ('Stock.M.9.A.4', 'v1', '2026-10-16 00:00:00', 'neutral', map('neutral', 1.0))"
+        )
+
+        apply_pending(client, migrations)
+
+        assert _query(client, "SELECT post_id, text_hash FROM predictions") == [
+            ["Stock.M.9.A.4", ""]
+        ]
+        views = _query(client, "SELECT name FROM system.tables WHERE database = 'hash_test'")
+        assert {"predictions_queue", "predictions_mv"} <= {r[0] for r in views}
+    finally:
+        admin.execute("DROP DATABASE IF EXISTS hash_test")
+        client.close()
+        admin.close()
