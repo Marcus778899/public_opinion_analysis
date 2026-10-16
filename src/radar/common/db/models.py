@@ -6,6 +6,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -105,3 +106,18 @@ class CrawlState(Base):
     post_id: Mapped[str] = mapped_column(Text, ForeignKey("posts.post_id"), primary_key=True)
     next_crawl_at: Mapped[datetime]
     last_dispatched: Mapped[datetime]
+
+
+class Subscription(Base):
+    """Telegram bot 的訂閱（開發規格 7.21）；MVP 只有看板。"""
+
+    __tablename__ = "subscriptions"
+    __table_args__ = (
+        CheckConstraint("unit_type IN ('board')", name="unit_type_allowed"),
+        {"comment": "writer: bot; debezium: no"},
+    )
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    unit_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    unit_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())

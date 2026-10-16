@@ -61,6 +61,13 @@ services:
     volumes:
       - e2e_app_logs:/app/log
       - e2e_heat_state:/app/state
+  # NOTE: e2e 不可推送到真的 Telegram；token 為空時 bot 啟動失敗
+  bot:
+    environment:
+      <<: *e2e-quiet
+      TELEGRAM_BOT_TOKEN: ''
+    volumes:
+      - e2e_app_logs:/app/log
 
   crawler:
     environment:

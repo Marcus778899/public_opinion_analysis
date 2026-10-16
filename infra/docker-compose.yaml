@@ -213,7 +213,7 @@ services:
       - app_logs:/app/log
       - ../models:/app/models:ro
 
-  # 熱度偵測（S5-01～S5-04，開發規格 7.20）：make up-alerting 才啟動
+  # 熱度偵測（S5-01～S5-04，開發規格 7.20）與 Telegram bot（S5-07，7.21）：make up-alerting 才啟動
   heat:
     <<: *app
     container_name: radar_heat
@@ -225,6 +225,14 @@ services:
     volumes:
       - app_logs:/app/log
       - heat_state:/app/state
+
+  bot:
+    <<: *app
+    container_name: radar_bot
+    profiles: ["alerting"]
+    command: ["python", "-m", "radar.bot.main"]
+    environment:
+      <<: *app-env
 
   # 串流抽樣標註（S3-08）：會持續呼叫 LLM API，獨立 profile，make up-labeling 才啟動
   label-stream:

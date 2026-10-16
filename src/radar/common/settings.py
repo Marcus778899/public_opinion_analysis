@@ -136,6 +136,27 @@ class HeatSettings(BaseSettings):
     min_std: float = 1.0
 
 
+class TelegramSettings(BaseSettings):
+    """Telegram bot（開發規格 7.21）。"""
+
+    model_config = SettingsConfigDict(env_prefix="TELEGRAM_")
+
+    bot_token: SecretStr
+    # 允許的 chat_id，逗號分隔；空白代表不限制
+    allowed_chat_ids: Annotated[list[int], NoDecode] = []
+    api_base_url: str = "https://api.telegram.org"
+    poll_timeout_s: int = 30
+    hot_window_min: int = 60
+    hot_limit: int = 5
+
+    @field_validator("allowed_chat_ids", mode="before")
+    @classmethod
+    def _split_chat_ids(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [int(v) for v in value.split(",") if v.strip()]
+        return value
+
+
 class SchemaRegistrySettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SCHEMA_REGISTRY_")
 

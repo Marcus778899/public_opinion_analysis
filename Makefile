@@ -18,8 +18,8 @@ up-labeling: stop-e2e  ## 啟動串流抽樣標註（S3-08，會持續呼叫 LLM
 up-inference: stop-e2e  ## 啟動情緒推論（S4，需先在 .env 設 INFERENCE_MODEL_VERSION，模型放在 models/）
 	$(COMPOSE) --profile app --profile inference up -d --wait inference
 
-up-alerting: stop-e2e  ## 啟動熱度偵測（S5；Telegram bot 另一個 PR 加入）
-	$(COMPOSE) --profile app --profile alerting up -d --wait heat
+up-alerting: stop-e2e  ## 啟動熱度偵測與 Telegram bot（S5，需先在 .env 設 TELEGRAM_BOT_TOKEN）
+	$(COMPOSE) --profile app --profile alerting up -d --wait heat bot
 
 down:
 	$(COMPOSE) --profile app --profile labeling --profile inference --profile alerting down --remove-orphans

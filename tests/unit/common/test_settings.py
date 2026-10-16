@@ -15,6 +15,7 @@ from radar.common.settings import (
     LabelingSettings,
     PostgresSettings,
     SchedulerSettings,
+    TelegramSettings,
 )
 
 PG_ENV = {
@@ -220,3 +221,30 @@ def test_heat_settings_defaults_match_dev_spec(monkeypatch):
     assert (s.input_topic, s.consumer_group) == ("cdc.public.comments", "heat")
     assert (s.window_min, s.grace_min, s.max_delay_min, s.stale_after_min) == (10, 2, 30, 60)
     assert (s.z_threshold, s.min_count, s.cooldown_min, s.warmup_min) == (3.0, 30, 30, 60)
+
+
+def test_telegram_settings_allowed_chat_ids_split_by_comma(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", " 123, -100456 ,, ")
+
+    assert TelegramSettings().allowed_chat_ids == [123, -100456]
+
+
+def test_telegram_settings_allowed_chat_ids_empty_means_unrestricted(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", "")
+
+    assert TelegramSettings().allowed_chat_ids == []
+
+
+def test_telegram_settings_missing_token_raises(monkeypatch):
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+
+    with pytest.raises(ValidationError, match="bot_token"):
+        TelegramSettings()
+
+
+def test_telegram_settings_token_hidden_in_repr(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:secret")
+
+    assert "secret" not in repr(TelegramSettings())

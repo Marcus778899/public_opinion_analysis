@@ -384,6 +384,7 @@ CREATE INDEX ON crawl_state (next_crawl_at);
 | `posts`、`comments` | Ingest consumer | ✅ |
 | `boards` | FastAPI | ❌ |
 | `crawl_state` | Scheduler | ❌ |
+| `subscriptions` | Telegram bot | ❌ |
 
 每張表只有一個寫入者。爬蟲不能同時寫 PG 和 Kafka（雙寫）。寫入者與是否被監聽也記在各表的 PG table comment。
 
@@ -566,9 +567,11 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 
 ### 9.2 Telegram bot
 
-- 推送：消費 `alerts`
-- 指令：`/subscribe 台積電`、`/boards`、`/hot`
-- 使用 long polling，不需要對外開放 HTTP
+- 推送：消費 `alerts`，依 `subscriptions`（以看板為單位）推送
+- 指令：MVP 為 `/start`、`/boards`、`/subscribe <board>`、`/unsubscribe`、`/hot`；之後加 `/subscribe 台積電`（實體，15.2 進階 1）
+- 使用 long polling，不需要對外開放 HTTP；以 `httpx2` 直接呼叫 Bot API，不加 SDK
+- 只回應允許清單內的 chat（`TELEGRAM_ALLOWED_CHAT_IDS`）
+- 細節見開發規格 7.21
 - 每日摘要：APScheduler cron trigger，每天 08:00 用 LLM 摘要前一天的熱門話題
 
 ---
@@ -634,7 +637,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 | `apicurio-db-init`、`apicurio`、`connect`、`clickhouse` | （預設） | 階段 2 起屬於資料流的一部分，`make up` 一併啟動；`apicurio-db-init` 是一次性服務 |
 | `label-stream` | `labeling` | 串流抽樣標註，會持續呼叫 LLM API，`make up-labeling` 才啟動 |
 | `inference` | `inference` | 情緒推論（8.2），需要先訓練好模型；`make up-inference` 才啟動，以唯讀方式掛載 `models/` |
-| `heat` | `alerting` | 熱度偵測（8.3），`make up-alerting` 才啟動；RocksDB 掛 volume `heat_state` |
+| `heat`、`bot` | `alerting` | 熱度偵測（8.3）與 Telegram bot（9.2）；bot 需要 `TELEGRAM_BOT_TOKEN`，`make up-alerting` 才啟動；heat 的 RocksDB 掛 volume `heat_state` |
 | `kafka-ui` | （預設） | 開發期間預設啟動（http://localhost:8089，只綁本機），部署前移除（S8-06） |
 | `init` | `app` | 一次性：Alembic、建立 topic、ClickHouse migration、註冊 connector（皆冪等）；唯一負責建置 `radar-app` image 的服務 |
 | `api` | `app` | 只綁 `127.0.0.1:8000` |
