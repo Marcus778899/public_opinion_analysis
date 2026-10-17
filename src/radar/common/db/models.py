@@ -53,6 +53,8 @@ class Post(Base):
     url: Mapped[str] = mapped_column(Text)
     push_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     boo_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    # NOTE: 推＋噓＋箭頭；只多了箭頭也要讓 crawled_at 前進（開發規格 7.24）
+    comment_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     created_at: Mapped[datetime]
     crawled_at: Mapped[datetime]
     is_deleted: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))

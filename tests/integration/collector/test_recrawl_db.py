@@ -37,12 +37,13 @@ def session_factory(engine):
 
 def add_post(engine, post_id, *, age, push=0, boo=0, arrow=0, deleted=False, next_crawl=None):
     board = post_id.split(".", 1)[0]
+    types = ["push"] * push + ["boo"] * boo + ["arrow"] * arrow
     with engine.begin() as conn:
         conn.execute(
             text(
                 "INSERT INTO posts (post_id, board, url, created_at, crawled_at, push_count, "
-                "boo_count, is_deleted) "
-                "VALUES (:id, :board, :url, :created, :created, :push, :boo, :deleted)"
+                "boo_count, comment_count, is_deleted) "
+                "VALUES (:id, :board, :url, :created, :created, :push, :boo, :n, :deleted)"
             ),
             {
                 "id": post_id,
@@ -51,10 +52,10 @@ def add_post(engine, post_id, *, age, push=0, boo=0, arrow=0, deleted=False, nex
                 "created": NOW - age,
                 "push": push,
                 "boo": boo,
+                "n": len(types),
                 "deleted": deleted,
             },
         )
-        types = ["push"] * push + ["boo"] * boo + ["arrow"] * arrow
         if types:
             conn.execute(
                 text("INSERT INTO comments (post_id, floor, type) VALUES (:id, :floor, :type)"),

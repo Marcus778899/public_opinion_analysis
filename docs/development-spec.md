@@ -334,7 +334,7 @@
 | S2-01 Spike：ClickHouse 讀 Apicurio Avro | ✅ 完成（結論見設計文件 6.2；以 Debezium 3.7 / Apicurio 3.3 / ClickHouse 26.8 驗證） | #8 |
 | S2-02～S2-06 CDC 與 ClickHouse | ✅ 程式完成；端到端測試（`tests/e2e/test_cdc.py`）2026-10-08 通過（首次執行時發現 image 缺 `infra/` 檔案等 3 個問題，見 7.9） | #8、#15 |
 | 文章警示門檻（#59） | ✅ 文章另設最低推文數 `HEAT_POST_MIN_COUNT=80`，看板維持 30（7.20） | — |
-| 晚到的舊快照刪掉較新的推文（#52） | ⬜ | — |
+| 晚到的舊快照刪掉較新的推文（#52） | ✅ `posts.comment_count`（推＋噓＋箭頭）列入變化判斷，重爬門檻改讀這欄（7.24）；整合測試重現「晚到的舊快照刪掉 10 則新箭頭」後修正 | — |
 | 階段 6 規劃：Telegram 按鈕選單與情緒呈現（7.23） | ✅ 文件完成（2026-10-17）；原階段 6～8 順延為 7～9 | — |
 | S6-01～S6-06 Telegram 互動與情緒呈現 | ⬜（S6-05 取代 #53） | — |
 | 發文 1 小時內的重爬改為每 5 分鐘（7.22，#56） | ✅ 完成；單元、collector 整合測試通過。待部署 Scheduler | — |
@@ -639,7 +639,7 @@
 - 文章滿 1 小時後，推文數低於門檻就停止重爬
 - Gossiping 先設 10，依實際請求量調整
 - **門檻改看推文總數**（fix，2026-10-17，#51）：原本只看推數，少數推、大量噓的逆風文，與用箭頭對罵上百樓的文章，滿 1 小時後就不再重爬，後續推文進不了 PG 與熱度偵測。改成推、噓、箭頭都算
-  - 由 Scheduler 查詢時對 `comments` 依主鍵數推文，不在 `posts` 加箭頭數欄位：加欄位會讓每則新箭頭都產生一個 `posts` 的 CDC 事件
+  - 原本由 Scheduler 查詢時對 `comments` 依主鍵數推文，避免在 `posts` 加欄位讓每則新箭頭都多一個 CDC 事件；#52 為了修推文誤刪仍加了 `posts.comment_count`，門檻改讀這欄（7.24）
   - 欄位名稱 `recrawl_min_push` 沿用（改名要動 migration、API 與 seed），意義改為推文總數
   - 請求量（2026-10-17 開發環境，發文 1～24 小時的文章）：Gossiping 684 篇中達門檻的由 122 篇增為 391 篇，HatePolitics 394 篇中由 92 篇增為 260 篇；每篇 1～24 小時約重爬 48 次，合計每天約多 2.1 萬次（約 0.25 次／秒）。超出預算時把門檻調到 20（兩看板合計約多 150 篇）
 
@@ -775,7 +775,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 推文以頁面順序編樓層、`ON CONFLICT DO NOTHING` 寫入；中間的推文被刪時後面全部往前移，PG 的舊樓層不會更新，最後幾則可能永遠寫不進去，`comments` 與 `posts.push_count` 對不上。
 
 - **同步而非重寫**：同一樓層內容不同才更新，超過新快照最大樓層的刪除。一般重爬只有新推文接在後面，不多寫、不多產生 CDC 事件；只有位移的那幾層會改寫
-- **只同步不舊的快照**：`upsert_posts` 之後，`posts.crawled_at <= 快照的 crawled_at` 的文章才同步（新文章、有變化而寫入的、沒變化的都算）；比較舊的快照不碰推文。刪除快照照舊不碰推文
+- **只同步不舊的快照**：`upsert_posts` 之後，`posts.crawled_at <= 快照的 crawled_at` 的文章才同步（新文章、有變化而寫入的、沒變化的都算）；比較舊的快照不碰推文。刪除快照照舊不碰推文；2026-10-17 起推文數也列入變化判斷，只多了箭頭的快照也會讓 `crawled_at` 前進（7.24）
 - **不改用 hash 識別**（issue 方案 B）：PTT 推文時間只到分鐘，同一人同一分鐘的相同推文會碰撞；且仍需處理刪除
 - **統計**：`WriteStats.comments_inserted` 改為 `comments_written`（新增＋更新）與 `comments_deleted`
 - **PG**：Alembic migration 對 `comments` 設 `REPLICA IDENTITY FULL`。代價是 `comments` 的更新、刪除在 WAL 多存整列舊值；這兩種事件只在樓層位移時發生，量很少
@@ -949,7 +949,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - **HTML**：`parse_mode=HTML`，標題等外部文字一律 escape（`<`、`>`、`&`）
 - **警示內容**（S6-05）：
   - 倍數 = `value` ÷ max(`baseline`, 1)
-  - 推、噓、箭頭：`comments_latest FINAL` 依 `type` 計數（與重爬門檻同一個來源，7.2）
+  - 推、噓、箭頭：`comments_latest FINAL` 依 `type` 計數（ClickHouse 沒有 `comment_count`，7.24）
   - 爭議度 = 噓 ÷（推＋噓）；推＋噓 < 10 時不顯示
   - 文章情緒：`predictions` 該篇最新一筆；最高分數低於 `TELEGRAM_SENTIMENT_MIN_SCORE`（預設 0.6，實作時加到 `.env.example`）顯示「不確定」；沒有推論（推論服務上線前的文章、snapshot）顯示「尚無」
   - ClickHouse 查詢失敗時照樣推送基本警示（不帶推噓與情緒）並記 WARNING，不讓查詢擋住通知
@@ -958,6 +958,16 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - **現在熱門**：最近 60 分鐘新增推文最多的 5 篇；預設只看訂閱的看板，可切換「全部看板」
 - **驗收清單**（真的 Telegram）：主選單與各畫面來回切換；切換訂閱後推送跟著改變；警示的各欄位與按鈕；「不再通知」後同一篇不再推；關閉文章警示後只收看板警示；不在允許清單的 chat 按按鈕沒有反應；舊的文字指令仍可用
 - **之後**：Mini App（「後續階段」15）
+
+### 7.24 只多了箭頭時 `crawled_at` 不前進（fix，2026-10-17，#52）
+
+`posts` 只在推數、噓數、標題、內文有變時更新，`crawled_at` 跟著前進；推文同步又以 `posts.crawled_at <= 快照時間` 判斷能不能動推文（7.15）。只多了箭頭的快照不更新 `posts`，晚到的較舊快照仍會通過判斷，把較新寫入的箭頭當成「超出最大樓層」刪掉。
+
+- **`posts` 新增 `comment_count`**（推＋噓＋箭頭，即快照的推文數），列入變化判斷；只多了箭頭時也會寫入、`crawled_at` 前進，較舊的快照就不碰推文
+- **不採用的做法**：另建一張不在 CDC publication 裡的表記錄推文同步時間——CDC 完全不變，但多一張表、多一個寫入點，`GET /status` 的 `last_changed_at` 仍會低估只有箭頭活動的看板
+- **代價**：只多了箭頭的重爬也會多一筆 `cdc.public.posts` 事件。inference 以 `text_hash` 判斷，內文沒變不重算（7.19）；label-stream 只看新文章；ClickHouse 的 posts 表不加這欄，Avro 多出的欄位直接忽略
+- **舊資料補值**：migration 依 `comments` 筆數補值，只更新筆數 > 0 的文章；每列產生一筆 CDC 事件（數千筆），`posts_history` 會多出一批推噓數沒變的列。不補值的話，舊文章要等下一次重爬才會更新，這段期間仍有誤刪的風險
+- **重爬門檻改讀 `comment_count`**：原本的 `comments` 子查詢（7.2，#51）是為了不在 `posts` 加欄位；欄位既然加了，Scheduler 直接讀它，省掉每次查詢的子查詢。補值後兩者相同
 
 ## 8. 風險清單
 

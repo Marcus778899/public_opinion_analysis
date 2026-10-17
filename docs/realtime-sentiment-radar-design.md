@@ -242,8 +242,7 @@ WHERE b.enabled                                          -- 停用的看板不�
   AND NOT p.is_deleted
   AND p.created_at > now() - interval '24 hours'
   AND (p.created_at > now() - interval '1 hour'          -- 1 小時內一律重爬
-       OR (SELECT count(*) FROM comments c               -- 之後只追蹤推文總數
-           WHERE c.post_id = p.post_id) >= b.recrawl_min_push)  -- （推＋噓＋→）達門檻的
+       OR p.comment_count >= b.recrawl_min_push)         -- 之後只追蹤推文總數（推＋噓＋→）達門檻的
   AND (cs.next_crawl_at IS NULL OR cs.next_crawl_at <= now())
 ORDER BY cs.next_crawl_at NULLS FIRST, p.created_at DESC  -- 沒派發過的優先
 LIMIT 500;                                               -- 其餘留到下一輪
@@ -288,7 +287,7 @@ LIMIT 500;                                               -- 其餘留到下一�
 - **同批去重**：同一個 `post_id` 只留 `crawled_at` 最新的一筆；`ON CONFLICT DO UPDATE` 不能在同一個語句更新同一列兩次
 - **推文分段**：每 5000 列送一次，避開 PG 單一語句 65535 個參數的上限
 - **刪除快照**：只把既有文章的 `is_deleted` 設為 true 並更新 `crawled_at`，保留刪除前的內容；從未見過的文章略過，已標記的不重複寫；比 `posts.crawled_at` 舊的刪除快照略過（較晚到的舊 404 不可蓋掉較新的 200）
-- **推文同步**：推文以頁面上的順序編樓層，中間有推文被刪時後面全部往前移一層。快照不比 `posts.crawled_at` 舊時才同步：同一樓層內容不同就更新，超過新快照最大樓層的刪除；比較舊的快照不碰推文（否則晚到、推文較少的舊快照會刪掉新推文）。一般重爬只是新推文接在後面，舊樓層不變，不會多寫
+- **推文同步**：推文以頁面上的順序編樓層，中間有推文被刪時後面全部往前移一層。快照不比 `posts.crawled_at` 舊時才同步（推文數也列入變化判斷，只多了箭頭時 `crawled_at` 同樣前進）：同一樓層內容不同就更新，超過新快照最大樓層的刪除；比較舊的快照不碰推文（否則晚到、推文較少的舊快照會刪掉新推文）。一般重爬只是新推文接在後面，舊樓層不變，不會多寫
 - **撤銷刪除**：已標記刪除的文章收到比 `crawled_at` 新的正常快照時，`is_deleted` 改回 false 並寫入新內容，避免 PTT／Cloudflare 暫時性的錯誤 404 讓文章被永久誤判為刪除。Scheduler 照舊不重爬已刪除的文章；被誤判的文章若還在列表上，推文數一變（或爬蟲重啟、快取清空）列表任務就會重抓內頁而復原。真的被刪的文章在列表上沒有連結，不會被重抓
 - **錯誤處理**：
   - DB 連線錯誤（`OperationalError`）→ 整批重試
@@ -300,11 +299,12 @@ LIMIT 500;                                               -- 其餘留到下一�
 
 ```sql
 INSERT INTO posts (post_id, board, author, title, content, url,
-                   push_count, boo_count, created_at, crawled_at)
+                   push_count, boo_count, comment_count, created_at, crawled_at)
 VALUES (...)
 ON CONFLICT (post_id) DO UPDATE SET
   push_count = EXCLUDED.push_count,
   boo_count  = EXCLUDED.boo_count,
+  comment_count = EXCLUDED.comment_count,
   title      = EXCLUDED.title,
   content    = EXCLUDED.content,
   crawled_at = EXCLUDED.crawled_at,
@@ -313,6 +313,7 @@ WHERE posts.crawled_at < EXCLUDED.crawled_at                  -- 舊快照不覆
   AND (posts.is_deleted
     OR posts.push_count IS DISTINCT FROM EXCLUDED.push_count
     OR posts.boo_count  IS DISTINCT FROM EXCLUDED.boo_count
+    OR posts.comment_count IS DISTINCT FROM EXCLUDED.comment_count  -- 只多了箭頭
     OR posts.title      IS DISTINCT FROM EXCLUDED.title       -- 作者可能改標題
     OR posts.content    IS DISTINCT FROM EXCLUDED.content);   -- 沒變化就不寫
 
@@ -354,6 +355,7 @@ CREATE TABLE posts (
   url           TEXT NOT NULL,
   push_count    INT  NOT NULL DEFAULT 0,        -- 由推文計算
   boo_count     INT  NOT NULL DEFAULT 0,
+  comment_count INT  NOT NULL DEFAULT 0,        -- 推＋噓＋箭頭
   created_at    TIMESTAMPTZ NOT NULL,
   crawled_at    TIMESTAMPTZ NOT NULL,
   is_deleted    BOOLEAN NOT NULL DEFAULT FALSE
@@ -728,6 +730,7 @@ Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、�
 - [ ] 刪除標記不可逆、不比較 `crawled_at` → 暫時性的 404 或晚到的舊 404 讓文章被永久誤判為刪除
 - [ ] 一次 INSERT 太多推文 → 超過 PG 65535 個參數上限
 - [ ] 推文只新增不同步 → 中間的推文被刪後樓層位移，`comments` 與頁面、推噓數對不上
+- [ ] 變化判斷只看推噓數 → 只多了箭頭時 `crawled_at` 不前進，晚到的舊快照刪掉較新的推文
 - [ ] 會被刪除的表沒設 `REPLICA IDENTITY FULL` → Debezium 刪除事件只帶主鍵，下游的非 Nullable 欄位解析失敗
 - [ ] Debezium 沒開 heartbeat → WAL 塞滿硬碟
 - [ ] Connect task `FAILED` 沒人重啟、只看 consumer lag → CDC 停了好幾個小時都沒發現，WAL 持續累積
