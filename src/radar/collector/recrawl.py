@@ -3,11 +3,11 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import ScalarSelect, func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
-from radar.common.db.models import Board, Comment, CrawlState, Post
+from radar.common.db.models import Board, CrawlState, Post
 from radar.common.enums import CrawlReason
 from radar.common.kafka import names
 from radar.common.kafka.producer import JsonProducer
@@ -47,18 +47,6 @@ def next_crawl_at(
     return None
 
 
-def comment_total() -> ScalarSelect[int]:
-    """文章的推文總數（推、噓、箭頭都算），與外層的 Post 關聯的子查詢。"""
-    # NOTE: 不在 posts 存箭頭數：每則新箭頭都會多一個 posts 的 CDC 事件（#51）
-    return (
-        select(func.count())
-        .select_from(Comment)
-        .where(Comment.post_id == Post.post_id)
-        .correlate(Post)
-        .scalar_subquery()
-    )
-
-
 def find_due_posts(session: Session, now: datetime, *, limit: int) -> list[DuePost]:
     """設計文件 4.5 的查詢：24 小時內、未刪除、達門檻、看板啟用中、且已到期的文章。
 
@@ -74,7 +62,7 @@ def find_due_posts(session: Session, now: datetime, *, limit: int) -> list[DuePo
             Post.created_at > now - MAX_AGE,
             or_(
                 Post.created_at > now - THRESHOLD_AFTER,
-                comment_total() >= Board.recrawl_min_push,
+                Post.comment_count >= Board.recrawl_min_push,
             ),
             or_(CrawlState.next_crawl_at.is_(None), CrawlState.next_crawl_at <= now),
         )

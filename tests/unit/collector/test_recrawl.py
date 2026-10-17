@@ -2,12 +2,9 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.dialects import postgresql
 
 from radar.collector import recrawl
-from radar.collector.recrawl import DuePost, DuePostDispatcher, comment_total, next_crawl_at
-from radar.common.db.models import Post
+from radar.collector.recrawl import DuePost, DuePostDispatcher, next_crawl_at
 from radar.common.kafka import names
 from radar.common.kafka.producer import DeliveryError, JsonProducer
 from radar.common.settings import KafkaSettings
@@ -18,14 +15,6 @@ NOW = datetime(2026, 10, 7, 12, 0, tzinfo=UTC)
 
 def created(age: timedelta) -> datetime:
     return NOW - age
-
-
-def test_comment_total_counts_all_comment_types_of_outer_post():
-    sql = str(select(Post.post_id, comment_total()).compile(dialect=postgresql.dialect()))
-
-    assert "count(*)" in sql
-    assert "comments.post_id = posts.post_id" in sql
-    assert "comments.type" not in sql  # 推、噓、箭頭都算
 
 
 @pytest.mark.parametrize("age_minutes", [0, 30, 59])

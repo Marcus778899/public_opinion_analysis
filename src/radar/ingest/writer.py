@@ -22,7 +22,8 @@ DATA_ERRORS = (IntegrityError, DataError)
 COMMENT_CHUNK_SIZE = 5000
 
 # 這些欄位變了才算「有變化」；crawled_at 不列入，否則每次重爬都會產生 CDC 事件
-_CHANGE_COLUMNS = ("push_count", "boo_count", "title", "content")
+# comment_count：只多了箭頭時 crawled_at 也要前進，舊快照才不會刪掉新推文（開發規格 7.24）
+_CHANGE_COLUMNS = ("push_count", "boo_count", "comment_count", "title", "content")
 _COMMENT_COLUMNS = ("type", "user_id", "content", "commented_at")
 
 
@@ -105,6 +106,7 @@ def upsert_posts(session: Session, posts: list[RawPost]) -> int:
                 "url": p.url,
                 "push_count": p.push_count,
                 "boo_count": p.boo_count,
+                "comment_count": len(p.comments),
                 "created_at": p.created_at,
                 "crawled_at": p.crawled_at,
             }

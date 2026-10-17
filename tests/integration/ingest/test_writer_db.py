@@ -414,3 +414,43 @@ def test_ingest_handler_batch_with_poison_post_commits_rest(session_factory):
 
     assert [r.index for r in rejections] == [1]
     assert post_ids(session_factory) == sorted([POST_ID, OTHER_ID])
+
+
+# ---------- 只多了箭頭的快照（開發規格 7.24，#52） ----------
+def test_new_post_records_comment_count(session_factory):
+    write(session_factory, [make_post(n_push=2, n_boo=1, n_arrow=3)])
+
+    assert query(session_factory, "SELECT comment_count FROM posts") == [(6,)]
+
+
+def test_arrow_only_snapshot_advances_crawled_at(session_factory):
+    write(session_factory, [make_post(n_push=1)])
+    t3 = T0 + timedelta(minutes=10)
+
+    stats = write(session_factory, [make_post(crawled_at=t3, n_push=1, n_arrow=10)])
+
+    assert stats.posts_written == 1
+    assert post_row(session_factory).crawled_at == t3
+
+
+def test_late_older_snapshot_does_not_delete_newer_arrows(session_factory):
+    # 重現 #52：T1 寫入 → T3 只多 10 則箭頭 → 晚到的 T2 不可刪掉這 10 則
+    write(session_factory, [make_post(n_push=1)])
+    write(session_factory, [make_post(crawled_at=T0 + timedelta(minutes=10), n_arrow=10)])
+
+    stats = write(session_factory, [make_post(crawled_at=T0 + timedelta(minutes=5), n_push=1)])
+
+    assert (stats.comments_written, stats.comments_deleted) == (0, 0)
+    assert len(comment_rows(session_factory)) == 11
+
+
+def test_same_comment_count_without_other_changes_does_not_write(session_factory):
+    write(session_factory, [make_post(n_push=1, n_arrow=2)])
+    before = post_row(session_factory)
+
+    stats = write(
+        session_factory, [make_post(crawled_at=T0 + timedelta(minutes=1), n_push=1, n_arrow=2)]
+    )
+
+    assert stats.posts_written == 0
+    assert post_row(session_factory) == before

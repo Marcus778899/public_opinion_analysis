@@ -123,3 +123,32 @@ def test_table_comments_record_writer(engine):
         "boards": "writer: api; debezium: no",
         "crawl_state": "writer: scheduler; debezium: no",
     }
+
+
+def test_comment_count_migration_backfills_from_comments(alembic_cfg, engine):
+    # 只更新有推文的文章：沒推文的不寫，xmin 不變、不產生 CDC 事件
+    empty_id = "Stock.M.1759730001.A.000"
+    command.downgrade(alembic_cfg, "8a9b4796098b")
+    with engine.begin() as conn:
+        insert_post(conn)
+        insert_post(conn, empty_id)
+        for floor in (1, 2, 3):
+            conn.execute(
+                text("INSERT INTO comments (post_id, floor, type) VALUES (:id, :f, 'arrow')"),
+                {"id": POST_ID, "f": floor},
+            )
+        before = conn.execute(
+            text("SELECT xmin::text FROM posts WHERE post_id = :id"), {"id": empty_id}
+        ).scalar_one()
+    try:
+        command.upgrade(alembic_cfg, "head")
+        with engine.connect() as conn:
+            rows = dict(conn.execute(text("SELECT post_id, comment_count FROM posts")).all())
+            after = conn.execute(
+                text("SELECT xmin::text FROM posts WHERE post_id = :id"), {"id": empty_id}
+            ).scalar_one()
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("TRUNCATE comments, posts CASCADE"))
+    assert rows == {POST_ID: 3, empty_id: 0}
+    assert after == before
