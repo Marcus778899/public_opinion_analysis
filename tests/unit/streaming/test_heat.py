@@ -16,12 +16,14 @@ from radar.streaming.heat import (
     Trigger,
     advance,
     alert_id,
+    close_minute,
     counts_event,
     event_minute,
     is_decode_error,
     is_fresh,
     make_on_consumer_error,
     minute_end,
+    post_baseline_values,
     process,
     record,
     to_alert,
@@ -90,6 +92,42 @@ def test_ewma_constant_input_variance_stays_zero():
     assert (e.mean, e.var) == (pytest.approx(5), pytest.approx(0))
 
 
+def test_ewma_update_pooled_single_value_matches_update():
+    pooled, single = Ewma(mean=10, var=4, samples=3), Ewma(mean=10, var=4, samples=3)
+
+    pooled.update_pooled([20], 0.1)
+    single.update(20, 0.1)
+
+    assert (pooled.mean, pooled.var) == (pytest.approx(single.mean), pytest.approx(single.var))
+    assert pooled.samples == 4
+
+
+def test_ewma_update_pooled_first_call_uses_batch_mean_and_spread():
+    e = Ewma()
+
+    e.update_pooled([2, 4, 6], 0.1)
+
+    assert (e.mean, e.var, e.samples) == (pytest.approx(4), pytest.approx(8 / 3), 1)
+
+
+def test_ewma_update_pooled_spread_between_values_raises_variance():
+    same, spread = Ewma(mean=5, var=0, samples=10), Ewma(mean=5, var=0, samples=10)
+
+    same.update_pooled([5, 5], 0.1)
+    spread.update_pooled([1, 9], 0.1)
+
+    assert same.mean == spread.mean == pytest.approx(5)
+    assert (same.var, spread.var) == (pytest.approx(0), pytest.approx(0.1 * 16))
+
+
+def test_ewma_update_pooled_empty_values_is_noop():
+    e = Ewma(mean=5, var=1, samples=10)
+
+    e.update_pooled([], 0.1)
+
+    assert e == Ewma(mean=5, var=1, samples=10)
+
+
 def test_ewma_zscore_uses_min_std_when_variance_tiny():
     e = Ewma(mean=2, var=0.01, samples=10)
 
@@ -151,16 +189,23 @@ def test_window_count_sums_last_window_minutes_inclusive_end():
 def test_advance_updates_board_baseline_once_per_closed_minute():
     state = BoardHeat(BOARD, watermark=T0, board_counts={T0: 4})
 
-    advance(state, T0 + 3, CFG)
+    advance(state, T0 + 3, T0 + 3, CFG)
 
     assert state.board_baseline.samples == 3
     assert state.watermark == T0 + 3
 
 
+def test_advance_first_minute_only_sets_watermark():
+    state = BoardHeat(BOARD)
+
+    assert advance(state, T0, T0, CFG) == []
+    assert (state.watermark, state.board_baseline.samples) == (T0, 0)
+
+
 def test_advance_fills_gap_minutes_with_zero():
     state = BoardHeat(BOARD, watermark=T0, board_counts={T0 - 20: 4})
 
-    advance(state, T0 + 5, CFG)
+    advance(state, T0 + 5, T0 + 5, CFG)
 
     assert state.board_baseline.mean == 0  # 視窗內都沒有推文，補的都是 0
 
@@ -168,7 +213,7 @@ def test_advance_fills_gap_minutes_with_zero():
 def test_advance_caps_gap_at_max_gap_min():
     state = BoardHeat(BOARD, watermark=T0)
 
-    advance(state, T0 + 10_000, HeatConfig(max_gap_min=30))
+    advance(state, T0 + 10_000, T0 + 10_000, HeatConfig(max_gap_min=30))
 
     assert state.board_baseline.samples == 30
 
@@ -176,15 +221,60 @@ def test_advance_caps_gap_at_max_gap_min():
 def test_advance_post_baseline_only_from_active_posts():
     state = BoardHeat(BOARD, watermark=T0, post_counts={PID: {T0: 6}, PID2: {T0 - 30: 9}})
 
-    advance(state, T0 + 1, CFG)
+    advance(state, T0 + 1, T0 + 1, CFG)
 
     assert (state.post_baseline.samples, state.post_baseline.mean) == (1, 6)
+
+
+def test_advance_post_baseline_once_per_minute_regardless_of_active_posts():
+    many = {f"Stock.M.{i}.A.000": {T0: 5} for i in range(40)}
+    state = BoardHeat(BOARD, watermark=T0, post_counts=many)
+
+    advance(state, T0 + 3, T0 + 3, CFG)
+
+    assert state.post_baseline.samples == 3
+
+
+def test_advance_post_baseline_decays_like_board_baseline():
+    # 重現 #49：40 篇活躍文章時，舊的高基準 1 分鐘就幾乎被洗掉
+    many = {f"Stock.M.{i}.A.000": {T0: 1} for i in range(40)}
+    state = BoardHeat(
+        BOARD,
+        watermark=T0,
+        board_counts={T0: 1},
+        post_counts=many,
+        board_baseline=Ewma(mean=100, var=0, samples=100),
+        post_baseline=Ewma(mean=100, var=0, samples=100),
+    )
+
+    advance(state, T0 + 1, T0 + 1, CFG)
+
+    assert state.post_baseline.mean == pytest.approx(state.board_baseline.mean)
+
+
+def test_advance_post_baseline_skips_minute_without_active_posts():
+    state = BoardHeat(BOARD, watermark=T0, post_baseline=Ewma(mean=8, var=2, samples=50))
+
+    advance(state, T0 + 3, T0 + 3, CFG)
+
+    assert state.post_baseline == Ewma(mean=8, var=2, samples=50)
+
+
+def test_post_baseline_values_excludes_posts_in_cooldown():
+    state = BoardHeat(
+        BOARD,
+        watermark=T0,
+        post_counts={PID: {T0: 3}, PID2: {T0: 90}, "x": {T0 - 30: 9}},
+        last_alert={f"post:{PID2}": T0 - 5},
+    )
+
+    assert post_baseline_values(state, T0, CFG) == [3]
 
 
 def test_advance_drops_counts_older_than_window_plus_grace():
     state = BoardHeat(BOARD, watermark=T0, board_counts={T0 - 30: 1, T0 - 5: 1, T0: 1})
 
-    advance(state, T0 + 10, CFG)
+    advance(state, T0 + 10, T0 + 10, CFG)
 
     assert sorted(state.board_counts) == [T0]
 
@@ -192,7 +282,7 @@ def test_advance_drops_counts_older_than_window_plus_grace():
 def test_advance_removes_posts_without_recent_comments():
     state = BoardHeat(BOARD, watermark=T0, post_counts={PID: {T0: 1}, PID2: {T0 - 30: 1}})
 
-    advance(state, T0 + 1, CFG)
+    advance(state, T0 + 1, T0 + 1, CFG)
 
     assert list(state.post_counts) == [PID]
 
@@ -200,17 +290,72 @@ def test_advance_removes_posts_without_recent_comments():
 def test_advance_backwards_minute_is_noop():
     state = BoardHeat(BOARD, watermark=T0)
 
-    advance(state, T0 - 3, CFG)
-
+    assert advance(state, T0 - 3, T0, CFG) == []
     assert (state.watermark, state.board_baseline.samples) == (T0, 0)
 
 
 def test_advance_drops_expired_cooldown_entries():
     state = BoardHeat(BOARD, watermark=T0, last_alert={f"post:{PID}": T0 - 40, "board:Stock": T0})
 
-    advance(state, T0 + 1, CFG)
+    advance(state, T0 + 1, T0 + 1, CFG)
 
     assert state.last_alert == {"board:Stock": T0}
+
+
+# --- close_minute ---
+
+
+def hot(post_counts: dict[str, dict[int, int]], **kw) -> BoardHeat:
+    """基準已暖機（平均 1、變異 1）的看板，用來直接測 close_minute。"""
+    base = {"mean": 1.0, "var": 1.0, "samples": 100}
+    return BoardHeat(
+        BOARD,
+        watermark=T0 + 1,
+        board_counts={T0: sum(c.get(T0, 0) for c in post_counts.values())},
+        post_counts=post_counts,
+        board_baseline=Ewma(**base),
+        post_baseline=Ewma(**base),
+        **kw,
+    )
+
+
+def test_close_minute_zscore_uses_baseline_before_update():
+    state = hot({PID: {T0: 50}})
+
+    [post] = [t for t in close_minute(state, T0, T0 + 1, CFG) if t.unit_type == "post"]
+
+    assert (post.baseline, post.zscore) == (pytest.approx(1), pytest.approx(49))
+
+
+def test_close_minute_evaluates_every_active_post():
+    state = hot({PID: {T0: 50}, PID2: {T0: 60}})
+
+    triggers = close_minute(state, T0, T0 + 1, CFG)
+
+    assert sorted(t.unit_key for t in triggers if t.unit_type == "post") == [PID, PID2]
+
+
+def test_close_minute_stale_minute_updates_baseline_without_trigger():
+    state = hot({PID: {T0: 50}})
+
+    assert close_minute(state, T0, T0 + 61, CFG) == []
+    assert state.board_baseline.samples == 101
+
+
+def test_close_minute_triggered_post_not_in_post_baseline():
+    state = hot({PID: {T0: 50}, PID2: {T0: 1}})
+
+    close_minute(state, T0, T0 + 1, CFG)
+
+    assert state.post_baseline.mean == pytest.approx(1)  # 只納入 PID2 的 1
+
+
+def test_close_minute_window_end_is_closed_minute():
+    state = hot({PID: {T0: 50}})
+
+    triggers = close_minute(state, T0, T0 + 1, CFG)
+
+    assert {t.window_end_min for t in triggers} == {T0}
 
 
 # --- record ---
@@ -221,6 +366,11 @@ def surge(state: BoardHeat, minute: int, n: int, post_id: str = PID) -> list[Tri
     for _ in range(n):
         triggers += record(state, comment(minute, post_id=post_id), now_min=minute, config=CFG)
     return triggers
+
+
+def close(state: BoardHeat, minute: int) -> list[Trigger]:
+    """送一則下一分鐘的零星推文，讓 minute 結算。"""
+    return record(state, comment(minute + 1), now_min=minute + 1, config=CFG)
 
 
 def test_record_late_comment_beyond_grace_is_dropped():
@@ -238,6 +388,17 @@ def test_record_late_comment_within_grace_is_counted():
 
     assert state.board_counts == {T0 - 2: 1}
     assert state.watermark == T0
+
+
+def test_record_late_comment_for_closed_minute_not_reevaluated():
+    state = warmed()
+    surge(state, T0 + 10, 25, post_id=PID2)
+    close(state, T0 + 10)
+
+    late = surge(state, T0 + 10, 25, post_id=PID2)  # 寬限內，但 T0 + 10 已結算
+
+    assert late == []
+    assert state.post_counts[PID2][T0 + 10] == 50
 
 
 def test_record_delayed_comment_not_counted():
@@ -261,26 +422,35 @@ def test_record_stale_comment_updates_baseline_without_trigger():
     m = T0 + 10
 
     triggers = [t for _ in range(60) for t in record(state, comment(m), m + 61, CFG)]
+    triggers += record(state, comment(m + 1), m + 62, CFG)
 
     assert triggers == []
     assert state.board_counts[m] == 60
 
 
-def test_record_post_surge_triggers_post_alert():
+def test_record_surge_does_not_alert_before_minute_closes():
     state = warmed()
 
-    triggers = surge(state, T0 + 10, 40, post_id=PID2)
+    assert surge(state, T0 + 10, 200, post_id=PID2) == []
 
-    post = [t for t in triggers if t.unit_type == "post"]
-    assert len(post) == 1
-    assert (post[0].unit_key, post[0].value, post[0].sample_post_ids) == (PID2, 30, [PID2])
-    assert post[0].zscore >= CFG.z_threshold
+
+def test_record_surge_alert_value_is_count_at_minute_close():
+    # 重現 #50：原本在第 30 則就觸發，value 停在 30
+    state = warmed()
+    surge(state, T0 + 10, 200, post_id=PID2)
+
+    triggers = close(state, T0 + 10)
+
+    [post] = [t for t in triggers if t.unit_type == "post"]
+    assert (post.unit_key, post.value, post.sample_post_ids) == (PID2, 200, [PID2])
+    assert post.zscore >= CFG.z_threshold
 
 
 def test_record_board_surge_triggers_board_alert():
     state = warmed()
+    surge(state, T0 + 10, 40, post_id=PID2)
 
-    triggers = surge(state, T0 + 10, 40, post_id=PID2)
+    triggers = close(state, T0 + 10)
 
     [board] = [t for t in triggers if t.unit_type == "board"]
     assert board.unit_key == BOARD
@@ -289,29 +459,32 @@ def test_record_board_surge_triggers_board_alert():
 
 def test_record_below_min_count_does_not_trigger():
     state = warmed()
+    surge(state, T0 + 10, 15, post_id=PID2)
 
-    assert surge(state, T0 + 10, 15, post_id=PID2) == []
+    assert close(state, T0 + 10) == []
 
 
 def test_record_below_z_threshold_does_not_trigger():
     state = warmed(per_minute=40)  # 平常每分鐘 40 則，視窗約 400
+    surge(state, T0 + 10, 45)
 
-    triggers = surge(state, T0 + 10, 45)
-
-    assert [t for t in triggers if t.unit_type == "board"] == []
+    assert [t for t in close(state, T0 + 10) if t.unit_type == "board"] == []
 
 
 def test_record_before_warmup_does_not_trigger():
     state = warmed(minutes=3)
+    surge(state, T0 + 3, 60, post_id=PID2)
 
-    assert surge(state, T0 + 3, 60, post_id=PID2) == []
+    assert close(state, T0 + 3) == []
 
 
 def test_record_same_unit_within_cooldown_triggers_once():
     state = warmed()
 
-    first = surge(state, T0 + 10, 40, post_id=PID2)
-    again = surge(state, T0 + 12, 40, post_id=PID2)
+    surge(state, T0 + 10, 40, post_id=PID2)
+    first = close(state, T0 + 10)
+    surge(state, T0 + 12, 40, post_id=PID2)
+    again = close(state, T0 + 12)
 
     assert len([t for t in first if t.unit_type == "post"]) == 1
     assert [t for t in again if t.unit_type == "post"] == []
@@ -323,18 +496,11 @@ def test_record_after_cooldown_triggers_again():
     for m in range(T0 + 11, T0 + 45):  # 冷卻期間只有零星推文
         record(state, comment(m), now_min=m, config=CFG)
 
-    # 第一次暴增也進了文章基準，第二次要更大才會超過門檻
-    triggers = surge(state, T0 + 45, 150, post_id=PID2)
+    surge(state, T0 + 45, 40, post_id=PID2)
+    triggers = close(state, T0 + 45)
 
+    # 冷卻中的暴增不進文章基準，第二次同樣規模就會觸發
     assert [t.unit_key for t in triggers if t.unit_type == "post"] == [PID2]
-
-
-def test_record_window_end_is_watermark():
-    state = warmed()
-
-    triggers = surge(state, T0 + 10, 40, post_id=PID2)
-
-    assert {t.window_end_min for t in triggers} == {T0 + 10}
 
 
 # --- Trigger → Alert ---
@@ -386,6 +552,7 @@ def test_to_alert_board_keeps_sample_posts():
 def test_board_heat_to_dict_from_dict_roundtrip():
     state = warmed()
     surge(state, T0 + 10, 40, post_id=PID2)
+    close(state, T0 + 10)
 
     assert BoardHeat.from_dict(state.to_dict()) == state
 
@@ -436,6 +603,7 @@ def test_process_returns_alert_dicts_matching_schema():
         process(value_of(m), state, CFG, at(m))
 
     out = [a for _ in range(40) for a in process(value_of(T0 + 10, PID2), state, CFG, at(T0 + 10))]
+    out += process(value_of(T0 + 11), state, CFG, at(T0 + 11))
 
     alerts = [Alert.model_validate(a) for a in out]
     assert {a.unit_type for a in alerts} == {"post", "board"}
