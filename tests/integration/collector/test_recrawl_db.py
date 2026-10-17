@@ -158,7 +158,7 @@ def test_record_dispatch_upserts_crawl_state(engine, session_factory):
 
     with engine.connect() as conn:
         rows = dict(conn.execute(text("SELECT post_id, next_crawl_at FROM crawl_state")).all())
-    assert rows["Stock.M.1.A.001"] == NOW + timedelta(minutes=2)
+    assert rows["Stock.M.1.A.001"] == NOW + timedelta(minutes=5)
     assert rows["Stock.M.2.A.002"] == NOW + timedelta(hours=1)
     assert due_ids(session_factory) == []
 
