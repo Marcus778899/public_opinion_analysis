@@ -22,6 +22,7 @@ from radar.streaming.heat import (
     is_decode_error,
     is_fresh,
     make_on_consumer_error,
+    min_count_for,
     minute_end,
     post_baseline_values,
     process,
@@ -35,7 +36,8 @@ BOARD = "Stock"
 PID = "Stock.M.1792000000.A.ABC"
 PID2 = "Stock.M.1792000001.A.DEF"
 T0 = 29_000_000  # epoch 分鐘
-CFG = HeatConfig(warmup_min=5, max_gap_min=100)
+# NOTE: 文章門檻設成與看板相同，既有案例才能用小量推文測觸發邏輯；#59 的門檻另外測
+CFG = HeatConfig(warmup_min=5, max_gap_min=100, post_min_count=30)
 
 
 def at(minute: int) -> datetime:
@@ -358,6 +360,33 @@ def test_close_minute_window_end_is_closed_minute():
     assert {t.window_end_min for t in triggers} == {T0}
 
 
+def test_min_count_for_post_uses_post_min_count():
+    assert min_count_for("post", HeatConfig(min_count=30, post_min_count=80)) == 80
+
+
+def test_min_count_for_board_uses_min_count():
+    assert min_count_for("board", HeatConfig(min_count=30, post_min_count=80)) == 30
+
+
+def test_close_minute_post_below_post_min_count_only_board_triggers():
+    # 重現 #59：文章基準約 1，視窗值 50 的 z-score 很高，原本只要過 30 就觸發
+    state = hot({PID: {T0: 50}})
+    config = HeatConfig(warmup_min=5, post_min_count=80)
+
+    triggers = close_minute(state, T0, T0 + 1, config)
+
+    assert [t.unit_type for t in triggers] == ["board"]
+
+
+def test_close_minute_post_at_post_min_count_triggers():
+    state = hot({PID: {T0: 80}})
+    config = HeatConfig(warmup_min=5, post_min_count=80)
+
+    triggers = close_minute(state, T0, T0 + 1, config)
+
+    assert [t.unit_key for t in triggers if t.unit_type == "post"] == [PID]
+
+
 # --- record ---
 
 
@@ -668,3 +697,11 @@ def test_heat_config_from_settings_copies_all_fields(monkeypatch):
     config = HeatConfig.from_settings(HeatSettings())
 
     assert (config.min_count, config.ewma_alpha, config.window_min) == (7, 0.5, 10)
+
+
+def test_heat_config_post_min_count_defaults_to_80_and_reads_env(monkeypatch):
+    assert HeatConfig.from_settings(HeatSettings()).post_min_count == 80
+
+    monkeypatch.setenv("HEAT_POST_MIN_COUNT", "120")
+
+    assert HeatConfig.from_settings(HeatSettings()).post_min_count == 120

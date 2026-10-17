@@ -79,7 +79,12 @@ def run(kafka, registry, tmp_path):
 
     def run_app(state_dir, idle_s: float) -> None:
         settings = HeatSettings(
-            input_topic=topic, consumer_group=group, state_dir=state_dir, warmup_min=5
+            input_topic=topic,
+            consumer_group=group,
+            state_dir=state_dir,
+            warmup_min=5,
+            # NOTE: 暴增只有 40 則；這裡測的是串接與 exactly-once，不是門檻（#59）
+            post_min_count=30,
         )
         producer = JsonProducer(kafka)
         app = build_app(settings, kafka, DlqPublisher(producer, group), registry)
