@@ -166,7 +166,7 @@ Apicurio 使用 SQL 儲存，不建立 topic。PG connector 不需要 schema his
 | 6～24 小時 | 每小時 |
 | > 24 小時 | 停止 |
 
-**重爬門檻**：文章滿 1 小時後，推文數低於該看板的 `boards.recrawl_min_push` 就停止重爬。依上表每篇 24 小時內約重爬 78 次，Gossiping 一天數千篇會超出請求預算，門檻用來只追蹤有在發酵的文章（Gossiping 預設 10，其餘 0）。
+**重爬門檻**：文章滿 1 小時後，推文總數（推、噓、箭頭都算）低於該看板的 `boards.recrawl_min_push` 就停止重爬（欄位名稱沿用，見開發規格 7.2）。依上表每篇 24 小時內約重爬 78 次，Gossiping 一天數千篇會超出請求預算，門檻用來只追蹤有在發酵的文章（Gossiping 預設 10，其餘 0）。
 
 ### 4.3 管理後端（FastAPI）
 
@@ -233,7 +233,8 @@ WHERE b.enabled                                          -- 停用的看板不�
   AND NOT p.is_deleted
   AND p.created_at > now() - interval '24 hours'
   AND (p.created_at > now() - interval '1 hour'          -- 1 小時內一律重爬
-       OR p.push_count >= b.recrawl_min_push)            -- 之後只追蹤達門檻的
+       OR (SELECT count(*) FROM comments c               -- 之後只追蹤推文總數
+           WHERE c.post_id = p.post_id) >= b.recrawl_min_push)  -- （推＋噓＋→）達門檻的
   AND (cs.next_crawl_at IS NULL OR cs.next_crawl_at <= now())
 ORDER BY cs.next_crawl_at NULLS FIRST, p.created_at DESC  -- 沒派發過的優先
 LIMIT 500;                                               -- 其餘留到下一輪
@@ -363,7 +364,7 @@ CREATE TABLE boards (
   board            TEXT PRIMARY KEY,
   enabled          BOOLEAN NOT NULL DEFAULT TRUE,
   interval_sec     INT NOT NULL CHECK (interval_sec >= 30),
-  recrawl_min_push INT NOT NULL DEFAULT 0 CHECK (recrawl_min_push >= 0),  -- 4.2 重爬門檻
+  recrawl_min_push INT NOT NULL DEFAULT 0 CHECK (recrawl_min_push >= 0),  -- 4.2 重爬門檻（推文總數）
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()                     -- ORM 更新時刷新
 );
 
