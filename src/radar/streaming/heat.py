@@ -54,6 +54,7 @@ class HeatConfig:
     max_gap_min: int = 1440
     z_threshold: float = 3.0
     min_count: int = 30
+    post_min_count: int = 80
     cooldown_min: int = 30
     warmup_min: int = 60
     min_std: float = 1.0
@@ -265,6 +266,11 @@ def record(
     return advance(state, minute, now_min, config)
 
 
+def min_count_for(unit_type: UnitType, config: HeatConfig) -> int:
+    """觸發所需的最低推文數：文章用 post_min_count，看板用 min_count。"""
+    return config.post_min_count if unit_type == "post" else config.min_count
+
+
 def evaluate(
     state: BoardHeat,
     unit_type: UnitType,
@@ -277,7 +283,7 @@ def evaluate(
     """單一單位在結算分鐘 end_min 是否觸發；觸發時記錄 last_alert（冷卻）。"""
     if state.board_baseline.samples < config.warmup_min:
         return None
-    if value < config.min_count:
+    if value < min_count_for(unit_type, config):
         return None
     z = baseline.zscore(value, config.min_std)
     if z < config.z_threshold:

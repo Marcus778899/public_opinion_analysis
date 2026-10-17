@@ -131,6 +131,8 @@ class HeatSettings(BaseSettings):
     max_gap_min: int = 1440
     z_threshold: float = 3.0
     min_count: int = 30
+    # 文章的最低推文數另設較高的值：大多數文章推文很少，z-score 篩不掉（開發規格 7.20、#59）
+    post_min_count: int = 80
     cooldown_min: int = 30
     warmup_min: int = 60
     min_std: float = 1.0
