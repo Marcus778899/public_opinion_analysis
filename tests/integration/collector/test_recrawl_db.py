@@ -35,13 +35,14 @@ def session_factory(engine):
     return make_session_factory(engine)
 
 
-def add_post(engine, post_id, *, age, push=0, deleted=False, next_crawl=None):
+def add_post(engine, post_id, *, age, push=0, boo=0, arrow=0, deleted=False, next_crawl=None):
     board = post_id.split(".", 1)[0]
     with engine.begin() as conn:
         conn.execute(
             text(
                 "INSERT INTO posts (post_id, board, url, created_at, crawled_at, push_count, "
-                "is_deleted) VALUES (:id, :board, :url, :created, :created, :push, :deleted)"
+                "boo_count, is_deleted) "
+                "VALUES (:id, :board, :url, :created, :created, :push, :boo, :deleted)"
             ),
             {
                 "id": post_id,
@@ -49,9 +50,16 @@ def add_post(engine, post_id, *, age, push=0, deleted=False, next_crawl=None):
                 "url": f"https://www.ptt.cc/bbs/{board}/{post_id.split('.', 1)[1]}.html",
                 "created": NOW - age,
                 "push": push,
+                "boo": boo,
                 "deleted": deleted,
             },
         )
+        types = ["push"] * push + ["boo"] * boo + ["arrow"] * arrow
+        if types:
+            conn.execute(
+                text("INSERT INTO comments (post_id, floor, type) VALUES (:id, :floor, :type)"),
+                [{"id": post_id, "floor": i + 1, "type": t} for i, t in enumerate(types)],
+            )
         if next_crawl is not None:
             conn.execute(
                 text(
@@ -102,6 +110,26 @@ def test_due_posts_apply_threshold_after_1h(engine, session_factory):
     add_post(engine, "Gossiping.M.3.A.003", age=timedelta(hours=2), push=10)
 
     assert sorted(due_ids(session_factory)) == ["Gossiping.M.1.A.001", "Gossiping.M.3.A.003"]
+
+
+def test_due_posts_threshold_counts_boos(engine, session_factory):
+    # 重現 #51：逆風文 3 推 120 噓，滿 1 小時後原本就不再重爬
+    add_post(engine, "Gossiping.M.1.A.001", age=timedelta(hours=2), push=3, boo=120)
+
+    assert due_ids(session_factory) == ["Gossiping.M.1.A.001"]
+
+
+def test_due_posts_threshold_counts_arrows(engine, session_factory):
+    add_post(engine, "Gossiping.M.1.A.001", age=timedelta(hours=2), push=2, arrow=30)
+
+    assert due_ids(session_factory) == ["Gossiping.M.1.A.001"]
+
+
+def test_due_posts_threshold_total_just_below_excluded(engine, session_factory):
+    add_post(engine, "Gossiping.M.1.A.001", age=timedelta(hours=2), push=4, boo=3, arrow=2)
+    add_post(engine, "Gossiping.M.2.A.002", age=timedelta(hours=2), push=4, boo=3, arrow=3)
+
+    assert due_ids(session_factory) == ["Gossiping.M.2.A.002"]
 
 
 def test_due_posts_exclude_disabled_boards(engine, session_factory):
