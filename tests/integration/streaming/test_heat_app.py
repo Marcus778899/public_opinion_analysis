@@ -118,7 +118,11 @@ def comment(post_id: str, floor: int, at: datetime, op: str = "c") -> dict:
 def baseline_and_surge(board: str, now: datetime) -> list[dict]:
     quiet, hot = f"{board}.M.1792000000.A.AAA", f"{board}.M.1792000001.A.BBB"
     events = [comment(quiet, i, now - timedelta(minutes=30 - i)) for i in range(28)]
-    events += [comment(hot, 100 + i, now - timedelta(seconds=40 - i)) for i in range(40)]
+    # 暴增都在同一分鐘內，結算時的 value 才確定是 40
+    minute = now.replace(second=0, microsecond=0)
+    events += [comment(hot, 100 + i, minute + timedelta(seconds=i)) for i in range(40)]
+    # NOTE: 分鐘要等下一分鐘的推文進來才結算（#50），最後送一則讓暴增的分鐘結算
+    events.append(comment(quiet, 99, minute + timedelta(seconds=90)))
     return events
 
 
@@ -158,7 +162,7 @@ def test_surge_produces_one_alert_per_unit(kafka, registry, run, tmp_path):
     assert sorted(a["unit_type"] for a in alerts) == ["board", "post"]
     post = next(a for a in alerts if a["unit_type"] == "post")
     assert post["unit_key"] == "HeatA.M.1792000001.A.BBB"
-    assert post["value"] >= 30
+    assert post["value"] == 40  # 結算時的值，不是剛越過門檻的 30
 
 
 def test_updates_and_deletes_produce_no_alert(kafka, registry, run, tmp_path):
@@ -180,7 +184,8 @@ def test_restart_restores_state_and_does_not_realert(kafka, registry, run, tmp_p
     assert len(alerts_for(kafka, "HeatC")) == 2
 
     hot = "HeatC.M.1792000001.A.BBB"
-    more = [comment(hot, 500 + i, now + timedelta(seconds=i)) for i in range(40)]
+    more = [comment(hot, 500 + i, now + timedelta(minutes=1, seconds=i)) for i in range(40)]
+    more.append(comment(hot, 600, now + timedelta(minutes=3)))
     produce(kafka, registry, run.topic, more)
     # 新的 state 目錄：state 只能從 changelog topic 恢復；冷卻期間不應再發
     run(tmp_path / "second", 25)

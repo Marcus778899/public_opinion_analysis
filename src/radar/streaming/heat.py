@@ -81,6 +81,22 @@ class Ewma:
             self.var = (1 - alpha) * (self.var + diff * incr)
         self.samples += 1
 
+    def update_pooled(self, values: list[int], alpha: float) -> None:
+        """一分鐘只更新一次：以多個值的平均與平方平均更新一階、二階動差（開發規格 7.20）。"""
+        if not values:
+            return
+        mean = sum(values) / len(values)
+        sq_mean = sum(v * v for v in values) / len(values)
+        if self.samples == 0:
+            self.mean, self.var = mean, sq_mean - mean * mean
+        else:
+            # NOTE: 對二階動差做 EWMA；只有一個值時展開後與 update 相同
+            second = (1 - alpha) * (self.var + self.mean**2) + alpha * sq_mean
+            self.mean = (1 - alpha) * self.mean + alpha * mean
+            self.var = second - self.mean**2
+        self.var = max(self.var, 0.0)  # 浮點誤差可能略小於 0
+        self.samples += 1
+
     def zscore(self, value: float, min_std: float) -> float:
         """標準差低於 min_std 時以 min_std 計算，避免變異數接近 0 時 z-score 爆大。"""
         return (value - self.mean) / max(math.sqrt(self.var), min_std)
@@ -98,7 +114,7 @@ class BoardHeat:
     # post_id → 分鐘 → 推文數；同上，沒有推文的文章會被移除
     post_counts: dict[str, dict[int, int]] = field(default_factory=dict)
     board_baseline: Ewma = field(default_factory=Ewma)
-    # 該看板活躍文章的視窗值共用一個基準（設計文件 15.2、開發規格 7.20）
+    # 該看板活躍文章共用一個基準，每分鐘以 update_pooled 更新一次（開發規格 7.20）
     post_baseline: Ewma = field(default_factory=Ewma)
     # "post:<post_id>" / "board:<board>" → 最後一次警示的分鐘
     last_alert: dict[str, int] = field(default_factory=dict)
@@ -177,22 +193,17 @@ def window_count(counts: dict[int, int], end_min: int, window_min: int) -> int:
     return sum(n for m, n in counts.items() if end_min - window_min < m <= end_min)
 
 
-def advance(state: BoardHeat, minute: int, config: HeatConfig) -> None:
-    """watermark 前進到 minute：每個結束的分鐘以當時的 10 分鐘視窗更新基準，再清掉過期的計數。"""
+def advance(state: BoardHeat, minute: int, now_min: int, config: HeatConfig) -> list[Trigger]:
+    """watermark 前進到 minute：逐一結算結束的分鐘（close_minute），再清掉過期的計數。"""
     if state.watermark is None:
         state.watermark = minute
-        return
+        return []
     if minute <= state.watermark:
-        return
+        return []
     # NOTE: 中間沒有推文的分鐘也要補 0，否則基準只看到有推文的時段而偏高
+    triggers: list[Trigger] = []
     for closed in range(max(state.watermark, minute - config.max_gap_min), minute):
-        state.board_baseline.update(
-            window_count(state.board_counts, closed, config.window_min), config.ewma_alpha
-        )
-        for counts in state.post_counts.values():
-            value = window_count(counts, closed, config.window_min)
-            if value > 0:
-                state.post_baseline.update(value, config.ewma_alpha)
+        triggers += close_minute(state, closed, now_min, config)
     state.watermark = minute
     keep_after = minute - config.window_min - config.grace_min
     state.board_counts = {m: n for m, n in state.board_counts.items() if m > keep_after}
@@ -204,12 +215,45 @@ def advance(state: BoardHeat, minute: int, config: HeatConfig) -> None:
     state.last_alert = {
         unit: m for unit, m in state.last_alert.items() if minute - m < config.cooldown_min
     }
+    return triggers
+
+
+def close_minute(state: BoardHeat, closed: int, now_min: int, config: HeatConfig) -> list[Trigger]:
+    """結算一分鐘：先以更新前的基準評估看板與所有活躍文章，再更新兩種基準。"""
+    # NOTE: 不是每則推文都評估，否則一定在剛越過門檻時觸發，value 永遠停在門檻附近（#50）
+    board_value = window_count(state.board_counts, closed, config.window_min)
+    triggers: list[Trigger] = []
+    if closed >= now_min - config.stale_after_min:
+        board = evaluate(
+            state, "board", state.board, closed, board_value, state.board_baseline, config
+        )
+        posts = (
+            evaluate(state, "post", post_id, closed, value, state.post_baseline, config)
+            for post_id, counts in state.post_counts.items()
+            if (value := window_count(counts, closed, config.window_min)) > 0
+        )
+        triggers = [t for t in (board, *posts) if t is not None]
+    state.board_baseline.update(board_value, config.ewma_alpha)
+    state.post_baseline.update_pooled(
+        post_baseline_values(state, closed, config), config.ewma_alpha
+    )
+    return triggers
+
+
+def post_baseline_values(state: BoardHeat, closed: int, config: HeatConfig) -> list[int]:
+    """更新文章基準用的視窗值：視窗內有推文、且不在冷卻中的文章（冷卻包含剛觸發的）。"""
+    values = (
+        window_count(counts, closed, config.window_min)
+        for post_id, counts in state.post_counts.items()
+        if f"post:{post_id}" not in state.last_alert
+    )
+    return [v for v in values if v > 0]
 
 
 def record(
     state: BoardHeat, comment: CdcComment, now_min: int, config: HeatConfig
 ) -> list[Trigger]:
-    """處理一則推文：太舊或寬限外的丟棄；計數、推進 watermark；不是舊事件才評估觸發。"""
+    """處理一則推文：太舊或寬限外的丟棄；計數後推進 watermark，回傳結算分鐘產生的 Trigger。"""
     if not is_fresh(comment, config.max_delay_min):
         return []
     minute = event_minute(comment)
@@ -218,44 +262,20 @@ def record(
     state.board_counts[minute] = state.board_counts.get(minute, 0) + 1
     post = state.post_counts.setdefault(comment.post_id, {})
     post[minute] = post.get(minute, 0) + 1
-    advance(state, minute, config)
-    if minute < now_min - config.stale_after_min:
-        return []
-    end = state.watermark
-    if end is None:  # advance 之後一定有 watermark，只為型別檢查
-        return []
-    triggers = [
-        evaluate(
-            state,
-            "post",
-            comment.post_id,
-            window_count(state.post_counts[comment.post_id], end, config.window_min),
-            state.post_baseline,
-            config,
-        ),
-        evaluate(
-            state,
-            "board",
-            state.board,
-            window_count(state.board_counts, end, config.window_min),
-            state.board_baseline,
-            config,
-        ),
-    ]
-    return [t for t in triggers if t is not None]
+    return advance(state, minute, now_min, config)
 
 
 def evaluate(
     state: BoardHeat,
     unit_type: UnitType,
     unit_key: str,
+    end_min: int,
     value: int,
     baseline: Ewma,
     config: HeatConfig,
 ) -> Trigger | None:
-    """單一單位是否觸發；觸發時記錄 last_alert（冷卻）。"""
-    end = state.watermark
-    if end is None or state.board_baseline.samples < config.warmup_min:
+    """單一單位在結算分鐘 end_min 是否觸發；觸發時記錄 last_alert（冷卻）。"""
+    if state.board_baseline.samples < config.warmup_min:
         return None
     if value < config.min_count:
         return None
@@ -264,11 +284,11 @@ def evaluate(
         return None
     unit = f"{unit_type}:{unit_key}"
     last = state.last_alert.get(unit)
-    if last is not None and end - last < config.cooldown_min:
+    if last is not None and end_min - last < config.cooldown_min:
         return None
-    state.last_alert[unit] = end
-    samples = [unit_key] if unit_type == "post" else top_posts(state, end, config.window_min)
-    return Trigger(unit_type, unit_key, end, value, baseline.mean, z, samples)
+    state.last_alert[unit] = end_min
+    samples = [unit_key] if unit_type == "post" else top_posts(state, end_min, config.window_min)
+    return Trigger(unit_type, unit_key, end_min, value, baseline.mean, z, samples)
 
 
 def top_posts(state: BoardHeat, end_min: int, window_min: int, limit: int = 3) -> list[str]:
