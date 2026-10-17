@@ -15,8 +15,9 @@ from radar.common.log import log
 from radar.common.tasks import make_post_task
 
 # (文章年齡上限, 重爬間隔)；超過最後一級就停止重爬
+# NOTE: PTT 網頁版約 10 分鐘才更新，1 小時內再密也拿不到新內容（開發規格 7.22）
 RECRAWL_TIERS: tuple[tuple[timedelta, timedelta], ...] = (
-    (timedelta(hours=1), timedelta(minutes=2)),
+    (timedelta(hours=1), timedelta(minutes=5)),
     (timedelta(hours=6), timedelta(minutes=10)),
     (timedelta(hours=24), timedelta(hours=1)),
 )
