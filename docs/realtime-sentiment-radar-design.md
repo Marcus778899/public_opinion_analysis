@@ -1,7 +1,7 @@
 # 即時輿情雷達：設計草案
 
-> 狀態：實作中（階段 1 待 24 小時驗收，階段 2 進行中；進度見開發規格第 6 章）
-> 最後更新：2026-10-07
+> 狀態：實作中（階段 1～4 已驗收；階段 5 MVP 待 3 天驗收；進度見開發規格第 6 章）
+> 最後更新：2026-10-17
 >
 > 本文件需與程式同步：改動資料流、表、topic、訊息格式時先更新這裡（CLAUDE.md）。
 
@@ -27,7 +27,14 @@
 
 ## 1. 產品定位
 
-追蹤 PTT 等社群上的話題，在討論**開始發酵的前幾分鐘**偵測並通知使用者，同時提供情緒分析與話題摘要。
+追蹤 PTT 等社群上的話題，在討論**開始發酵時**偵測並通知使用者，同時告訴使用者這個話題的**風向**。
+
+- **主要介面是 Telegram bot**：警示推送，與用按鈕選單管理訂閱、查詢熱門與看板概況（9.2）；Dashboard 看長時間的趨勢（9.1）
+- **兩類訊號**：
+  - 熱度：推文增加的速度（8.3）
+  - 風向：文章本身的情緒（模型推論，8.2）、共鳴度與爭議度（推、噓、箭頭的數量與比例，15.6）。推文內容的情緒（群眾反應）列為延伸功能（14.4）
+- **即時性**：受 PTT 網頁版約 10 分鐘的更新週期限制（4.2）；要更即時需改用 PTT BBS（開發規格「後續階段」）
+- 每日話題摘要（LLM）為非 MVP 功能
 
 ### 1.1 為什麼用 Kafka
 
@@ -92,7 +99,7 @@
 | CDC watchdog | 1 | 監看 connector 與 replication slot，task 失敗時自動重啟（6.4） |
 | Apicurio | 1 | Schema Registry |
 | ClickHouse | 1 | OLAP 分析、熱度曲線、訓練資料來源 |
-| Telegram bot | 1 | 推送警示與每日摘要、接收訂閱指令 |
+| Telegram bot | 1 | 推送警示（熱度、推噓與爭議度、文章情緒）與每日摘要；按鈕選單管理訂閱、查詢熱門與看板概況 |
 
 ---
 
@@ -387,7 +394,7 @@ CREATE INDEX ON crawl_state (next_crawl_at);
 | `posts`、`comments` | Ingest consumer | ✅ |
 | `boards` | FastAPI | ❌ |
 | `crawl_state` | Scheduler | ❌ |
-| `subscriptions` | Telegram bot | ❌ |
+| `subscriptions`、`chat_settings`、`muted_posts` | Telegram bot | ❌ |
 
 每張表只有一個寫入者。爬蟲不能同時寫 PG 和 Kafka（雙寫）。寫入者與是否被監聽也記在各表的 PG table comment。
 
@@ -543,6 +550,7 @@ Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED
   - Connect 重啟重送的 `op=c` 事件，hash 相同也不會重複推論
 - 刪除的文章（`is_deleted`）不推論
 - 模型檔不進 image：compose 以唯讀方式掛載 `models/`，模型版本由環境變數指定
+- **呈現**：Telegram（警示、熱門、看板概況，9.2）與 Dashboard（9.1）讀 ClickHouse `predictions` 每篇最新一筆；信心不足顯示「不確定」（15.8）
 
 ### 8.3 熱度偵測
 
@@ -567,16 +575,28 @@ Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED
 
 ### 9.1 Dashboard
 
-Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情緒分布、實體排行。
+Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、情緒分布與趨勢、爭議度、近 24 小時警示、熱門文章排行。長時間的趨勢看 Dashboard；即時通知與快速查詢在 Telegram。
 
 ### 9.2 Telegram bot
 
-- 推送：消費 `alerts`，依 `subscriptions`（以看板為單位）推送
-- 指令：MVP 為 `/start`、`/boards`、`/subscribe <board>`、`/unsubscribe`、`/hot`；之後加 `/subscribe 台積電`（實體，15.2 進階 1）
-- 使用 long polling，不需要對外開放 HTTP；以 `httpx2` 直接呼叫 Bot API，不加 SDK
-- 只回應允許清單內的 chat（`TELEGRAM_ALLOWED_CHAT_IDS`）
-- 細節見開發規格 7.21
-- 每日摘要：APScheduler cron trigger，每天 08:00 用 LLM 摘要前一天的熱門話題
+主要介面。MVP（階段 5）只有文字指令；階段 6 改成按鈕選單（15.7），文字指令保留。
+
+- **推送**：消費 `alerts`，依訂閱（看板）推送。每則警示附：
+  - 熱度：視窗內推文數，與平常（基準）的倍數
+  - 推、噓、箭頭數與爭議度（噓 ÷（推＋噓））
+  - 文章情緒：模型推論的標籤與信心；信心不足顯示「不確定」，還沒推論的顯示「尚無」（15.8）
+  - 按鈕：開啟原文（URL 按鈕）、看板概況、這篇不再通知、訂閱設定
+  - 看板警示另附推文最多的前 3 篇，各帶推噓與情緒
+- **主選單**（`/start`、`/menu`）：按鈕切換時編輯同一則訊息，不洗版
+  - 🔥 現在熱門：最近 60 分鐘推文最多的文章（預設只看訂閱的看板），附推噓、爭議度、情緒與原文按鈕
+  - 📋 我的訂閱：列出所有啟用的看板，✅／⬜ 點一下切換
+  - 📈 看板概況：選看板後顯示近 24 小時的文章數、推文量、情緒比例（負面／中立／正面）、爭議度最高的文章、今天的警示數
+  - ⚙️ 通知設定：文章警示、看板警示分別開關；「不再通知」的文章清單（可恢復）
+- 使用 long polling，不需要對外開放 HTTP；以 `httpx2` 直接呼叫 Bot API（含 inline keyboard、callback query），不加 SDK
+- 只回應允許清單內的 chat（`TELEGRAM_ALLOWED_CHAT_IDS`），按鈕回呼同樣檢查
+- 之後：`/subscribe 台積電`（實體，15.2 進階 1）；Mini App（14.3，上雲、有 HTTPS 之後）
+- 細節見開發規格 7.21（MVP 文字指令）、7.23（按鈕選單與情緒呈現）
+- 每日摘要：APScheduler cron trigger，每天 08:00 用 LLM 摘要前一天的熱門話題（S5-08，非 MVP）
 
 ---
 
@@ -611,7 +631,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 │   ├── streaming/
 │   │   ├── heat.py          # [常駐] Quix Streams
 │   │   └── replay.py        # [一次性] 錄製、回放、人工暴增
-│   └── bot/main.py          # [常駐] Telegram bot
+│   └── bot/                 # [常駐] Telegram bot：main（long polling、推送）、views（訊息與按鈕）
 ├── infra/
 │   ├── docker-compose.yaml
 │   ├── debezium/
@@ -642,7 +662,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 | `label-stream` | `labeling` | 串流抽樣標註，會持續呼叫 LLM API，`make up-labeling` 才啟動 |
 | `inference` | `inference` | 情緒推論（8.2），需要先訓練好模型；`make up-inference` 才啟動，以唯讀方式掛載 `models/` |
 | `heat`、`bot` | `alerting` | 熱度偵測（8.3）與 Telegram bot（9.2）；bot 需要 `TELEGRAM_BOT_TOKEN`，`make up-alerting` 才啟動；heat 的 RocksDB 掛 volume `heat_state` |
-| `kafka-ui` | （預設） | 開發期間預設啟動（http://localhost:8089，只綁本機），部署前移除（S8-06） |
+| `kafka-ui` | （預設） | 開發期間預設啟動（http://localhost:8089，只綁本機），部署前移除（S9-06） |
 | `init` | `app` | 一次性：Alembic、建立 topic、ClickHouse migration、註冊 connector（皆冪等）；唯一負責建置 `radar-app` image 的服務 |
 | `api` | `app` | 只綁 `127.0.0.1:8000` |
 | `scheduler` | `app` | 只能 1 個；多開時其餘的待命 |
@@ -683,7 +703,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 ### 11.3 減輕負擔
 
 - JVM 服務設定 heap 上限
-- Kafka UI 部署時移除（S8-06）
+- Kafka UI 部署時移除（S9-06）
 - 標註用雲端 API，不同時跑 Ollama
 
 ---
@@ -743,9 +763,12 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 | 3 | LLM 標註 + TF-IDF baseline | 第一版模型與評估分數 |
 | 4 | 推論 consumer | 新文章自動帶情緒分數 |
 | 5 | 熱度偵測 + Telegram bot | 話題暴增時收到通知（**MVP**） |
-| 6 | Dashboard | 視覺化 |
-| 7 | BERT + shadow 比較 | 模型比較報告 |
-| 8 | Terraform 上雲 | 24 小時運作 |
+| 6 | Telegram 互動與情緒呈現 | 按鈕操作；警示帶推噓、爭議度與文章情緒 |
+| 7 | Dashboard | 視覺化 |
+| 8 | BERT + shadow 比較 | 模型比較報告 |
+| 9 | Terraform 上雲 | 24 小時運作 |
+
+之後的階段（實體與主題熱度、即時資料來源、推文層級情緒、Mini App 等）見開發規格「後續階段」。
 
 ---
 
@@ -764,6 +787,20 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 - FastAPI 修改設定時寫入 compacted topic `config.boards`，Scheduler 改為消費該 topic
 - 優點：設定立即生效，可練習 log compaction
 - 代價：需處理雙寫（Outbox pattern 或 Debezium 監聽 `boards`）
+
+### 14.3 Telegram Mini App
+
+- 在 Telegram 裡開網頁介面：圖表、可篩選的清單、看板情緒趨勢
+- 前置：對外的 HTTPS 網址（上雲後，開發規格階段 9）；後端要驗證 Telegram 傳來的 `initData` 簽章
+- 與 Dashboard 有重疊：Mini App 給使用者在手機上看，Grafana 給維運與分析
+
+### 14.4 推文層級的情緒（群眾反應）
+
+- 現在的模型判斷「文章本身的情緒」（作者的立場）；輿情更關心讀者的反應
+- 推噓只代表同不同意（15.6），不是情緒；要知道讀者在支持、反對還是嘲諷，需要對推文內容分類
+- 做法：LLM 抽樣標註推文 → 訓練推文層級的模型 → 彙總成「這篇底下的輿論偏向」，呈現在 Telegram 與 Dashboard
+- 代價：另一筆標註費用；推文短、反諷多，難度比文章高
+- 時程未定，等階段 6 上線看實際需求再決定（開發規格「後續階段」）
 
 ---
 
@@ -815,9 +852,24 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 - 下游本來就從 `cdc.public.comments` 拿到逐筆推文，不需要在 raw 層拆
 - 單則訊息過大時的對策：zstd 壓縮、調高 `max.message.bytes`；仍不夠再讓爬蟲只送新樓層（任務帶 `last_floor`）
 
-### 15.6 推噓比作為弱標註：列為第 3 階段的驗證實驗
+### 15.6 推噓比作為弱標註：已驗證，不採用（S3-05）
 
 - 疑慮：推噓代表「同不同意這篇文」，不等於「這篇文的情緒」（例如痛罵某公司的文章被大量推）
-- 驗證方式：拿 LLM 標註的資料，比較各情緒類別的推噓比分布
-- 相關性弱 → 不當標籤，改當獨立指標（共鳴度、爭議度）或模型特徵
-- 推文層級的 `推` / `噓` 對「該則推文對文章的態度」可能是較好的弱標註，一併驗證
+- 結果（`docs/reports/s3-05-push-ratio.md`）：Groq、Claude、人工三種標註來源，各情緒類別的推噓比中位數都在 0.87～0.91，相關係數接近 0 → **不當標籤**
+- **改當獨立指標**，直接呈現給使用者（9.2、9.1）：共鳴度（推文總數）、爭議度（噓 ÷（推＋噓））、箭頭比例
+- **不當模型特徵**：與情緒沒有相關；推噓數持續變動，當特徵會讓同一篇的預測跳動，每次推噓變化都要重新推論（與 8.2「推噓更新不重新推論」衝突），訓練與推論時的數值也不一致
+- 推文層級的 `推` / `噓` 對「該則推文對文章的態度」可能是較好的弱標註：需要推文層級的情緒標註才能驗證，併入 14.4
+
+### 15.7 Telegram 互動：按鈕選單，之後再做 Mini App（2026-10-17）
+
+- MVP 的文字指令要記看板名稱與參數（`/subscribe Gossiping`），不符合 Telegram bot 的使用習慣
+- 採 inline keyboard：long polling 就能用、不需要對外網址、不用另寫前端；按鈕切換時編輯同一則訊息
+- Mini App（14.3）的畫面更豐富，但需要 HTTPS 與另一套前端，等上雲後再做
+- 文字指令保留（相容、除錯用）
+
+### 15.8 情緒呈現的原則（2026-10-17）
+
+- 「情緒」目前指文章本身的情緒；群眾反應見 14.4。介面上寫「文章情緒」，避免使用者誤會成推文的風向
+- 單篇顯示時附信心，低於門檻顯示「不確定」：baseline macro-F1 0.504，positive 幾乎分不出來（`docs/reports/model-evaluation.md`）
+- 看板層級看比例與趨勢，比單篇判斷可靠
+- 換成 BERT（階段 8）後重新決定門檻
