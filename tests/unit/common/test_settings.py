@@ -248,3 +248,20 @@ def test_telegram_settings_token_hidden_in_repr(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:secret")
 
     assert "secret" not in repr(TelegramSettings())
+
+
+def test_telegram_sentiment_and_mute_defaults(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+
+    settings = TelegramSettings()
+
+    assert (settings.sentiment_min_score, settings.mute_retention_h) == (0.5, 48)
+
+
+@pytest.mark.parametrize("value", ["-0.1", "1.5"])
+def test_telegram_sentiment_min_score_out_of_range_rejected(monkeypatch, value):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_SENTIMENT_MIN_SCORE", value)
+
+    with pytest.raises(ValidationError):
+        TelegramSettings()

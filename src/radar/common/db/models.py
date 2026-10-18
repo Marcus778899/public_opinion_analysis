@@ -123,3 +123,26 @@ class Subscription(Base):
     unit_type: Mapped[str] = mapped_column(Text, primary_key=True)
     unit_key: Mapped[str] = mapped_column(Text, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class ChatSettings(Base):
+    """各 chat 的通知開關（開發規格 7.23）；沒有列時視為全部開啟。"""
+
+    __tablename__ = "chat_settings"
+    __table_args__ = ({"comment": "writer: bot; debezium: no"},)
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    post_alerts: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    board_alerts: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+
+class MutedPost(Base):
+    """「這篇不再通知」（開發規格 7.23）；文章 24 小時後不再重爬，bot 定期刪掉舊的。"""
+
+    __tablename__ = "muted_posts"
+    __table_args__ = ({"comment": "writer: bot; debezium: no"},)
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    post_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    muted_at: Mapped[datetime] = mapped_column(server_default=func.now())

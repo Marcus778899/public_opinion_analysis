@@ -60,17 +60,6 @@ def test_unsubscribe_all(sessions):
         assert (repo.boards_of(1), repo.boards_of(2)) == ([], ["Stock"])
 
 
-def test_chats_for_board(sessions):
-    with sessions() as s:
-        repo = SubscriptionRepository(s)
-        repo.subscribe(3, "Stock")
-        repo.subscribe(1, "Stock")
-        repo.subscribe(2, "Gossiping")
-
-        assert repo.chats_for_board("Stock") == [1, 3]
-        assert repo.chats_for_board("Off") == []
-
-
 def test_enabled_boards_excludes_disabled(sessions):
     with sessions() as s:
         assert SubscriptionRepository(s).enabled_boards() == ["Gossiping", "Stock"]

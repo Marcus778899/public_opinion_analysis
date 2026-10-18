@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -150,6 +150,10 @@ class TelegramSettings(BaseSettings):
     poll_timeout_s: int = 30
     hot_window_min: int = 60
     hot_limit: int = 5
+    # 推論最高分數低於此值顯示「不確定」（開發規格 7.23）
+    sentiment_min_score: float = Field(default=0.5, ge=0, le=1)
+    # 「不再通知」保留多久；文章 24 小時後就不再重爬
+    mute_retention_h: int = Field(default=48, gt=0)
 
     @field_validator("allowed_chat_ids", mode="before")
     @classmethod

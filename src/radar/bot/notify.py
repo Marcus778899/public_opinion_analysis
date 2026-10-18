@@ -1,17 +1,13 @@
-"""消費 alerts、依訂閱推送（開發規格 7.21）；BatchConsumer 的 handler。"""
+"""消費 alerts、依訂閱與通知設定推送（開發規格 7.21、7.23）；BatchConsumer 的 handler。"""
 
 from collections import OrderedDict
 from collections.abc import Callable
 
+from radar.bot.stats import QUERY_ERRORS, PostStats
 from radar.bot.telegram import TelegramBadRequestError, TelegramClient, TelegramForbiddenError
-from radar.common.clickhouse import ClickHouseClient
-from radar.common.ids import PTT_BASE_URL, split_post_id
+from radar.bot.views import ALERT_TOP_POSTS, Screen
 from radar.common.log import log
 from radar.common.schemas import Alert
-
-TITLES_QUERY = """
-SELECT post_id, title FROM posts_latest FINAL WHERE post_id IN {post_ids:Array(String)}
-"""
 
 
 class SentAlerts:
@@ -31,48 +27,38 @@ class SentAlerts:
             self._data.popitem(last=False)
 
 
-def post_url(post_id: str) -> str:
-    """Gossiping.M.1.A.ABC → https://www.ptt.cc/bbs/Gossiping/M.1.A.ABC.html。"""
-    board, filename = split_post_id(post_id)
-    return f"{PTT_BASE_URL}/bbs/{board}/{filename}.html"
-
-
-def fetch_titles(client: ClickHouseClient, post_ids: list[str]) -> dict[str, str]:
-    if not post_ids:
-        return {}
-    # NOTE: Array 參數以 ClickHouse 的字面值格式傳入；post_id 先驗證過，不含引號
-    for post_id in post_ids:
-        split_post_id(post_id)
-    literal = "[" + ",".join(f"'{p}'" for p in post_ids) + "]"
-    rows = client.query_rows(TITLES_QUERY, {"post_ids": literal})
-    return {str(r["post_id"]): str(r["title"]) for r in rows if r["title"]}
-
-
-def format_alert(alert: Alert, titles: dict[str, str]) -> str:
-    """純文字；文章警示列出該篇，看板警示列出 sample_post_ids 的標題與連結。"""
-    stats = f"10 分鐘內 {alert.value} 則推文（平常約 {alert.baseline:.1f}，z={alert.zscore:.1f}）"
+def stats_post_ids(alert: Alert) -> list[str]:
+    """要查推噓與情緒的文章：文章警示是該篇，看板警示是 sample_post_ids 的前 3 篇。"""
     if alert.unit_type == "post":
-        head = f"🔥 [{alert.board}] 文章推文暴增\n{stats}"
-    else:
-        head = f"📈 [{alert.board}] 看板推文量暴增\n{stats}\n熱門文章："
-    posts = [f"{titles.get(p, p)}\n{post_url(p)}" for p in alert.sample_post_ids]
-    return "\n".join([head, *posts])
+        return [alert.unit_key]
+    return alert.sample_post_ids[:ALERT_TOP_POSTS]
+
+
+def safe_stats(
+    post_stats: Callable[[list[str]], dict[str, PostStats]], post_ids: list[str]
+) -> dict[str, PostStats]:
+    """ClickHouse 查詢失敗（QUERY_ERRORS）記 WARNING 回傳空 dict，警示照樣推送。"""
+    try:
+        return post_stats(post_ids)
+    except QUERY_ERRORS as e:
+        log.warning("post stats query failed, sending basic alert: %s", e)
+        return {}
 
 
 class AlertNotifier:
-    """handler：去重 → 找訂閱該看板的 chat → 推送；全部送完才回傳（之後才 commit）。"""
+    """handler：去重 → 找要通知的 chat（recipients）→ 推送；全部送完才回傳（之後才 commit）。"""
 
     def __init__(
         self,
         telegram: TelegramClient,
-        chats_for_board: Callable[[str], list[int]],
-        titles: Callable[[list[str]], dict[str, str]],
+        recipients: Callable[[Alert], list[int]],
+        render: Callable[[Alert], Screen],
         forget_chat: Callable[[int], None],
         sent: SentAlerts | None = None,
     ) -> None:
         self._telegram = telegram
-        self._chats_for_board = chats_for_board
-        self._titles = titles
+        self._recipients = recipients
+        self._render = render
         self._forget_chat = forget_chat
         self._sent = sent or SentAlerts()
         # (alert_id, chat_id)：整批重試時，已送到的 chat 不重送
@@ -84,11 +70,11 @@ class AlertNotifier:
             alert_id = str(alert.alert_id)
             if self._sent.seen(alert_id):
                 continue
-            chats = self._chats_for_board(alert.board)
+            chats = self._recipients(alert)
             if chats:
-                text = format_alert(alert, self._titles(alert.sample_post_ids))
+                screen = self._render(alert)
                 for chat_id in chats:
-                    self._deliver(alert_id, chat_id, text)
+                    self._deliver(alert_id, chat_id, screen)
                 log.info(
                     "alert %s (%s %s) sent to %d chats",
                     alert_id,
@@ -98,12 +84,12 @@ class AlertNotifier:
                 )
             self._sent.add(alert_id)
 
-    def _deliver(self, alert_id: str, chat_id: int, text: str) -> None:
+    def _deliver(self, alert_id: str, chat_id: int, screen: Screen) -> None:
         key = f"{alert_id}:{chat_id}"
         if self._delivered.seen(key):
             return
         try:
-            self._telegram.send_message(chat_id, text)
+            self._telegram.send_message(chat_id, screen.text, screen.keyboard)
         except TelegramForbiddenError:
             log.warning("chat %s blocked the bot, removing its subscriptions", chat_id)
             self._forget_chat(chat_id)

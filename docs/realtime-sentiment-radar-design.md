@@ -633,7 +633,7 @@ Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、�
 │   ├── streaming/
 │   │   ├── heat.py          # [常駐] Quix Streams
 │   │   └── replay.py        # [一次性] 錄製、回放、人工暴增
-│   └── bot/                 # [常駐] Telegram bot：main（long polling、推送）、views（訊息與按鈕）
+│   └── bot/                 # [常駐] Telegram bot：main（long polling、推送）、views（訊息與按鈕）、callbacks、stats（ClickHouse 查詢）
 ├── infra/
 │   ├── docker-compose.yaml
 │   ├── debezium/

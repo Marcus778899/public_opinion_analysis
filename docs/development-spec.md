@@ -336,7 +336,7 @@
 | 文章警示門檻（#59） | ✅ 文章另設最低推文數 `HEAT_POST_MIN_COUNT=80`，看板維持 30（7.20） | — |
 | 晚到的舊快照刪掉較新的推文（#52） | ✅ `posts.comment_count`（推＋噓＋箭頭）列入變化判斷，重爬門檻改讀這欄（7.24）；整合測試重現「晚到的舊快照刪掉 10 則新箭頭」後修正 | — |
 | 階段 6 規劃：Telegram 按鈕選單與情緒呈現（7.23） | ✅ 文件完成（2026-10-17）；原階段 6～8 順延為 7～9 | — |
-| S6-01～S6-06 Telegram 互動與情緒呈現 | ⬜（S6-05 取代 #53） | — |
+| S6-01～S6-06 Telegram 互動與情緒呈現 | 🔶 程式完成；單元、整合測試通過，待以真的 Telegram 走 7.23 驗收清單（S6-05 取代 #53） | — |
 | 發文 1 小時內的重爬改為每 5 分鐘（7.22，#56） | ✅ 完成；單元、collector 整合測試通過。待部署 Scheduler | — |
 | 重爬門檻改看推文總數（7.2，#51） | ✅ 完成；整合測試重現「3 推 120 噓、2 推 30 箭頭的文章滿 1 小時後不再重爬」後修正；開發環境的 PG 上 `EXPLAIN ANALYZE` 新查詢 29 ms（走 `comments` 主鍵）。待部署 Scheduler | — |
 | 爬蟲略過重複的重爬任務（7.12） | ✅ 完成；2026-10-09 實測 `crawl.tasks` 積壓 10 分鐘內 3,355 → 1,709（部署前持續增加），期間略過約 1,500 個重複任務 | #21 |
@@ -366,7 +366,7 @@
 |---|---|---|
 | 1 | #59 文章警示門檻 | 不修的話警示多到無法使用，也會干擾階段 6 的實機測試 |
 | 2 | #52 晚到的舊快照刪掉較新的推文 | 資料正確性 |
-| 3 | 調查 Stock、Boy-Girl、Tech_Job 每天文章數偏少（2026-10-17 近 24 小時各 34、3、2 篇） | 影響階段 3 的 Stock 標註進度 |
+| 3 | ✅ 調查 Stock、Boy-Girl、Tech_Job 每天文章數偏少（2026-10-17 近 24 小時各 34、3、2 篇） | **結論：PTT 上本來就少，沒有漏抓**（2026-10-17）。三個看板列表前 3 頁共 139 篇，PG 全部都有；PTT 上 Stock 約 30 小時 42 篇（每天約 34）、Boy-Girl 15 天 51 篇（約 3.4）、Tech_Job 21 天 46 篇（約 2.2）。10/13～10/14 數字更低是開發環境停機（10/13 02Z～10/15 06Z）。看板保留；Stock 標註照「累積到 400 篇」進行 |
 | 4 | 階段 6：Telegram 互動與情緒呈現 | 先合併文件，再依骨架、實作兩輪進行 |
 | 5 | 階段 7：Dashboard | |
 | 6 | 階段 8：BERT 與 shadow 比較 | |
@@ -570,6 +570,20 @@
 - 點按鈕後 2 秒內畫面更新
 - 「不再通知」的文章、關閉的警示類型不再推送
 - 以真的 Telegram 走過 7.23 的驗收清單，紀錄於本節
+
+**驗收紀錄**（2026-10-17 16:30Z 起，`feat/s6-telegram` 部署到開發環境：Alembic `b2f14c20e4ca`、只重建 bot）
+
+| 項目 | 結果 |
+|---|---|
+| `/start` 主選單；四個畫面來回切換、編輯同一則訊息 | ✅ 使用者確認 |
+| 按鈕訂閱／取消（不輸入看板名稱） | ✅ 16:33Z 以按鈕訂閱 Stock、Tech_Job，PG `subscriptions` 對得上 |
+| 現在熱門切換「全部看板／只看訂閱」 | ✅ 使用者確認 |
+| 看板概況 | ✅ 使用者確認；部署前以開發環境資料預覽，今天的警示數以台北日期計算與 ClickHouse 對得上 |
+| 通知設定開關 | ✅ 使用者確認；16:39Z 建立 `chat_settings` |
+| `setMyCommands` 指令清單、舊的文字指令（`/boards`、`/hot`） | ✅ 使用者確認；啟動 log 沒有警告 |
+| 關閉文章警示後只收看板警示、「不再通知」的文章不再推 | ✅ 在開發環境 PG 以假 chat 寫入後查 `recipients` 再 rollback：關閉文章警示的 chat 只出現在看板警示的對象；不再通知的 chat 不收該篇的文章警示、仍收看板警示 |
+| 不在允許清單的 chat 按按鈕沒有反應 | 沒有第二個帳號，以單元測試 `test_handle_update_disallowed_callback_not_answered` 為準 |
+| 真的警示：各欄位與按鈕、「這篇不再通知」 | 待警示進來 |
 
 ### 階段 7：Dashboard（S）
 
@@ -951,12 +965,25 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
   - 倍數 = `value` ÷ max(`baseline`, 1)
   - 推、噓、箭頭：`comments_latest FINAL` 依 `type` 計數（ClickHouse 沒有 `comment_count`，7.24）
   - 爭議度 = 噓 ÷（推＋噓）；推＋噓 < 10 時不顯示
-  - 文章情緒：`predictions` 該篇最新一筆；最高分數低於 `TELEGRAM_SENTIMENT_MIN_SCORE`（預設 0.6，實作時加到 `.env.example`）顯示「不確定」；沒有推論（推論服務上線前的文章、snapshot）顯示「尚無」
+  - 文章情緒：`predictions` 該篇最新一筆；最高分數低於 `TELEGRAM_SENTIMENT_MIN_SCORE`（預設 0.5）顯示「不確定」。原訂 0.6，但 2026-10-18 開發環境 7,244 篇的最高分數中位數 0.57、57% 低於 0.6（低於 0.5 為 29%），超過一半會顯示「不確定」；TF-IDF baseline 先用 0.5，階段 8 換模型後再調；沒有推論（推論服務上線前的文章、snapshot）顯示「尚無」
   - ClickHouse 查詢失敗時照樣推送基本警示（不帶推噓與情緒）並記 WARNING，不讓查詢擋住通知
 - **新表**（S6-02）：`chat_settings(chat_id PK, post_alerts BOOL DEFAULT true, board_alerts BOOL DEFAULT true, updated_at)`；`muted_posts(chat_id, post_id, muted_at)`，主鍵前兩欄，超過 2 天的由 bot 定期刪除（文章 24 小時後就不再重爬）。寫入者 bot、不在 publication 裡（設計文件 5.4），單筆 CRUD 用 ORM（2.4）
 - **看板概況**：近 24 小時的文章數、新增推文數、有推論的文章中負面／中立／正面的比例（附「n 篇有推論」）、爭議度最高的 3 篇（推＋噓 ≥ 10）、今天的警示數
 - **現在熱門**：最近 60 分鐘新增推文最多的 5 篇；預設只看訂閱的看板，可切換「全部看板」
 - **驗收清單**（真的 Telegram）：主選單與各畫面來回切換；切換訂閱後推送跟著改變；警示的各欄位與按鈕；「不再通知」後同一篇不再推；關閉文章警示後只收看板警示；不在允許清單的 chat 按按鈕沒有反應；舊的文字指令仍可用
+- **模組**（骨架，2026-10-18）：
+  - `bot/telegram.py`：`Button`、`Keyboard`、`Update`（`message` 或 `callback`）；所有訊息 `parse_mode=HTML`
+  - `bot/views.py`：`Action`、`Callback`、`Screen`、`ChatPrefs` 與各畫面；`post_url` 由 `notify.py` 移來
+  - `bot/stats.py`：`Queries` protocol 與 `ClickHouseQueries`（`post_stats`、`hot`、`overview`）；原本 `commands.HOT_QUERY`、`notify.fetch_titles` 併入
+  - `bot/callbacks.py`：`handle_callback` 回傳 `CallbackResult(screen, toast)`，不呼叫 Telegram；`main.handle_update` 負責 answer 與 edit
+  - `bot/repository.py`：新增 `PreferenceRepository`（設定、不再通知、`recipients`、`forget`）；`SubscriptionRepository.chats_for_board` 由 `recipients` 取代後刪除
+- **動作**：`menu`、`hot`（參數 `all` 為全部看板）、`subs`、`sub:<看板>`（切換）、`boards`、`ov:<看板>`、`set`、`tog:post|board`、`mute:<post_id>`、`unmute:<post_id>`；參數一律驗證（看板必須啟用、post_id 格式正確），不符時只回提示
+- **推送對象**：`recipients(alert)` 一個查詢——訂閱該看板、沒關掉這種警示、文章警示另排除「不再通知」的文章；看板警示沒有「這篇不再通知」按鈕（一則列 3 篇，按鈕對不到單一文章）
+- **「這篇不再通知」**：只回提示、不改警示訊息；`TELEGRAM_MUTE_RETENTION_H`（預設 48）後由 bot 每小時清一次
+- **現在熱門**：沒有訂閱時改看全部看板；`/hot` 文字指令看全部看板
+- **今天的警示數**：以台北時間的日期計算
+- **403**：除了訂閱，也刪掉該 chat 的 `chat_settings`、`muted_posts`
+- **`setMyCommands`**：啟動時呼叫一次，失敗只記 WARNING，不擋啟動
 - **之後**：Mini App（「後續階段」15）
 
 ### 7.24 只多了箭頭時 `crawled_at` 不前進（fix，2026-10-17，#52）

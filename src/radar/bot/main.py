@@ -6,13 +6,23 @@ alerts consumer 在 main thread（收 SIGTERM），指令迴圈在另一個 thre
 
 import threading
 from collections.abc import Callable, Iterator
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from radar.bot.commands import HotPost, fetch_hot, handle, parse_command
-from radar.bot.notify import AlertNotifier, fetch_titles
-from radar.bot.repository import SubscriptionRepository
-from radar.bot.telegram import IncomingMessage, TelegramBadRequestError, TelegramClient
+from radar.bot.callbacks import CallbackResult, handle_callback
+from radar.bot.commands import COMMANDS, handle, parse_command
+from radar.bot.notify import AlertNotifier, safe_stats, stats_post_ids
+from radar.bot.repository import PreferenceRepository, SubscriptionRepository
+from radar.bot.stats import ClickHouseQueries, Queries
+from radar.bot.telegram import (
+    CallbackQuery,
+    IncomingMessage,
+    TelegramBadRequestError,
+    TelegramClient,
+    Update,
+)
+from radar.bot.views import Screen, alert_screen, parse_callback
 from radar.common.clickhouse import ClickHouseClient
 from radar.common.db.session import make_engine, make_session_factory
 from radar.common.kafka import names
@@ -30,6 +40,8 @@ from radar.common.settings import (
 )
 
 GROUP_ID = "bot"
+# 「不再通知」的清理頻率；表很小，每小時一次就夠
+PURGE_INTERVAL = timedelta(hours=1)
 
 
 def is_allowed(chat_id: int | None, allowed: list[int]) -> bool:
@@ -42,37 +54,119 @@ def is_allowed(chat_id: int | None, allowed: list[int]) -> bool:
 def reply_to(
     message: IncomingMessage,
     sessions: sessionmaker[Session],
-    hot: Callable[[], list[HotPost]],
-) -> str | None:
+    queries: Queries,
+    min_score: float,
+) -> Screen | None:
     """一則訊息的回覆；不是指令回傳 None。"""
     command = parse_command(message.text)
     if command is None or message.chat_id is None:
         return None
     with sessions() as session:
-        return handle(command, message.chat_id, SubscriptionRepository(session), hot)
+        repo = SubscriptionRepository(session)
+        return handle(command, message.chat_id, repo, queries, min_score=min_score)
+
+
+def on_callback(
+    callback: CallbackQuery,
+    sessions: sessionmaker[Session],
+    queries: Queries,
+    min_score: float,
+    now: datetime,
+) -> CallbackResult:
+    """parse_callback → callbacks.handle_callback；callback.chat_id 已由呼叫端檢查過。"""
+    assert callback.chat_id is not None
+    with sessions() as session:
+        return handle_callback(
+            parse_callback(callback.data),
+            callback.chat_id,
+            SubscriptionRepository(session),
+            PreferenceRepository(session),
+            queries,
+            min_score=min_score,
+            now=now,
+        )
+
+
+def handle_update(
+    update: Update,
+    telegram: TelegramClient,
+    settings: TelegramSettings,
+    sessions: sessionmaker[Session],
+    queries: Queries,
+    now: datetime,
+) -> None:
+    """允許清單外的 chat 不回應（按鈕回呼也不 answer）。
+
+    訊息 → send_message；按鈕 → 先 answerCallbackQuery（帶 toast），有畫面再 editMessageText。
+    """
+    allowed = settings.allowed_chat_ids
+    min_score = settings.sentiment_min_score
+    if update.message is not None:
+        message = update.message
+        if message.chat_id is None or not is_allowed(message.chat_id, allowed):
+            return
+        screen = reply_to(message, sessions, queries, min_score)
+        if screen is not None:
+            _send_reply(telegram, message.chat_id, screen)
+        return
+    callback = update.callback
+    if callback is None or not is_allowed(callback.chat_id, allowed):
+        return
+    result = on_callback(callback, sessions, queries, min_score, now)
+    try:
+        telegram.answer_callback_query(callback.id, result.toast)
+        if result.screen is not None and callback.chat_id is not None and callback.message_id:
+            telegram.edit_message_text(
+                callback.chat_id, callback.message_id, result.screen.text, result.screen.keyboard
+            )
+    except TelegramBadRequestError as e:
+        # 例如按鈕回呼超過 Telegram 的期限、原訊息已刪除
+        log.warning("callback %s from chat %s rejected: %s", callback.data, callback.chat_id, e)
+
+
+def purge_muted(sessions: sessionmaker[Session], settings: TelegramSettings, now: datetime) -> int:
+    """刪掉超過 mute_retention_h 的「不再通知」。"""
+    with sessions() as session:
+        deleted = PreferenceRepository(session).purge_muted(
+            now - timedelta(hours=settings.mute_retention_h)
+        )
+    if deleted:
+        log.info("purged %d muted posts", deleted)
+    return deleted
+
+
+def register_commands(telegram: TelegramClient) -> None:
+    """setMyCommands；失敗只記 WARNING，不擋啟動（指令清單只影響輸入 / 時的提示）。"""
+    try:
+        telegram.set_my_commands(COMMANDS)
+    except (TransientError, TelegramBadRequestError) as e:
+        log.warning("setMyCommands failed: %s", e)
 
 
 def poll_commands(
     telegram: TelegramClient,
     settings: TelegramSettings,
     sessions: sessionmaker[Session],
-    hot: Callable[[], list[HotPost]],
+    queries: Queries,
     stop: threading.Event,
     wait: Callable[[float], bool] | None = None,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> None:
-    """getUpdates 迴圈：允許清單外的 chat 不回應；處理完才把 offset 往前推。"""
+    """getUpdates 迴圈：處理完才把 offset 往前推；每 PURGE_INTERVAL 清一次「不再通知」。"""
     wait = wait or stop.wait
     offset: int | None = None
     delays: Iterator[float] = backoff_delays()
+    last_purge: datetime | None = None
     while not stop.is_set():
+        now = clock()
+        if last_purge is None or now - last_purge >= PURGE_INTERVAL:
+            purge_muted(sessions, settings, now)
+            last_purge = now
         try:
             updates = telegram.get_updates(offset, settings.poll_timeout_s)
-            for message in updates:
-                if is_allowed(message.chat_id, settings.allowed_chat_ids):
-                    text = reply_to(message, sessions, hot)
-                    if text is not None and message.chat_id is not None:
-                        _send_reply(telegram, message.chat_id, text)
-                offset = message.update_id + 1
+            for update in updates:
+                handle_update(update, telegram, settings, sessions, queries, now)
+                offset = update.update_id + 1
             delays = backoff_delays()
         except TransientError as e:
             delay = e.retry_after_s if e.retry_after_s is not None else next(delays)
@@ -80,9 +174,9 @@ def poll_commands(
             wait(delay)
 
 
-def _send_reply(telegram: TelegramClient, chat_id: int, text: str) -> None:
+def _send_reply(telegram: TelegramClient, chat_id: int, screen: Screen) -> None:
     try:
-        telegram.send_message(chat_id, text)
+        telegram.send_message(chat_id, screen.text, screen.keyboard)
     except TelegramBadRequestError as e:
         log.warning("reply to chat %s rejected: %s", chat_id, e)
 
@@ -115,36 +209,37 @@ def main() -> None:
     telegram = TelegramClient(settings)
     producer = JsonProducer(get_kafka_settings())
 
-    def chats_for_board(board: str) -> list[int]:
+    queries = ClickHouseQueries(
+        ch, hot_window_min=settings.hot_window_min, hot_limit=settings.hot_limit
+    )
+
+    def recipients(alert: Alert) -> list[int]:
         with sessions() as session:
-            return SubscriptionRepository(session).chats_for_board(board)
+            return PreferenceRepository(session).recipients(alert)
+
+    def render(alert: Alert) -> Screen:
+        stats = safe_stats(queries.post_stats, stats_post_ids(alert))
+        return alert_screen(alert, stats, settings.sentiment_min_score)
 
     def forget_chat(chat_id: int) -> None:
         with sessions() as session:
-            SubscriptionRepository(session).unsubscribe(chat_id, None)
+            PreferenceRepository(session).forget(chat_id)
 
     consumer = BatchConsumer(
         get_kafka_settings(),
         group_id=GROUP_ID,
         topics=[names.ALERTS],
         model=Alert,
-        handler=AlertNotifier(
-            telegram, chats_for_board, lambda ids: fetch_titles(ch, ids), forget_chat
-        ),
+        handler=AlertNotifier(telegram, recipients, render, forget_chat),
         dlq=DlqPublisher(producer, GROUP_ID),
         batch_size=50,
     )
     stop = threading.Event()
     commands = _CommandThread(
-        lambda: poll_commands(
-            telegram,
-            settings,
-            sessions,
-            lambda: fetch_hot(ch, settings.hot_window_min, settings.hot_limit),
-            stop,
-        ),
+        lambda: poll_commands(telegram, settings, sessions, queries, stop),
         on_exit=consumer.stop,
     )
+    register_commands(telegram)
     log.info("bot started; allowed chats: %s", settings.allowed_chat_ids or "all")
     commands.start()
     try:

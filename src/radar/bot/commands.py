@@ -1,41 +1,36 @@
-"""指令解析與回覆文字（開發規格 7.21）；查詢 PG、ClickHouse 的部分以參數注入，方便測試。"""
+"""指令解析與回覆（開發規格 7.21、7.23）；查詢 PG、ClickHouse 的部分以參數注入，方便測試。"""
 
-from collections.abc import Callable
 from dataclasses import dataclass
 
 from radar.bot.repository import SubscriptionRepository
-from radar.common.clickhouse import ClickHouseClient
+from radar.bot.stats import QUERY_ERRORS, Queries
+from radar.bot.views import QUERY_FAILED, Screen, escape, hot_screen, main_menu
+from radar.common.log import log
 
+# NOTE: 純文字；送出前由 handle 統一 escape（訊息是 HTML，<看板> 會被當成標籤）
 HELP = (
     "PTT 輿情雷達：看板推文暴增時通知你。\n"
+    "/menu 按鈕選單\n"
     "/boards 可訂閱的看板\n"
     "/subscribe <看板> 訂閱\n"
     "/unsubscribe [看板] 取消訂閱（不帶看板則全部取消）\n"
     "/hot 最近 1 小時推文最多的文章"
 )
 
-HOT_QUERY = """
-SELECT c.post_id AS post_id, count() AS comments, any(p.title) AS title
-FROM comments_latest AS c FINAL
-LEFT JOIN (SELECT post_id, title FROM posts_latest FINAL) AS p ON p.post_id = c.post_id
-WHERE c.is_deleted = 0 AND c.commented_at >= now() - INTERVAL {window_min:UInt32} MINUTE
-GROUP BY c.post_id
-ORDER BY comments DESC, post_id
-LIMIT {limit:UInt32}
-"""
+# setMyCommands 註冊的清單（S6-06）
+COMMANDS = [
+    ("menu", "按鈕選單"),
+    ("hot", "最近 1 小時推文最多的文章"),
+    ("boards", "可訂閱的看板"),
+    ("subscribe", "訂閱看板，例如 /subscribe Stock"),
+    ("unsubscribe", "取消訂閱（不帶看板則全部取消）"),
+]
 
 
 @dataclass(frozen=True)
 class Command:
     name: str
     args: list[str]
-
-
-@dataclass(frozen=True)
-class HotPost:
-    post_id: str
-    title: str | None
-    comments: int
 
 
 def parse_command(text: str | None) -> Command | None:
@@ -47,18 +42,30 @@ def parse_command(text: str | None) -> Command | None:
     return Command(name, args) if name else None
 
 
-def fetch_hot(client: ClickHouseClient, window_min: int, limit: int) -> list[HotPost]:
-    rows = client.query_rows(HOT_QUERY, {"window_min": str(window_min), "limit": str(limit)})
-    return [HotPost(str(r["post_id"]), r["title"] or None, int(r["comments"])) for r in rows]
-
-
 def handle(
     command: Command,
     chat_id: int,
     repo: SubscriptionRepository,
-    hot: Callable[[], list[HotPost]],
-) -> str:
-    """回傳要回覆的文字；未知指令回覆 HELP。看板名稱比對不分大小寫，存成 PTT 的正式寫法。"""
+    queries: Queries,
+    *,
+    min_score: float,
+) -> Screen:
+    """/start、/menu → 主選單；/hot → 現在熱門（全部看板）；其他指令 → text_reply 的文字。"""
+    if command.name in ("start", "menu"):
+        return main_menu()
+    if command.name == "hot":
+        try:
+            posts = queries.hot(None)
+        except QUERY_ERRORS as e:
+            log.warning("hot query failed: %s", e)
+            return Screen(QUERY_FAILED)
+        return hot_screen(posts, all_boards=True, min_score=min_score)
+    text = text_reply(command, chat_id, repo)
+    return Screen(escape(HELP if text is None else text))
+
+
+def text_reply(command: Command, chat_id: int, repo: SubscriptionRepository) -> str | None:
+    """S5-07 的文字指令（純文字）；不是這些指令回傳 None。看板名稱不分大小寫，存成正式寫法。"""
     if command.name == "boards":
         boards = repo.enabled_boards()
         mine = set(repo.boards_of(chat_id))
@@ -81,18 +88,9 @@ def handle(
         if board is None or repo.unsubscribe(chat_id, board) == 0:
             return f"你沒有訂閱 {command.args[0]}"
         return f"已取消訂閱 {board}"
-    if command.name == "hot":
-        return format_hot(hot())
-    return HELP
+    return None
 
 
 def _match_board(name: str, boards: list[str]) -> str | None:
     lowered = name.lower()
     return next((b for b in boards if b.lower() == lowered), None)
-
-
-def format_hot(posts: list[HotPost]) -> str:
-    if not posts:
-        return "最近沒有推文"
-    lines = [f"{i}. {p.title or p.post_id}（{p.comments} 則）" for i, p in enumerate(posts, 1)]
-    return "最近 1 小時推文最多：\n" + "\n".join(lines)
