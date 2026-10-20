@@ -43,6 +43,8 @@ def ensure_files() -> None:
 def ensure_git() -> None:
     if not (ROOT / ".git").exists():
         run("git", "init", "-b", RELEASE_BRANCH)
+    # task.py 用 sparse-checkout 開 worktree；sandbox 內可能寫不了 .git/config，這裡（sandbox 外）先設好
+    run("git", "config", "extensions.worktreeConfig", "true")
     has_commit = run("git", "rev-parse", "--verify", "HEAD", check=False) != ""
     run("git", "add", "-A")
     if run("git", "status", "--porcelain"):

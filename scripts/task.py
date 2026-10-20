@@ -35,6 +35,7 @@ from _common import (
     number_from_url,
     require_on_base,
     run,
+    run_status,
     save_meta,
 )
 
@@ -46,6 +47,9 @@ MAX_BACKGROUND_LINES = 5
 # 因為 .gitignore 的 `.venv/` 只比對目錄、不比對 symlink，下游專案的 .gitignore 又不歸範本管。
 # 不共用 .env：sandbox 擋住所有 `**/.env`，連結本身也 stat 不到、刪不掉；compose 用 --env-file .env 讀主目錄的
 SHARED_PATHS = (".venv", "node_modules")
+# Claude Code 的 sandbox 不准寫任何目錄下的 agent／編輯器設定，worktree 照常 checkout 會中斷；
+# worker 本來就不改這些（受保護路徑，檢查在主目錄做），用 sparse-checkout 不放進 worktree
+SPARSE_EXCLUDES = ("/.claude/", "/.mcp.json", "/.vscode/")
 # 派工前必須已提交：worker 的 worktree 從 develop 開出，只看得到已提交的決策
 DISPATCH_DOCS = ("BOARD.md", "docs/decisions.md")
 FIELD_RE = re.compile(r"^- \*\*(.+?)\*\*[：:]?\s*(.*)$")
@@ -161,7 +165,19 @@ def start_worktree(task_id: str, kind: str) -> tuple[str, str]:
     if branch_exists(branch):
         raise FlowError(f"分支 {branch} 已存在（之前的版本用過這個名字）；task_id 換個更具體的名字")
     path = WORKTREES_DIR / task_id
-    run("git", "worktree", "add", "-b", branch, str(path), BASE_BRANCH)
+    # 每個 worktree 各自的 sparse-checkout 設定要靠這個 extension；寫 .git/config 可能被 sandbox 擋，update.sh 會先設好
+    if run("git", "config", "--get", "extensions.worktreeConfig", check=False) != "true":
+        code, _ = run_status("git", "config", "extensions.worktreeConfig", "true")
+        if code != 0:
+            raise FlowError("請甲方在自己的終端機（sandbox 外）於主目錄跑一次：git config extensions.worktreeConfig true")
+    run("git", "worktree", "add", "--no-checkout", "-b", branch, str(path), BASE_BRANCH)
+    try:
+        run("git", "sparse-checkout", "set", "--no-cone", "/*", *(f"!{p}" for p in SPARSE_EXCLUDES), cwd=path)
+        run("git", "checkout", cwd=path)
+    except FlowError as e:
+        run("git", "worktree", "remove", "--force", str(path), check=False)
+        run("git", "branch", "-D", branch, check=False)
+        raise FlowError(f"建立 worktree 失敗，已清掉 {branch}：{e}") from e
     exclude_shared_paths()
     for name in SHARED_PATHS:
         if (ROOT / name).exists() and not (path / name).exists():
@@ -197,7 +213,11 @@ def new_card(task_id: str, body: str) -> None:
     TASKS_DIR.mkdir(exist_ok=True)
     path.write_text(body.rstrip() + "\n", encoding="utf-8")
 
-    branch, worktree = start_worktree(task_id, kind)
+    try:
+        branch, worktree = start_worktree(task_id, kind)
+    except FlowError:
+        path.unlink()  # 不留派工單，修好後可以直接重開
+        raise
     issue = None
     if has_remote():
         url = run("gh", "issue", "create", "--title", f"[{task_id}] {title}", "--body-file", str(path), "--label", kind)
