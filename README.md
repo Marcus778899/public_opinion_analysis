@@ -28,7 +28,21 @@
 
 7. 檢查：`make check`（lint + 單元測試；整合測試 `make test-int` 需要 Docker）
 
-端到端測試用假 PTT、獨立 volume，不碰開發資料：`make e2e-up && make e2e && make e2e-down`（開發與 e2e 共用容器名稱，不能同時運作，#41）。
+端到端測試用假 PTT、獨立 volume，不碰開發資料（開發與 e2e 共用容器名稱，不能同時運作，#41）：
+
+1. 開發環境有在跑就先用第 6 步的指令停掉（不刪 volume）
+2. 啟動 e2e 環境：
+
+   ```bash
+   docker compose -f infra/docker-compose.yaml -f infra/docker-compose.e2e.yaml --env-file .env --profile app up -d --build --wait
+   ```
+
+3. 跑測試：`make e2e`
+4. 停止並刪除 e2e 專用的 volume（不碰開發資料）：
+
+   ```bash
+   docker compose -f infra/docker-compose.yaml -f infra/docker-compose.e2e.yaml --env-file .env --profile app down -v --remove-orphans
+   ```
 
 標註與訓練（階段 3）的指令見[開發規格](docs/development-spec.md)第 6 章與 [docs/labeling-guideline.md](docs/labeling-guideline.md)。
 
