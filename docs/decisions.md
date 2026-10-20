@@ -13,6 +13,12 @@
 - 提出：architect（todo-design）
 -->
 
+### D-008 `task.py new` 在 sandbox 裡無法開單
+- 背景：`task.py new` 會呼叫 `check_env.missing_settings()` 檢查 `.env`，但 sandbox 禁止讀 `**/.env`（連 `exists()` 都不行），直接 `PermissionError` 當掉；`check_env.py` 本身也一樣。所有派工單都卡住（含 `spec-release-order`、階段 7）。流程腳本是甲方的檔案，manager 不能改
+- 選項：A. 暫時由甲方在自己的終端機開單：`! python3 scripts/task.py new <id> < <派工單檔>`（我先把派工單寫好，每張單都要甲方跑一次）／B. 修範本（agent-engineering 上游）：`check_env.py` 由甲方在 sandbox 外跑一次後寫一個「設定齊全」的戳記（例：`.env.example` 雜湊），`task.py` 讀不到 `.env` 時改查戳記，修好後 `update.sh` 同步／C. sandbox 開放讀 `.env`（違反「不可讀 .env」，不建議）
+- 建議：B 為長期解，修好前先用 A
+- 提出：manager（spec-release-order）
+
 ## 已決定
 
 <!-- 範本：

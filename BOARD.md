@@ -19,10 +19,11 @@
 |---|---|---|---|---|
 | v060-security | security | todo | 0 |  |
 | v060-uat | uat | todo | 0 |  |
+| spec-release-order | architect | blocked | 0 |  |
 
 ## 卡住／待甲方決定
 
-- （無）
+- D-008：task.py new 在 sandbox 讀不到 .env 而當掉，所有派工單（spec-release-order、階段 7）卡住
 
 ## 注意事項（踩過的坑）
 
