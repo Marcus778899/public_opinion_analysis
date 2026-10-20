@@ -20,7 +20,7 @@
 |---|---|---|---|---|
 | v060-security | security | blocked | 0 | docs/security/v0.6.0.md FAIL fac0421：high 1（H-1 → bot-forbidden-crash）、medium 3（M-1 D-010、M-2 #68、M-3 D-011）、low 3（#69～#71） |
 | v060-uat | uat | review | 0 | docs/uat/v0.6.0.md：blocker 0、major 0、minor 4（F-1、F-2 README 已補；#65～#67 backlog）；甲方驗收清單 24 項待勾 |
-| spec-release-order | architect | blocked | 0 |  |
+| spec-release-order | architect | in-progress | 0 |  |
 | bot-forbidden-crash | backend | blocked | 0 |  |
 
 ## 卡住／待甲方決定
