@@ -25,6 +25,18 @@
 - 建議：A；程式行為不變，之後新增選填設定一律寫成註解
 - 提出：manager（spec-release-order）
 
+### D-010 bot 允許清單沒設時要不要改成拒絕（fail closed）
+- 背景：資安 M-1。`TELEGRAM_ALLOWED_CHAT_IDS` 留空＝任何人都能用 bot（訂閱、收警示、觸發 ClickHouse 查詢），與設計文件 9.2「只回應允許清單內的 chat」不一致。看不到別人的資料，但可被濫用與觸發 H-1。你的 `.env` 已填，現況不受影響
+- 選項：A. 沒設就啟動失敗；要開放所有人必須明確設 `TELEGRAM_ALLOW_ALL=true`／B. 維持留空不限制，只在文件寫清楚（README 已補）
+- 建議：A，權限預設值應該 fail closed；不擋 v0.6.0，排進下一版
+- 提出：security（v0.6.0 審查 M-1）
+
+### D-011 agent 的 `docker compose *` 權限可繞過「不可讀 .env」
+- 背景：資安 M-3。`.claude/settings.json` 放行 `docker compose *` 且在 sandbox 外，用 `docker compose run … env` 就能讀到 `.env` 的值與 sandbox 外的檔案。這是流程設定檔，只有甲方能改
+- 選項：A. 甲方把放行範圍縮小到需要的子指令（`up`、`ps`、`logs`、`down`、`exec`…），`run`／`cp` 等改成要詢問／B. 維持現狀，接受風險
+- 建議：A；同時可順手處理 L-3（`http.server` 免詢問，#71）
+- 提出：security（v0.6.0 審查 M-3）
+
 ## 已決定
 
 <!-- 範本：
