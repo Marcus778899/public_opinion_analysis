@@ -1,0 +1,29 @@
+{
+  "task_id": "bot-forbidden-crash",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "指令與按鈕路徑遇到 Telegram 403 時 bot 不再結束，也不會因同一筆 update 反覆重啟（資安 H-1）",
+  "issue": 73,
+  "branch": "fix/bot-forbidden-crash",
+  "worktree": ".worktrees/bot-forbidden-crash",
+  "pr": 75,
+  "qa": {
+    "result": "pass",
+    "sha": "44669d9faeda75a51e4ca2177efb382abb4fd549",
+    "by": "qa",
+    "carried_from": "9af39cbd9769eeda559394284a1ead7c84a74b9a"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "44669d9faeda75a51e4ca2177efb382abb4fd549",
+    "by": "architect",
+    "carried_from": "9af39cbd9769eeda559394284a1ead7c84a74b9a"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "faf74bdeedc2f6ea8facebefc99820c632227e84",
+    "sha": "44669d9faeda75a51e4ca2177efb382abb4fd549",
+    "carried_from": "9af39cbd9769eeda559394284a1ead7c84a74b9a"
+  }
+}

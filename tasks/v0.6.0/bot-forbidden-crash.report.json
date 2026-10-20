@@ -1,0 +1,14 @@
+{
+  "task_id": "bot-forbidden-crash",
+  "status": "done",
+  "files_changed": ["src/radar/bot/main.py", "tests/unit/bot/test_main.py", "docs/development-spec.md"],
+  "verification": {
+    "command": "scratchpad 副本（pyproject.toml/src/tests）PYTHONPATH=src pytest tests/unit/bot；ruff check/format --check src tests/unit/bot",
+    "exit_code": 0,
+    "tail": "177 passed in 0.40s (tests/unit/bot，含 acceptance 12 項)；ruff: All checks passed, 92 files already formatted；pre-commit hooks Passed"
+  },
+  "open_questions": [
+    "未能跑 make check（worktree .env symlink 被 sandbox 擋）；scratch 副本跑全部 tests/unit 有 11 個 bot 以外的失敗（缺 docs/infra 檔案，非本次改動造成）",
+    "mypy 未在 worktree .venv 內安裝，未跑型別檢查"
+  ]
+}

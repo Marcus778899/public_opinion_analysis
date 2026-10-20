@@ -2,10 +2,12 @@
 
 <!-- 只放目前這一階段；只有 manager 透過 scripts/board.py 修改；階段完成時整份封存到 tasks/<tag>.md -->
 
+> 上一階段：`tasks/v0.6.0.md`（派工單在 `tasks/v0.6.0/`）
+
 ## 目標與範圍
 
-- 本輪：發版 v0.6.0（階段 1～6 develop → main：security 審查、uat、甲方驗收）；之後開始階段 7 Dashboard
-- 不做：階段 3 Stock 重新標註、階段 5 的 3 天驗收（照開發規格第 6 章之後再做）
+- 本輪：（尚未設定）
+- 不做：（尚未設定）
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
@@ -22,11 +24,6 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
-| v060-security | security | done | 0 | docs/security/v0.6.0.md PASS bd11330（H-1 已修；M ×3、L ×4 皆已處置：D-010、D-011、#68～#71、#79） |
-| v060-uat | uat | done | 0 | docs/uat/v0.6.0.md 甲方驗收：PASS（23 項全勾）；警示重放紀錄；minor #65～#67、#80～#82 |
-| spec-release-order | architect | done | 0 | PR #74 |
-| bot-forbidden-crash | backend | done | 0 | PR #75 |
-| ci-gitleaks-ignore | backend | done | 0 | PR #77 |
 
 ## 卡住／待甲方決定
 
