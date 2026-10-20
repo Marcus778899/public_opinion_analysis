@@ -36,7 +36,7 @@
 | 套件管理 | uv | `pyproject.toml` + `uv.lock` |
 | Lint / format | ruff | 已在 pre-commit |
 | 安全掃描 | bandit；CI 另跑 gitleaks、osv-scanner、semgrep | bandit 在 pre-commit；誤判寫進 `.gitleaksignore` 等忽略檔並附理由 |
-| 測試 | pytest、pytest-asyncio、pytest-cov；整合測試用 compose 的 `test` 服務（7.26） | 覆蓋率：PR 改到的程式碼 ≥ 80%（`scripts/coverage_gate.py`），不量的路徑列在 `.coverage-exempt` |
+| 測試 | pytest、pytest-asyncio、pytest-cov、pytest-xdist（D-015）；整合測試用 compose 的 `test` 服務（7.26） | 覆蓋率：PR 改到的程式碼 ≥ 80%（`scripts/coverage_gate.py`），不量的路徑列在 `.coverage-exempt` |
 | 設定 | pydantic-settings | 全部從環境變數讀，提供 `.env.example` |
 | Kafka client | confluent-kafka | |
 | Web API | FastAPI + uvicorn | 依賴以 `Annotated` 注入，測試以 `dependency_overrides` 換成 fake |
@@ -362,7 +362,7 @@
 | S5-01～S5-05 熱度偵測、錄製回放（7.20） | ✅ 程式完成；加入 `quixstreams`，`confluent-kafka` 降到 2.12.x。整合測試（真實 Kafka、exactly-once）：暴增各單位只發一則、改寫不算新增、只靠 changelog 恢復後不重發、壞訊息進 DLQ。2026-10-17 實測推文進 PG 晚約 8 分鐘，時間基準由 `commented_at` 改成觀測時間（S5-02）。開發環境已部署 heat，待第 5 階段驗收 | — |
 | 文章基準每分鐘更新一次、分鐘結算才發警示（7.20，#49、#50） | ✅ 完成；單元測試重現兩個問題（40 篇活躍文章時文章基準 1 分鐘就洗掉舊值、一分鐘湧入 200 則警示只寫 30），修正後通過；整合測試（真實 Kafka）暴增 40 則的警示 `value` 為 40、重啟後不重發。待部署（重置 heat）後重跑階段 5 的 3 天驗收 | — |
 | 階段 7 規劃：Dashboard 呈現方式（7.25） | ⬜ 文件完成（2026-10-20），待甲方選案 | — |
-| 整合測試改用 compose `test` 服務、CI 加速（7.26，#78） | 🟡 `test-infra-compose` 完成（2026-10-20；本機 135 個全過、連跑兩次），待 CI 驗證與 `test-infra-fast-waits` | — |
+| 整合測試改用 compose `test` 服務、CI 加速（7.26，#78） | 🟡 `test-infra-compose`、`test-infra-fast-waits` 完成（2026-10-20；本機 150 個全過、連跑兩次、`-n 0` 也過），待 CI 驗證 | — |
 | S5-06～S5-07 Telegram bot（7.21） | ✅ 完成；2026-10-16 在開發環境以真的 Telegram 實測指令與推送，修正 compose 漏掉 `app-env`。階段 5 驗收第 1 項（人工暴增約 10 秒收到通知）通過 | — |
 
 階段 1 拆成 5 個 PR；全部完成後依下方「驗收」逐項驗證，通過才把 `develop` 合進 `main` 並打 `stage-1` tag；階段 2 相同。階段 3 起的發版方式見 D-003。
@@ -1116,9 +1116,9 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | 測試查詢的 DB | 一律 `radar`（唯讀帳號只允許這個 DB），以 uuid 看板名稱隔離，不用 xdist 的 worker DB |
 | dashboard 單的順序 | 依序 1→2→3→4，排在 `test-infra-compose` 之後：2 的驗收要用 1 的唯讀帳號 |
 
-### 7.26 整合測試改用 compose `test` 服務、CI 加速（順序 1 已實作，2026-10-20，#78、#84）
+### 7.26 整合測試改用 compose `test` 服務、CI 加速（順序 1、2 已實作，2026-10-20，#78、#84）
 
-agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能直接下 `docker compose …`（D-011）；CI 的 Integration Test 約 7 分鐘。本節是設計與實作紀錄；順序 1（`test-infra-compose`）已完成，順序 2（固定等待、xdist）尚未做。
+agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能直接下 `docker compose …`（D-011）；CI 的 Integration Test 約 7 分鐘。本節是設計與實作紀錄；順序 1（`test-infra-compose`）、順序 2（`test-infra-fast-waits`：固定等待、xdist）皆已完成。
 
 **量測**（CI run 39381652748，2026-10-20 push develop：135 個測試 410 秒；由 log 中每個測試檔結束的時間戳相減）
 
@@ -1148,7 +1148,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | 5 | 三個服務單節點、資料放 tmpfs；版本用 `.env` 的 `KAFKA_VERSION`、`POSTGRES_VERSION`、`CLICKHOUSE_VERSION`（`${KEY:?}`） | 與正式環境同版（testcontainers 現用自己的預設 Kafka 映像）；`down` 即清空 |
 | 6 | Kafka：KRaft；network alias `kafka_1`～`kafka_3`，容器內 listener `:29092` 廣播 `kafka_1:29092`；transaction log 副本 1、`group.initial.rebalance.delay.ms=0`、heap 上限 512 MB；另一個 listener 給 CI 主機（做法 10） | `infra/clickhouse/config.d/named_collections.xml` 的 broker 清單不用改就連得到；heat 的 exactly-once 與其他測試共用一個 Kafka；每次加入 group 省 3 秒 |
 | 7 | PG：`wal_level=logical`、`POSTGRES_HOST_AUTH_METHOD=trust`、DB 名稱 `radar_it`；ClickHouse 唯讀掛 `infra/clickhouse` 的 `named_collections.xml`、`radar.xml` 兩個檔（實作：不掛整個目錄，會蓋掉 image 的 listen 設定與 entrypoint 要寫入的使用者檔；`users.d/grafana.xml` 的 `from_env` 因此不會被載入） | `cdc/test_slot.py` 與其他 PG 測試共用一個容器；DB 名稱是重置前的防呆依據（威脅表） |
-| 8 | session 開始時重置：PG 確認 DB 名稱是 `radar_it` 後（Kafka 與 ClickHouse 重置前也確認目標主機在允許清單：`kafka`、`kafka_1`～`kafka_3`、`postgres`、`clickhouse`、`localhost`、`127.0.0.1`，ClickHouse 另限 database 為 `radar`，不符就 `pytest.exit`／拒絕、不刪任何東西） `DROP SCHEMA public CASCADE`、刪 publication 與未使用的 replication slot；ClickHouse 重建 `radar` DB 並套 migration；Kafka 刪除非內部 topic。各模組共用這組服務，模組開始時清自己用的表；平行執行時的分工見做法 15 | `run --rm test` 結束後依賴服務仍在（下次省啟動時間），靠重置避免上次的資料影響計數；容器 9 個降為 3 個 |
+| 8 | session 開始時重置：PG 確認 DB 名稱是 `radar_it` 後（Kafka 與 ClickHouse 重置前也確認目標主機在允許清單：`kafka`、`kafka_1`～`kafka_3`、`postgres`、`clickhouse`、`localhost`、`127.0.0.1`，ClickHouse 另限 database 為 `radar`；Kafka 另以 `AdminClient.list_topics().cluster_id` 比對測試 compose 的 `CLUSTER_ID`（`hw222Z37TDqnGKEUUPeTpA`，刻意不同於 `.env.example` 的開發值），不符就 `pytest.exit`／拒絕、不刪任何東西） `DROP SCHEMA public CASCADE`、刪 publication 與未使用的 replication slot；ClickHouse 重建 `radar` DB 並套 migration；Kafka 刪除非內部 topic。各模組共用這組服務，模組開始時清自己用的表；平行執行時的分工見做法 15 | `run --rm test` 結束後依賴服務仍在（下次省啟動時間），靠重置避免上次的資料影響計數；容器 9 個降為 3 個 |
 | 9 | ClickHouse 同一個 consumer group 的 Kafka engine 表只能有一組（只在 `radar` DB）；需要「從空 DB 套 migration」的測試另建 DB 時，套完要刪掉其 `*_queue` 表 | 同 group 的兩組表會分走 partition，`test_clickhouse_migrations` 等不到資料 |
 | 10 | CI：`compose.ci.yaml` 覆寫檔把三個服務的 port 綁在 `127.0.0.1:${IT_*_HOST_PORT}`；Integration Test job 依序 `docker compose … pull`、`up -d --wait kafka postgres clickhouse`，再在 runner 上 `make coverage`（`IT_*` 指向 localhost）；runner 的 docker daemon 設 `registry-mirrors` 為 `mirror.gcr.io` | 依 backend-standards 第 6 節，CI 在 runner 跑測試，報告路徑才對得回 repo；拉映像獨立成一步，耗時看得到；取代 `TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX` 與關閉 Ryuk |
 | 11 | 每次事件只跑一次整合測試：`make coverage` 與覆蓋率閘門搬進 Integration Test job（閘門仍只在 PR→develop），Check job 只剩 `make check`；job 名稱不變 | 現在 PR 跑兩次（量測） |
@@ -1165,8 +1165,10 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | PG | 每個 worker 一個 DB `radar_it_<worker>`：worker 的 session fixture 先 `DROP DATABASE IF EXISTS … WITH (FORCE)` 再建立，並跑 alembic；防呆改為 DB 名稱須以 `radar_it` 開頭 |
 | PG replication slot（整個 cluster 共用） | slot 名稱加 `_<worker>` 後綴（`cdc/test_slot.py` 的固定名稱 `watchdog_test` 要改） |
 | ClickHouse | 只查表、不靠 Kafka engine 的模組用 worker 自己的 DB `radar_<worker>`：套 migration 後刪掉 `*_queue` 表（做法 9）；依賴 Kafka engine 接入的測試用 `radar` DB |
-| Kafka 固定名稱的 topic（`alerts`、`dlq`、`labels`、`predictions`）與 ClickHouse Kafka engine | 用到的測試標 `@pytest.mark.xdist_group("shared_topics")`，排在同一個 worker 依序跑：目前是 `cdc/test_clickhouse_migrations.py`、`streaming/test_heat_app.py`、`ml/test_inference_consumer.py`（寫 `dlq`）；其他測試的 topic 一律帶 uuid |
-| consumer group、看板名稱等斷言用的 key | 帶 uuid，不靠「topic 是空的」 |
+| ClickHouse `radar` DB 與它的 Kafka engine 表（訂閱固定名稱的 `labels`、`predictions`、`alerts`） | 只有 `cdc/test_clickhouse_migrations.py` 用，整個模組標 `@pytest.mark.xdist_group("shared_radar_db")` 固定在同一個 worker；它的斷言只看自己的 `unit_key`。heat、inference 寫固定名稱的 `alerts`、`dlq`，但輸入 topic、group、看板名稱、source topic 都帶 uuid、斷言只看自己的，不需分組（實作時修正原先「三個模組同組」的設計）。新測試用到固定名稱 topic 且斷言整張表／整個 topic 時才需要標 |
+| consumer group、看板名稱等斷言用的 key | 帶 uuid，不靠「topic 是空的」；`alerts` 等 ClickHouse 訂閱的 topic 跨次執行保留（見下方實作補充），heat 看板名稱因此每次帶 uuid |
+| worker 的 ClickHouse DB | `radar_<worker>` 以 `without_kafka` 套 migration（略過 Kafka engine 表與讀它的 MV），不會加入 `clickhouse-*` consumer group 搶走 `radar` 的 partition |
+| 全域重置的協調 | `tests/integration/_xdist.py` 的 `run_once`：以 `PYTEST_XDIST_TESTRUNUID` 為鍵的 flock，第一個 worker 做、其餘等它；沒用 `pytest_sessionstart`，因為它只在 initial conftest 觸發，直接下 `pytest` 時不會跑 |
 
 **用法**（在主目錄下，直接下 `docker compose`，不包在 make 或 script 裡）
 
@@ -1177,6 +1179,8 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | 做完單、釋放記憶體 | `docker compose --env-file .env -f .worktrees/<task_id>/compose.yaml down -v` |
 | 人在主目錄 | `make test-int`（包 `docker compose -f compose.yaml --env-file .env run --rm test`） |
 
+- 實作補充（順序 2）：①固定等待：heat 的 `app.run` 閒置 timeout 由 20～25 秒降為 5 秒，結果讀取改為「收到預期筆數後再等 1.5 秒（抓多送的）」，預期 0 筆固定等 4 秒；`test_producer_partition` 每個 partition 收到 1 筆即停。②PG 每個 worker 一個 DB `radar_it_<worker>`（管理連線仍限 `radar_it`）；slot 名稱帶 worker；`cdc/test_slot` 的 lag 斷言改為「降了至少 400 KB」，因為 WAL lag 是整個 cluster 的，平行時別的 worker 也在寫。③`db/test_schema` 的 `engine` fixture 開始時清空所有資料表（同 worker 的 DB 會留下前面模組的資料）。④被刪掉的 Kafka engine consumer 不會離開 group，新的 consumer 要等 broker session 逾時（約 45 秒）才分到 partition；所以全域重置在 `radar` 已套完所有 migration 時（`is_current`）保留 Kafka engine 表與 `labels`、`predictions`、`alerts` 三個 topic，只清資料表、刪其他 database 與 topic；要全部重建時（第一次、migration 有新增），重建後等 `clickhouse-*` group 變空再套 migration。⑤`cluster_id` 比對在任何刪除之前（`check_kafka_target`）。⑥`test_clickhouse_migrations` 另建 database 的兩個測試移到模組最後，0003 那個不建 Kafka 表。
+- 實測（本機 macOS Docker Desktop，8 workers，150 個測試）：連續兩次 `run --rm test` 為 40 秒、53 秒；`-n 0` 為 121 秒；順序 1 為約 375 秒。CI 數字見 PR。
 - 與開發／e2e 環境（#41）：不同 compose 專案、網路與 volume，沒有對外 port，不需要也不會觸發 `stop-e2e`／`stop-dev`；三者可同時運作，限制只有記憶體（每套實測尖峰約 1.4 GiB）
 - `make check` 不變（不需容器）；`make coverage` 只在 CI 用，需要的服務由 CI 先開好
 - 實作補充（順序 1）：session 重置的順序是 PG → 刪 ClickHouse 所有 database（停掉 Kafka consumer）→ 刪 Kafka topic 並建 `labels`、`predictions`、`alerts`（Kafka engine 表要先有 topic）→ ClickHouse 重建 `radar` 並套 migration；各模組的 `clickhouse` fixture 開始時清空資料表。`test_clickhouse_migrations` 另建 database 時，套完 migration 立刻刪 Kafka engine 表（做法 9）。`test` 服務的 `uv sync` 與 Python 套件第一次約 1 分鐘，之後走 named volume 快取。實測：本機（macOS Docker Desktop）135 個測試約 375 秒，連跑兩次都全過。記憶體實測（`docker compose … stats --no-stream`，測試進行中，macOS Docker Desktop，上限 7.65 GiB）：kafka 約 390～470 MiB、clickhouse 約 210～365 MiB、postgres 約 80～90 MiB、test 約 80～450 MiB（`uv sync` 時較低，跑測試時約 330～450），合計尖峰約 1.4 GiB；原估 1.5～2 GB 偏高，以 1.5 GB 計。

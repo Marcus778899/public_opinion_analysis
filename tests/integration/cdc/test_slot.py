@@ -5,8 +5,6 @@ from sqlalchemy import Engine, create_engine, text
 
 from radar.cdc.watchdog import read_slot
 
-SLOT = "watchdog_test"
-
 
 @pytest.fixture(scope="module")
 def logical_pg(postgres_url):
@@ -19,18 +17,20 @@ def logical_pg(postgres_url):
 
 
 @pytest.fixture
-def slot(logical_pg: Engine):
+def slot(logical_pg: Engine, worker: str):
+    # NOTE: replication slot 是整個 cluster 共用的，名稱帶 worker 才不會互撞
+    name = f"watchdog_test_{worker}"
     # NOTE: test_decoding 是 PG 內建的 output plugin，不需要 publication
     with logical_pg.begin() as conn:
         conn.execute(text("CREATE TABLE IF NOT EXISTS t (id serial PRIMARY KEY, v text)"))
     # NOTE: 建立 logical slot 的 transaction 不可先有寫入，所以和建表分開
     with logical_pg.begin() as conn:
         conn.execute(
-            text("SELECT pg_create_logical_replication_slot(:s, 'test_decoding')"), {"s": SLOT}
+            text("SELECT pg_create_logical_replication_slot(:s, 'test_decoding')"), {"s": name}
         )
-    yield SLOT
+    yield name
     with logical_pg.begin() as conn:
-        conn.execute(text("SELECT pg_drop_replication_slot(:s)"), {"s": SLOT})
+        conn.execute(text("SELECT pg_drop_replication_slot(:s)"), {"s": name})
 
 
 def write_rows(engine: Engine, n: int) -> None:
@@ -70,5 +70,5 @@ def test_read_slot_after_consuming_changes_lag_drops(logical_pg, slot):
         consumed = read_slot(conn, slot)
 
     assert lagging is not None and consumed is not None
-    assert consumed.lag_bytes < lagging.lag_bytes
-    assert consumed.lag_bytes < 100_000
+    # NOTE: lag 是整個 cluster 的 WAL；平行時別的 worker 也在寫，所以比「降了多少」而非絕對值
+    assert consumed.lag_bytes < lagging.lag_bytes - 400_000

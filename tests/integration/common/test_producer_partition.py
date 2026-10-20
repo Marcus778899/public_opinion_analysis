@@ -1,3 +1,4 @@
+import time
 import uuid
 
 from confluent_kafka import Consumer, TopicPartition
@@ -30,8 +31,13 @@ def test_list_tasks_land_in_assigned_partitions(kafka_settings):
         landed = {}
         for p in range(count):
             consumer.assign([TopicPartition(topic, p, 0)])
-            for msg in consumer.consume(10, timeout=10):
-                landed[msg.key().decode()] = msg.partition()
+            # NOTE: 每個 partition 只送了 1 筆，收到就停；沒收到才等到逾時
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                msg = consumer.poll(0.5)
+                if msg is not None and msg.error() is None:
+                    landed[msg.key().decode()] = msg.partition()
+                    break
     finally:
         consumer.close()
 
