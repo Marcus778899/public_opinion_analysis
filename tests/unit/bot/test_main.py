@@ -7,6 +7,7 @@ from radar.bot import main as bot_main
 from radar.bot.commands import COMMANDS
 from radar.bot.main import (
     PURGE_INTERVAL,
+    forget_blocked_chat,
     handle_update,
     is_allowed,
     poll_commands,
@@ -18,6 +19,7 @@ from radar.bot.telegram import (
     CallbackQuery,
     IncomingMessage,
     TelegramBadRequestError,
+    TelegramForbiddenError,
     Update,
 )
 from radar.common.kafka.consumer import TransientError
@@ -303,3 +305,45 @@ def test_purge_muted_deletes_rows_older_than_retention(monkeypatch):
     deleted = purge_muted(lambda: FakeSession(), settings(), NOW)  # type: ignore[arg-type]
 
     assert (deleted, befores) == (2, [NOW - timedelta(hours=48)])
+
+
+# --- 403（資安 H-1、7.21）---
+
+
+@pytest.fixture
+def forgotten(monkeypatch) -> list[int]:
+    chats: list[int] = []
+
+    class FakePrefs:
+        def __init__(self, _session) -> None:
+            pass
+
+        def forget(self, chat_id):
+            chats.append(chat_id)
+
+    monkeypatch.setattr(bot_main, "PreferenceRepository", FakePrefs)
+    return chats
+
+
+def test_forget_blocked_chat_removes_chat_data(forgotten):
+    forget_blocked_chat(lambda: FakeSession(), 5)  # type: ignore[arg-type]
+
+    assert forgotten == [5]
+
+
+def test_handle_update_forbidden_reply_forgets_chat(forgotten):
+    handle(msg(1), error=TelegramForbiddenError(5))
+
+    assert forgotten == [5]
+
+
+def test_handle_update_forbidden_callback_forgets_chat(forgotten):
+    handle(button(1, chat_id=8), error=TelegramForbiddenError(8))
+
+    assert forgotten == [8]
+
+
+def test_poll_commands_forbidden_reply_advances_offset(forgotten):
+    telegram, _ = run([[msg(1)]], error=TelegramForbiddenError(5))
+
+    assert (telegram.offsets, forgotten) == ([None, 2], [5])
