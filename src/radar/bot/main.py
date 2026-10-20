@@ -46,7 +46,7 @@ PURGE_INTERVAL = timedelta(hours=1)
 
 
 def is_allowed(chat_id: int | None, allowed: list[int]) -> bool:
-    """allowed 為空代表不限制。"""
+    """allowed 為空代表不限制；空清單是否允許由 check_allowlist 在啟動時把關。"""
     if chat_id is None:
         return False
     return not allowed or chat_id in allowed
@@ -214,10 +214,27 @@ class _CommandThread(threading.Thread):
             self._on_exit()
 
 
+def check_allowlist(settings: TelegramSettings) -> None:
+    """允許清單 fail closed（D-010）：沒清單又沒明確開放就拒絕啟動。"""
+    if settings.allowed_chat_ids:
+        if settings.allow_all:
+            log.warning(
+                "TELEGRAM_ALLOW_ALL=true is ignored because TELEGRAM_ALLOWED_CHAT_IDS is set"
+            )
+        return
+    if not settings.allow_all:
+        raise SystemExit(
+            "TELEGRAM_ALLOWED_CHAT_IDS is empty: set it to the allowed chat ids, "
+            "or set TELEGRAM_ALLOW_ALL=true to answer every chat"
+        )
+    log.warning("TELEGRAM_ALLOW_ALL=true: the bot answers every chat")
+
+
 @log.catch(level="CRITICAL")
 def main() -> None:
     setup_logging("bot")
     settings = TelegramSettings()
+    check_allowlist(settings)
     engine = make_engine(get_postgres_settings(), pool_size=2)
     sessions = make_session_factory(engine)
     ch = ClickHouseClient(ClickHouseSettings())
