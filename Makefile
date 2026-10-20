@@ -74,7 +74,7 @@ check:  ## lint + 不需要容器的測試（CI 每個 PR 都跑）
 	uv run pytest tests/unit
 
 coverage:  ## 單元 + 整合測試的覆蓋率（只在 CI 用，compose 的服務由 CI 先開好；IT_* 見 ci.yml），Cobertura XML 寫到 coverage-reports/
-	uv run pytest tests/unit tests/integration -n auto --dist loadgroup --cov=src/radar --cov-report=xml:coverage-reports/python.xml -q
+	uv run pytest tests/unit tests/integration -n auto --dist loadgroup --durations=15 --cov=src/radar --cov-report=xml:coverage-reports/python.xml -q
 
 lint:
 	uv run ruff check .
