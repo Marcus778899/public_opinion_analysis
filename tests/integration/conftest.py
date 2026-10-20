@@ -34,7 +34,13 @@ from tests.helpers.clickhouse import (
 )
 from tests.integration._xdist import run_once, worker_id
 
-REQUIRED_ENV = ("IT_KAFKA_BOOTSTRAP", "IT_POSTGRES_HOST", "IT_POSTGRES_PORT", "IT_CLICKHOUSE_URL")
+REQUIRED_ENV = (
+    "IT_KAFKA_BOOTSTRAP",
+    "IT_POSTGRES_HOST",
+    "IT_POSTGRES_PORT",
+    "IT_CLICKHOUSE_URL",
+    "IT_GRAFANA_URL",
+)
 USAGE = (
     "整合測試需要 compose 的測試服務，請在主目錄執行：\n"
     "  docker compose --env-file .env -f .worktrees/<task_id>/compose.yaml run --rm test\n"
