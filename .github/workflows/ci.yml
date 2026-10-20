@@ -15,54 +15,61 @@ on:
       - main
 
 jobs:
-  py-lint:
-    name: Lint
+  check:
+    name: Check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Run Pre-commit
-        uses: pre-commit/action@v3.0.1
-
-  py-bandit:
-    name: Bandit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+          fetch-depth: 0  # 覆蓋率檢查要跟 develop 比 diff
+      # 專案初始化（INIT）合併前還沒有 Makefile，後續步驟全部跳過
+      - name: Detect Makefile
+        id: detect
+        run: if [ -f Makefile ]; then echo "found=true" >> "$GITHUB_OUTPUT"; else echo "found=false" >> "$GITHUB_OUTPUT"; fi
       - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Run Bandit
-        run: |
-          pip install bandit==1.7.8
-          bandit -r src -lll -iii --exit-zero
-
-  py-unit-test:
-    name: Unit Test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up Python
+        if: steps.detect.outputs.found == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install uv
+        if: steps.detect.outputs.found == 'true'
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - name: Sync dependencies
-        run: uv sync --all-extras --dev
-      - name: Run unit tests
-        run: uv run pytest tests/unit
+      # CI 用 .env.example 的預設值；需要機密的測試改用 GitHub secrets
+      - name: Prepare env
+        if: steps.detect.outputs.found == 'true'
+        run: if [ -f .env.example ]; then cp .env.example .env; fi
+      - name: Install dependencies
+        if: steps.detect.outputs.found == 'true'
+        run: make ci-setup
+      - name: Check
+        if: steps.detect.outputs.found == 'true'
+        run: make check
+      # 改到的程式碼覆蓋率（scripts/coverage_gate.py，門檻 80%）：只在開到 develop 的 PR 檢查；發版 PR 是已逐張檢查過的累積
+      # make coverage 把 Cobertura／JaCoCo XML 寫到 coverage-reports/（寫法見 .claude/skills/backend-standards/references/）
+      # 需要 DB 時在這步之前加 docker compose up -d <服務>：測試在 runner 上跑，在容器裡跑報告路徑會對不回 repo
+      - name: Set up Python for coverage gate  # 不要刪：coverage_gate.py 與 diff-cover 需要，跟專案語言無關
+        if: steps.detect.outputs.found == 'true' && github.event_name == 'pull_request' && github.base_ref == 'develop'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # make coverage 含整合測試（testcontainers 用 runner 內建的 Docker）
+      - name: Coverage of changed lines (diff-cover)
+        if: steps.detect.outputs.found == 'true' && github.event_name == 'pull_request' && github.base_ref == 'develop'
+        env:
+          DIFF_COVER_VERSION: "10.6.0"
+          COVERAGE_SRC_ROOTS: ""
+          TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX: mirror.gcr.io/
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+        run: |
+          make coverage
+          pip install -q "diff-cover==${DIFF_COVER_VERSION}"
+          python3 scripts/coverage_gate.py "origin/${GITHUB_BASE_REF}"
 
-  py-integration-test:
+  # push 到 develop／main 也要跑整合測試；PR 的 Check job 會在 make coverage 裡再跑一次
+  integration:
     name: Integration Test
     runs-on: ubuntu-latest
     steps:
@@ -75,7 +82,6 @@ jobs:
           python-version: "3.12"
       - name: Sync dependencies
         run: uv sync --dev
-      # ubuntu runner 內建 Docker，testcontainers 可直接啟動 Kafka / PG
       - name: Run integration tests
         run: uv run pytest tests/integration
         env:
@@ -83,3 +89,41 @@ jobs:
           TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX: mirror.gcr.io/
           # NOTE: 加前綴後 Ryuk 會無限遞迴建立自己（testcontainers 4.15）；runner 用完即丟，不需清理
           TESTCONTAINERS_RYUK_DISABLED: "true"
+
+  # 資安稽核：每個 PR 都跑，pr.py merge 要求所有 check 綠。工具與語言無關，版本固定，升級改這裡
+  # 要忽略某個發現，寫進 osv-scanner.toml／.gitleaksignore／.semgrepignore 並附理由；這些檔在 fast 通道是受保護路徑，發版前 security 也會逐條檢查
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      OSV_SCANNER_VERSION: "2.6.0"
+      SEMGREP_VERSION: "1.178.0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 密鑰掃描要看整段歷史，刪掉的 secret 仍在 git 裡
+      - name: Secrets (gitleaks)
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar -xz -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner .
+      - name: Dependencies (osv-scanner)
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/osv-scanner" "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+          set +e
+          "$RUNNER_TEMP/osv-scanner" scan source -r .
+          code=$?
+          set -e
+          # 128：找不到任何相依清單（例：專案初始化前），不算失敗
+          if [ "$code" -eq 128 ]; then echo "沒有相依清單，略過"; exit 0; fi
+          exit "$code"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: SAST (semgrep)
+        run: |
+          pip install -q "semgrep==${SEMGREP_VERSION}"
+          semgrep scan --config p/default --severity ERROR --error --metrics off --quiet

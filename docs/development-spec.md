@@ -35,8 +35,8 @@
 | Python | 3.12 | 所有自寫服務共用 |
 | 套件管理 | uv | `pyproject.toml` + `uv.lock` |
 | Lint / format | ruff | 已在 pre-commit |
-| 安全掃描 | bandit | 已在 pre-commit |
-| 測試 | pytest、pytest-asyncio、testcontainers | |
+| 安全掃描 | bandit；CI 另跑 gitleaks、osv-scanner、semgrep | bandit 在 pre-commit；誤判寫進 `.gitleaksignore` 等忽略檔並附理由 |
+| 測試 | pytest、pytest-asyncio、pytest-cov、testcontainers | 覆蓋率：PR 改到的程式碼 ≥ 80%（`scripts/coverage_gate.py`），不量的路徑列在 `.coverage-exempt` |
 | 設定 | pydantic-settings | 全部從環境變數讀，提供 `.env.example` |
 | Kafka client | confluent-kafka | |
 | Web API | FastAPI + uvicorn | 依賴以 `Annotated` 注入，測試以 `dependency_overrides` 換成 fake |
@@ -63,13 +63,13 @@
 ├── .env.example
 ├── infra/
 │   ├── postgres/migrations/ # Alembic（alembic.ini 放在根目錄）
-│   ├── kafka/topics.yaml    # topic 定義，由 scripts/create_topics.py 套用
+│   ├── kafka/topics.yaml    # topic 定義，由 tools/create_topics.py 套用
 │   ├── debezium/            # Connect image（含 Apicurio converter）、connector 設定
 │   └── clickhouse/          # config.d、users.d、migrations/（編號 SQL）
 ├── docs/labeling-guideline.md  # 情緒標註準則（LLM、Claude、人工共用）
 ├── docs/reports/            # 實驗與模型評估報告（model-evaluation.md 由人撰寫；s3-05-push-ratio.md），進 repo
 ├── .claude/skills/label-posts/ # Claude 手動標註的 skill
-├── scripts/
+├── tools/                   # 營運腳本（建 topic、ClickHouse migration、註冊 connector、seed）；scripts/ 是 agent 流程腳本
 ├── tests/
 │   ├── unit/
 │   ├── integration/
@@ -96,6 +96,9 @@
 | `make up-app` | 基礎設施加上 api、scheduler、crawler ×3、ingest；`init` 自動建表、建 topic、ClickHouse migration、註冊 connector |
 | `make e2e-up` / `make e2e` | 啟動端到端環境（假 PTT、e2e 專用 volume）/ 執行端到端測試 |
 | `make e2e-down` | 停止端到端環境並刪除其資料 volume |
+| `make setup` / `make ci-setup` | 本機／CI 安裝相依 |
+| `make check` | pre-commit 全部 hook + 單元測試（CI 每個 PR 都跑） |
+| `make coverage` | 單元 + 整合測試的覆蓋率，Cobertura XML 寫到 `coverage-reports/` |
 | `make lint` | ruff + bandit |
 | `make test` | 單元測試 |
 | `make test-int` | 整合測試（需要 Docker） |
@@ -103,10 +106,12 @@
 ### 1.4 分支與提交
 
 - `main`：可部署版本；`develop`：開發整合
-- 功能分支：`feat/s<階段>-<簡述>`，例如 `feat/s1-ptt-parser`，PR 合進 `develop`
-- 每個階段驗收通過後，`develop` 合進 `main` 並打 tag `stage-<n>`
+- 階段 7 起改用 agent 團隊流程（`scripts/` 的 `task.py`、`pr.py`、`release.py`；規則見 CLAUDE.md 與 `docs/decisions.md` D-001～D-006）：
+  - 功能分支：`<類型>/<task_id>`，例如 `feat/dashboard-board-trend`，PR 合進 `develop`；跟上 develop 用 `pr.py sync`（merge，不 rebase）
+  - 版本以 semver 發版（階段 7 = `v0.7.0`）；`stage-3`～`stage-6` 照第 6 章原計畫補打
+  - Commit：`<類型>(<task_id>): ...`
+- 階段 6 以前：功能分支 `feat/s<階段>-<簡述>`，階段驗收通過後 `develop` 合進 `main` 並打 tag `stage-<n>`；Commit 如 `feat(crawler): ...`
 - 緊急修正從 `main` 開 `fix/*`，合回 `main` 後由 workflow 同步到 `develop`
-- Commit 使用 Conventional Commits：`feat(crawler): ...`、`fix(ingest): ...`
 
 ---
 
@@ -386,7 +391,7 @@
 | S0-01 | `pyproject.toml`、uv、ruff 設定；修正 pre-commit（見 8.2） |
 | S0-02 | docker-compose：Kafka（KRaft 3 節點，副本數 3、`min.insync.replicas=2`）、PostgreSQL、Kafka UI（profile `debug`；階段 2 起改為預設啟動，部署前移除，見 S9-06） |
 | S0-03 | `common/`：settings、logging、Kafka producer/consumer 包裝（含 DLQ、優雅關閉）、PG 連線池 |
-| S0-04 | `infra/kafka/topics.yaml` + `scripts/create_topics.py`（冪等） |
+| S0-04 | `infra/kafka/topics.yaml` + `tools/create_topics.py`（冪等） |
 | S0-05 | 共用 Dockerfile（一個 image，靠 `command` 區分服務） |
 | S0-06 | GitHub Actions：lint + 單元測試 + 整合測試 |
 
@@ -693,8 +698,8 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 
 - **Apicurio 的 database**：PG 的 init script 只在空 volume 時執行，既有環境不會跑；改由一次性服務 `apicurio-db-init` 以 `CREATE DATABASE ... WHERE NOT EXISTS` 建立（冪等），Apicurio 等它完成才啟動
 - **Publication**：Alembic migration 建立 `radar_cdc`（只含 `posts`、`comments`），schema 變更都走 migration；Debezium 設 `publication.autocreate.mode=disabled`
-- **Connector 註冊**：`infra/debezium/radar-cdc.json` 以 `${VAR}` 引用環境變數，`scripts/register_connector.py` 替換後 `PUT /connectors/<name>/config`（冪等，設定有變就更新）
-- **ClickHouse schema**：`infra/clickhouse/migrations/NNNN_<name>.sql`，`scripts/migrate_clickhouse.py` 透過 HTTP 介面依序執行，已執行的版本記在 ClickHouse 的 `schema_migrations` 表
+- **Connector 註冊**：`infra/debezium/radar-cdc.json` 以 `${VAR}` 引用環境變數，`tools/register_connector.py` 替換後 `PUT /connectors/<name>/config`（冪等，設定有變就更新）
+- **ClickHouse schema**：`infra/clickhouse/migrations/NNNN_<name>.sql`，`tools/migrate_clickhouse.py` 透過 HTTP 介面依序執行，已執行的版本記在 ClickHouse 的 `schema_migrations` 表
 - **Image 內容**：`init` 在 container 內執行上述腳本，`Dockerfile` 必須 COPY `infra/clickhouse/migrations/` 與 `infra/debezium/radar-cdc.json`；migration 資料夾不存在或沒有檔案時直接報錯，不可當成「沒有待執行的 migration」默默略過
 - **等待 connector 啟動**：PUT 建立後狀態是非同步產生的，剛建立時查 `/status` 會先回 404，視為尚未就緒繼續輪詢，逾時才報錯
 - **執行順序**（`init` 服務）：Alembic → topic → ClickHouse migration → 註冊 connector。ClickHouse 先建好才開始產生 CDC 事件；Kafka engine 表從最早的 offset 讀，順序顛倒也不會掉資料
