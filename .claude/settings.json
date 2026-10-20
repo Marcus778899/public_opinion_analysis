@@ -96,7 +96,8 @@
         "hc-ping.com"
       ],
       "allowLocalBinding": true
-    }
+    },
+    "enableWeakerNetworkIsolation": true
   },
   "hooks": {
     "PreToolUse": [
