@@ -30,9 +30,9 @@
 | dashboard-design | architect | done | 0 | PR #86 |
 | test-infra-design | architect | done | 0 | PR #87 |
 | gitleaks-archive-ignore | backend | done | 0 | PR #89 |
-| test-infra-compose | backend | todo | 0 |  |
-| bot-allowlist-required | backend | todo | 0 |  |
-| dashboard-test-align | architect | in-progress | 0 |  |
+| test-infra-compose | backend | in-progress | 0 |  |
+| bot-allowlist-required | backend | done | 0 | PR #93 |
+| dashboard-test-align | architect | done | 0 | PR #94 |
 
 ## 卡住／待甲方決定
 

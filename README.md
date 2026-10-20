@@ -4,7 +4,7 @@
 
 ## 快速開始
 
-1. 設定：`python3 scripts/check_env.py`，依提示在 `.env` 填入缺少的值（Telegram 需要 `TELEGRAM_BOT_TOKEN`，並在 `TELEGRAM_ALLOWED_CHAT_IDS` 填自己的 chat id——留空代表任何找到這個 bot 的人都能訂閱、看警示；情緒推論需要 `INFERENCE_MODEL_VERSION` 與 `models/` 下的模型）
+1. 設定：`python3 scripts/check_env.py`，依提示在 `.env` 填入缺少的值（Telegram 需要 `TELEGRAM_BOT_TOKEN`，並在 `TELEGRAM_ALLOWED_CHAT_IDS` 填自己的 chat id——沒填 bot 會拒絕啟動，要開放所有人必須另設 `TELEGRAM_ALLOW_ALL=true`（D-010）；情緒推論需要 `INFERENCE_MODEL_VERSION` 與 `models/` 下的模型）
 2. 安裝：`make setup`（Python 3.12、[uv](https://docs.astral.sh/uv/)、Docker；`pre-commit install` 啟用 commit 前檢查）
 3. 啟動整套服務（會對真實 PTT 發請求；自動建表、topic 與 CDC connector）：
 
