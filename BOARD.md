@@ -25,10 +25,11 @@
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
 | dashboard-design | architect | todo | 0 |  |
+| test-infra-design | architect | todo | 0 |  |
 
 ## 卡住／待甲方決定
 
-- （無）
+- 等甲方修上游範本（claude_workflow#1，D-008 B）並跑 update.sh；修好後 manager 自行開 test-infra-design → dashboard-design
 
 ## 注意事項（踩過的坑）
 
