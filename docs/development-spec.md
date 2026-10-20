@@ -617,7 +617,7 @@
 
 | ID | 任務 |
 |---|---|
-| S9-01 | 確認所有 image 有 arm64 版本（Oracle 免費 ARM） |
+| S9-01 | 確認所有 image 有 arm64 版本（Oracle 免費 ARM）；Grafana 的 ClickHouse plugin 沒有官方平台清單，以 arm64 建置 `infra/grafana/Dockerfile` 並跑 7.25 的測試 |
 | S9-02 | Terraform：VM、網路、磁碟；VM 上跑 docker-compose |
 | S9-03 | Secrets 不進 repo（`.env` 由部署流程注入） |
 | S9-04 | PG 每日備份到另一個磁碟或物件儲存 |
@@ -1014,7 +1014,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | 工作量 | S（約 2～3 天）：compose 加一個服務、provisioning、1 個 ClickHouse migration（view）、1 份 dashboard JSON；不寫 Python | M～L（約 1～2 週）：API 契約、6 個唯讀端點（`api/routes/` 新增）、新前端專案（畫面、圖表、建置）、designer 畫面規格、前後端驗收測試與整合單；Grafana 監控另需決定監控什麼（目前沒有 metrics exporter，要嘛只查 ClickHouse，要嘛再引入 Prometheus） |
 | 新相依 | `grafana/grafana-oss` image、`grafana-clickhouse-datasource` plugin（都是設定，不進 `pyproject.toml`） | A 的全部（監控用）＋前端框架與圖表套件、node 建置工具鏈（CI 多一個語言）＋B 的 API 讀 ClickHouse 的程式 |
 | 維運 | 多一個容器（約 0.1～0.2 GB）；升級只換 image 與 plugin 版本；登入、權限、時間範圍、自動更新都是內建 | 多 1～2 個容器；前端相依要定期升級與稽核（osv-scanner 多一種 lockfile）；登入要自己做（API 目前沒有認證，只綁本機，設計文件 4.3） |
-| `make up` 免手動設定 | 可達：datasource、dashboard 以 provisioning 檔載入，plugin 以環境變數在啟動時安裝 | 可達，但前端要先建置成 image；Grafana 監控面板同樣用 provisioning |
+| `make up` 免手動設定 | 可達：datasource、dashboard 以 provisioning 檔載入，plugin 在建置 image 時裝好 | 可達，但前端要先建置成 image；Grafana 監控面板同樣用 provisioning |
 | S7-02 面板 | 6 種都能用內建的 time series、bar、pie、table 表示 | 都能做，畫面可完全自訂 |
 | 之後的延伸 | 給維運與分析看長期趨勢（設計文件 9.1）；手機上的圖表留給 Mini App（「後續階段」15） | 前端可在 Mini App 重用一部分，但 Mini App 要 HTTPS 與 `initData` 驗證（設計文件 14.3），屆時仍要改 |
 
@@ -1039,14 +1039,18 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | 6 | 熱門文章排行 | table | `comments_latest FINAL` ⨝ `posts_latest FINAL` ⟕ `post_votes` ⟕ `post_sentiment_latest` | 時間範圍內新增推文最多的前 20 篇，附推、噓、爭議度、文章情緒 |
 
 - 表格的標題連到原文：只用 `posts_latest.url`，且限 `https://www.ptt.cc/` 開頭（否則留空）
-- 面板 SQL 只用 ClickHouse plugin 的 `$__timeFilter`、`$__fromTime`、`$__toTime`、`$__timeInterval` 與上面兩個變數，驗收測試代換後直接在 ClickHouse 執行
+- 面板 SQL 只用 ClickHouse plugin 的 `$__timeFilter_ms`（欄位都是 DateTime64；秒級的 `$__timeFilter` 展開方式各來源說法不一）、`$__timeInterval` 與上面兩個變數，驗收測試代換後直接在 ClickHouse 執行；plugin 實際展開的結果由 `dashboard-integration` 驗證
 
 **部署與權限**
 
 - compose 服務 `grafana`（預設 profile，`make up` 一併啟動），只綁 `127.0.0.1:${GRAFANA_PORT}`；volume `grafana_data`
+- **版本與 plugin**（調查：`docs/research/dashboard-grafana.md`）：`infra/grafana/Dockerfile` 以 `grafana/grafana-oss:${GRAFANA_VERSION}` 為底，建置時用 `grafana cli` 裝 `grafana-clickhouse-datasource` `${GRAFANA_CLICKHOUSE_PLUGIN_VERSION}`，並關閉啟動時的 plugin 預裝與自動更新。執行時不需要連網、版本不會自己變，「離線重啟會不會重抓」「預載 plugin 會自動更新」兩個查不到的行為因此不必依賴
+  - 釘法：兩個版本都寫完整的 patch 版號（不用 `latest`、`13` 這類浮動 tag）。`GRAFANA_VERSION` 取 Docker Hub 上實際存在的 tag（調查時 GitHub 標 13.2.4、Docker Hub 只列到 13.0.2，以拉得到的為準）；plugin 4.23.0（需 Grafana ≥ 11.6）
+  - 社群回報 Grafana 13.0.0 升級後 ClickHouse datasource 失效：以 `dashboard-grafana-infra` 的相容性測試為準，不過就退到通過的最新版，把選定的版本與理由寫回本節
+  - arm64：Grafana image 有 arm64，plugin 沒有官方平台清單；併入 S9-01，以 arm64 建置這個 image、跑同一組測試
 - 檔案：`infra/grafana/provisioning/datasources/clickhouse.yaml`（固定 uid `radar-clickhouse`）、`infra/grafana/provisioning/dashboards/radar.yaml`、`infra/grafana/dashboards/radar.json`；dashboard 設為 provisioning 管理（UI 改了存不回去，改 JSON 才算數）
 - 登入：`GRAFANA_ADMIN_PASSWORD` 必填（compose 用 `${…:?}`），關閉匿名與註冊；不設預設帳密
-- ClickHouse 專用唯讀帳號 `CLICKHOUSE_GRAFANA_USER`／`CLICKHOUSE_GRAFANA_PASSWORD`（`infra/clickhouse/users.d/grafana.xml`，密碼以 `from_env` 讀）：`readonly=1`、只 `GRANT SELECT ON radar.*`、不給 named collection 權限（裡面有 Kafka、registry 設定），並設 `max_execution_time`、`max_memory_usage` 上限
+- ClickHouse 專用唯讀帳號 `CLICKHOUSE_GRAFANA_USER`／`CLICKHOUSE_GRAFANA_PASSWORD`（`infra/clickhouse/users.d/grafana.xml`，密碼以 `from_env` 讀，有官方說明）：profile `readonly=1`、`allow_databases` 只有 `${CLICKHOUSE_DB}`、不給 `named_collection_control`（裡面有 Kafka、registry 設定），並設 `max_execution_time`、`max_memory_usage` 上限。不用 XML 的 `<grants>`：26.8 的行為查不到官方說明，`readonly` 與 `allow_databases` 是 XML 使用者一直支援的設定；升級 ClickHouse 時同一組測試要通過（26.9 起 users.xml 留有 `SYSTEM RELOAD MODEL` 會啟動失敗，本檔不用 grants，不受影響）
 - 時區顯示 `Asia/Taipei`，資料仍是 UTC；預設時間範圍近 7 天、每分鐘自動更新
 
 **威脅與對策**
@@ -1062,10 +1066,19 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 
 | 順序 | task_id | 負責 | 負責檔案 | 驗收測試目錄 |
 |---|---|---|---|---|
-| 1 | `dashboard-grafana-infra` | backend | `infra/docker-compose.yaml`（`grafana` 服務、clickhouse 加唯讀帳號的環境變數）、`infra/clickhouse/users.d/grafana.xml`、`infra/grafana/provisioning/**`、`.env.example`、本文件 1.3 與設計文件 10.3、11.1 | `tests/unit/acceptance/dashboard/`（compose 與 provisioning 的靜態檢查） |
-| 2 | `dashboard-views` | backend | `infra/clickhouse/migrations/0005_dashboard_views.sql` | `tests/integration/acceptance/dashboard/test_views.py`（真的 ClickHouse） |
+| 1 | `dashboard-grafana-infra` | backend | `infra/docker-compose.yaml`（`grafana` 服務、clickhouse 加唯讀帳號的環境變數）、`infra/grafana/Dockerfile`、`infra/clickhouse/users.d/grafana.xml`、`infra/grafana/provisioning/**`、`.env.example`、本文件 1.3、7.25（回寫選定的版本）與設計文件 10.3、11.1 | `tests/unit/acceptance/dashboard/`（compose、Dockerfile、provisioning 的靜態檢查：版本為完整 patch 號、只綁本機、密碼 `${…:?}`）；`tests/integration/acceptance/dashboard/test_grafana_infra.py`（見下方） |
+| 2 | `dashboard-views` | backend | `infra/clickhouse/migrations/0005_dashboard_views.sql` | `tests/integration/acceptance/dashboard/test_views.py`（ClickHouse `${CLICKHOUSE_VERSION}`；以唯讀帳號查 view，結果符合種子資料：刪除的推文不計、取最新一筆推論、沒有推論的文章不出現） |
 | 3 | `dashboard-panels` | backend | `infra/grafana/dashboards/radar.json` | `tests/integration/acceptance/dashboard/test_panels.py`（每個面板的 SQL 代換後在 ClickHouse 執行、結果符合種子資料） |
-| 4 | `dashboard-integration` | qa | — | `tests/integration/dashboard/`：testcontainers 開 Grafana＋ClickHouse 載入 provisioning，以 Grafana API 確認 dashboard 存在、每個面板查詢無錯誤；另以 `make up` 後的截圖當驗收證據 |
+| 4 | `dashboard-integration` | qa | — | `tests/integration/dashboard/`：testcontainers 開 Grafana＋ClickHouse 載入 provisioning，以 Grafana API（`/api/ds/query`）確認 dashboard 存在、每個面板查詢無錯誤；時間範圍邊界內外各 2 秒的種子資料分別被納入、排除（驗 `$__timeFilter_ms` 對 DateTime64(6) 的展開，1 秒以內的誤差可接受）；另以 `make up` 後的截圖當驗收證據 |
+
+`test_grafana_infra.py` 要驗的（把調查查不到的行為變成測試，失敗就改設定或換版本，不留懸案）：
+
+| 項目 | 通過條件 |
+|---|---|
+| 相容性 | 選定的 Grafana＋plugin 對 ClickHouse `${CLICKHOUSE_VERSION}` 的 datasource health check 成功 |
+| 離線啟動 | 以既有 volume 在無對外網路（`internal` network）的情況下重啟 Grafana，plugin 仍載入、版本與 `GRAFANA_CLICKHOUSE_PLUGIN_VERSION` 相同、health check 成功 |
+| 唯讀帳號 | SELECT `radar` 的表與 view 成功；INSERT、CREATE、DROP、`SET readonly = 0` 失敗；查其他 database、`system.named_collections` 失敗或為空；`getSetting('max_execution_time')` 等於設定值 |
+| 設定載入 | ClickHouse 以 `from_env` 讀到密碼：錯的密碼登入失敗、對的成功 |
 
 - 驗收測試放在 `tests/unit/`、`tests/integration/` 底下，`make check`、`make coverage` 與 CI 不必改就會跑到
 - 面板的版面、顏色由 worker 自行決定（Grafana 內建樣式），不另派 designer
@@ -1079,6 +1092,10 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | 匿名檢視 | 不開；登入一次不算「手動設定」 |
 | Grafana 監控面板（Kafka lag 等） | 不在階段 7；需要 metrics exporter，屬新相依 |
 | 排行筆數 | 前 20（bot 是 5，Dashboard 畫面較大） |
+| plugin 安裝 | 建置 image 時裝（`infra/grafana/Dockerfile`），不用啟動時的 `GF_PLUGINS_PREINSTALL_SYNC`：執行時不連網、不自動更新 |
+| 版本釘法 | Grafana、plugin 都釘完整 patch 號，以相容性測試通過的最新版為準 |
+| 唯讀帳號的權限設定 | `readonly` profile＋`allow_databases`，不用 XML `<grants>`（26.8 行為查不到） |
+| 時間巨集 | `$__timeFilter_ms`（欄位都是 DateTime64） |
 
 ## 8. 風險清單
 
@@ -1099,7 +1116,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | Telegram 選單的回呼資料超過 64 bytes 或格式改版 | 按鈕失效 | `callback_data` 帶版本號，解析失敗時重送主選單；單元測試檢查最長的 post_id 在上限內（7.23） |
 | 開發機休眠 | 長時間驗收中斷、數據缺一段 | 驗收期間 `caffeinate -dims` 並接電源、不闔上螢幕（闔上仍會強制睡眠）；`cdc-watchdog` 的外部 heartbeat 停止時會寄 email（7.16）；上雲後（階段 9）不再依賴開發機 |
 | 標註的系統性偏差 | 模型學到錯誤標準，資料越多越確定 | 固定主要標註者、改 prompt 修偏差、兩個不同家族的標註者交叉比對、人工測試集裁決（7.11） |
-| Grafana 的 ClickHouse plugin 在啟動時下載、或與 ClickHouse 版本不相容 | 離線或升級後 dashboard 全部失效 | 版本固定在 `.env.example`；plugin 存在 `grafana_data` volume，重啟不重抓；升級時跑 `tests/integration/dashboard/`（7.25） |
+| Grafana 的 ClickHouse plugin 與 Grafana、ClickHouse 版本不相容 | 升級後 dashboard 全部失效 | 版本釘完整 patch 號、plugin 在建置 image 時裝好（執行時不下載、不自動更新）；升級任一方都要過 `test_grafana_infra.py` 與 `tests/integration/dashboard/`（7.25） |
 | Python 端讀不了 CDC 的 Avro | S3-08 串流標註、階段 4 推論卡住 | 採用 `confluent-kafka[avro]`（fastavro + 官方 schema registry client，打 Apicurio 的 ccompat API）；已用 mock schema registry 與 S2-01 實測的欄位驗證解碼，待以實際 CDC 訊息確認 |
 
 ### 8.2 現有 repo 設定問題
