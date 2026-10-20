@@ -20,6 +20,7 @@ from radar.bot.telegram import (
     IncomingMessage,
     TelegramBadRequestError,
     TelegramClient,
+    TelegramForbiddenError,
     Update,
 )
 from radar.bot.views import Screen, alert_screen, parse_callback
@@ -107,7 +108,7 @@ def handle_update(
             return
         screen = reply_to(message, sessions, queries, min_score)
         if screen is not None:
-            _send_reply(telegram, message.chat_id, screen)
+            _send_reply(telegram, message.chat_id, screen, sessions)
         return
     callback = update.callback
     if callback is None or not is_allowed(callback.chat_id, allowed):
@@ -122,6 +123,9 @@ def handle_update(
     except TelegramBadRequestError as e:
         # 例如按鈕回呼超過 Telegram 的期限、原訊息已刪除
         log.warning("callback %s from chat %s rejected: %s", callback.data, callback.chat_id, e)
+    except TelegramForbiddenError:
+        if callback.chat_id is not None:
+            forget_blocked_chat(sessions, callback.chat_id)
 
 
 def purge_muted(sessions: sessionmaker[Session], settings: TelegramSettings, now: datetime) -> int:
@@ -174,11 +178,22 @@ def poll_commands(
             wait(delay)
 
 
-def _send_reply(telegram: TelegramClient, chat_id: int, screen: Screen) -> None:
+def forget_blocked_chat(sessions: sessionmaker[Session], chat_id: int) -> None:
+    """403（使用者封鎖 bot，7.21）：刪掉該 chat 的訂閱、設定與不再通知。"""
+    log.warning("chat %s blocked the bot, removing its subscriptions", chat_id)
+    with sessions() as session:
+        PreferenceRepository(session).forget(chat_id)
+
+
+def _send_reply(
+    telegram: TelegramClient, chat_id: int, screen: Screen, sessions: sessionmaker[Session]
+) -> None:
     try:
         telegram.send_message(chat_id, screen.text, screen.keyboard)
     except TelegramBadRequestError as e:
         log.warning("reply to chat %s rejected: %s", chat_id, e)
+    except TelegramForbiddenError:
+        forget_blocked_chat(sessions, chat_id)
 
 
 class _CommandThread(threading.Thread):
