@@ -19,12 +19,6 @@
 - 建議：B 為長期解，修好前先用 A
 - 提出：manager（spec-release-order）
 
-### D-009 `.env.example` 把選填設定當成必填，`task.py new` 拒絕開單
-- 背景：`check_env` 把 `.env.example` 每個沒註解的 `KEY=` 都當必填，空值就擋。`OPENROUTER_API_KEY`（只有選 openrouter 當標註者才用）、`API_CORS_ORIGINS`（留空＝不開放跨網域，是正確的預設）在程式裡都是選填，卻擋住開單。改 `.env.example` 要走派工單，但開不了單，形成死結
-- 選項：A. 甲方直接改 `.env.example`，把這兩行改成註解（`# OPENROUTER_API_KEY=`、`# API_CORS_ORIGINS=`，說明保留），自己 commit、push 到 develop（一次性的開機例外）／B. 甲方在 `.env` 填值：OpenRouter 填真的 key；CORS 沒有「不開放」的值可填，只能填一個來源（例 `http://localhost:3000`），等於放寬跨網域，不建議
-- 建議：A；程式行為不變，之後新增選填設定一律寫成註解
-- 提出：manager（spec-release-order）
-
 ### D-010 bot 允許清單沒設時要不要改成拒絕（fail closed）
 - 背景：資安 M-1。`TELEGRAM_ALLOWED_CHAT_IDS` 留空＝任何人都能用 bot（訂閱、收警示、觸發 ClickHouse 查詢），與設計文件 9.2「只回應允許清單內的 chat」不一致。看不到別人的資料，但可被濫用與觸發 H-1。你的 `.env` 已填，現況不受影響
 - 選項：A. 沒設就啟動失敗；要開放所有人必須明確設 `TELEGRAM_ALLOW_ALL=true`／B. 維持留空不限制，只在文件寫清楚（README 已補）
@@ -75,4 +69,8 @@
 
 ### D-007 覆蓋率關卡需要的相依
 - 決定：`pytest-cov` 加進 dev 群組（不進 production image）；`diff-cover` 只在 CI 裡 pip 安裝
+- 日期：2026-10-20
+
+### D-009 `.env.example` 把選填設定當成必填，`task.py new` 拒絕開單
+- 決定：A. 選填設定在 `.env.example` 寫成註解（`GEMINI_API_KEY`、`OPENROUTER_API_KEY`、`API_CORS_ORIGINS`），甲方直接 commit 到 develop（eb6f81a，一次性例外）；之後新增選填設定一律寫成註解
 - 日期：2026-10-20

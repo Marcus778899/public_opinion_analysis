@@ -12,6 +12,7 @@
 | 日期 | 編號 | 決策 |
 |---|---|---|
 | 2026-10-20 | D-003 | semver；階段 1～6 以 v0.6.0 合進 main，不等階段 3、5 驗收；stage-3～6 tag 不補打 |
+| 2026-10-20 | D-009 | .env.example 的選填設定寫成註解，check_env 不再當必填 |
 
 ## 任務狀態
 
@@ -25,7 +26,6 @@
 ## 卡住／待甲方決定
 
 - D-008：task.py new 在 sandbox 讀不到 .env 而當掉，所有派工單（spec-release-order、階段 7）卡住
-- D-009：.env.example 的 OPENROUTER_API_KEY、API_CORS_ORIGINS 是選填卻被當必填，task.py new 拒絕開單
 - v0.6.0 資安 FAIL（H-1）：修正單 bot-forbidden-crash 待開（同樣卡在 D-008、D-009）
 
 ## 注意事項（踩過的坑）
