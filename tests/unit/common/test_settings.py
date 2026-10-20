@@ -230,11 +230,25 @@ def test_telegram_settings_allowed_chat_ids_split_by_comma(monkeypatch):
     assert TelegramSettings().allowed_chat_ids == [123, -100456]
 
 
-def test_telegram_settings_allowed_chat_ids_empty_means_unrestricted(monkeypatch):
+def test_telegram_settings_allowed_chat_ids_empty_parses_to_empty_list(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
     monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", "")
 
     assert TelegramSettings().allowed_chat_ids == []
+
+
+def test_telegram_settings_allow_all_defaults_to_false(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.delenv("TELEGRAM_ALLOW_ALL", raising=False)
+
+    assert TelegramSettings().allow_all is False
+
+
+def test_telegram_settings_allow_all_true_parsed(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_ALLOW_ALL", "true")
+
+    assert TelegramSettings().allow_all is True
 
 
 def test_telegram_settings_missing_token_raises(monkeypatch):
