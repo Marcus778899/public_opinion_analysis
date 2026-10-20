@@ -18,7 +18,7 @@
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
 | v060-security | security | todo | 0 |  |
-| v060-uat | uat | todo | 0 |  |
+| v060-uat | uat | review | 0 | docs/uat/v0.6.0.md：blocker 0、major 0、minor 4（F-1、F-2 README 已補；#65～#67 backlog）；甲方驗收清單 24 項待勾 |
 | spec-release-order | architect | blocked | 0 |  |
 
 ## 卡住／待甲方決定

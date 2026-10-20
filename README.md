@@ -4,7 +4,7 @@
 
 ## 快速開始
 
-1. 設定：`python3 scripts/check_env.py`，依提示在 `.env` 填入缺少的值（Telegram 需要 `TELEGRAM_BOT_TOKEN`；情緒推論需要 `INFERENCE_MODEL_VERSION` 與 `models/` 下的模型）
+1. 設定：`python3 scripts/check_env.py`，依提示在 `.env` 填入缺少的值（Telegram 需要 `TELEGRAM_BOT_TOKEN`，並在 `TELEGRAM_ALLOWED_CHAT_IDS` 填自己的 chat id——留空代表任何找到這個 bot 的人都能訂閱、看警示；情緒推論需要 `INFERENCE_MODEL_VERSION` 與 `models/` 下的模型）
 2. 安裝：`make setup`（Python 3.12、[uv](https://docs.astral.sh/uv/)、Docker；`pre-commit install` 啟用 commit 前檢查）
 3. 啟動整套服務（會對真實 PTT 發請求；自動建表、topic 與 CDC connector）：
 
@@ -18,7 +18,7 @@
    docker compose -f infra/docker-compose.yaml --env-file .env --profile app --profile inference up -d --wait inference
    ```
 
-4. 建立看板：`make seed`（Gossiping、Stock、Tech_Job，Scheduler 30 秒內開始爬取）；狀態：`curl localhost:8000/status`
+4. 建立看板：`make seed`（api 已在上一步的容器裡，不需要另外 `make api`；Gossiping、Stock、Tech_Job，Scheduler 30 秒內開始爬取）；狀態：`curl localhost:8000/status`
 5. 在 Telegram 對 bot 傳 `/start`，用主選單按鈕訂閱看板、看現在熱門與看板概況
 6. 停止（資料保留在 volume）：
 
