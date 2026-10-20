@@ -1148,7 +1148,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | 5 | 三個服務單節點、資料放 tmpfs；版本用 `.env` 的 `KAFKA_VERSION`、`POSTGRES_VERSION`、`CLICKHOUSE_VERSION`（`${KEY:?}`） | 與正式環境同版（testcontainers 現用自己的預設 Kafka 映像）；`down` 即清空 |
 | 6 | Kafka：KRaft；network alias `kafka_1`～`kafka_3`，容器內 listener `:29092` 廣播 `kafka_1:29092`；transaction log 副本 1、`group.initial.rebalance.delay.ms=0`、heap 上限 512 MB；另一個 listener 給 CI 主機（做法 10） | `infra/clickhouse/config.d/named_collections.xml` 的 broker 清單不用改就連得到；heat 的 exactly-once 與其他測試共用一個 Kafka；每次加入 group 省 3 秒 |
 | 7 | PG：`wal_level=logical`、`POSTGRES_HOST_AUTH_METHOD=trust`、DB 名稱 `radar_it`；ClickHouse 唯讀掛 `infra/clickhouse` 的 `named_collections.xml`、`radar.xml` 兩個檔（實作：不掛整個目錄，會蓋掉 image 的 listen 設定與 entrypoint 要寫入的使用者檔；`users.d/grafana.xml` 的 `from_env` 因此不會被載入） | `cdc/test_slot.py` 與其他 PG 測試共用一個容器；DB 名稱是重置前的防呆依據（威脅表） |
-| 8 | session 開始時重置：PG 確認 DB 名稱是 `radar_it` 後 `DROP SCHEMA public CASCADE`、刪 publication 與未使用的 replication slot；ClickHouse 重建 `radar` DB 並套 migration；Kafka 刪除非內部 topic。各模組共用這組服務，模組開始時清自己用的表；平行執行時的分工見做法 15 | `run --rm test` 結束後依賴服務仍在（下次省啟動時間），靠重置避免上次的資料影響計數；容器 9 個降為 3 個 |
+| 8 | session 開始時重置：PG 確認 DB 名稱是 `radar_it` 後（Kafka 與 ClickHouse 重置前也確認目標主機在允許清單：`kafka`、`kafka_1`～`kafka_3`、`postgres`、`clickhouse`、`localhost`、`127.0.0.1`，ClickHouse 另限 database 為 `radar`，不符就 `pytest.exit`／拒絕、不刪任何東西） `DROP SCHEMA public CASCADE`、刪 publication 與未使用的 replication slot；ClickHouse 重建 `radar` DB 並套 migration；Kafka 刪除非內部 topic。各模組共用這組服務，模組開始時清自己用的表；平行執行時的分工見做法 15 | `run --rm test` 結束後依賴服務仍在（下次省啟動時間），靠重置避免上次的資料影響計數；容器 9 個降為 3 個 |
 | 9 | ClickHouse 同一個 consumer group 的 Kafka engine 表只能有一組（只在 `radar` DB）；需要「從空 DB 套 migration」的測試另建 DB 時，套完要刪掉其 `*_queue` 表 | 同 group 的兩組表會分走 partition，`test_clickhouse_migrations` 等不到資料 |
 | 10 | CI：`compose.ci.yaml` 覆寫檔把三個服務的 port 綁在 `127.0.0.1:${IT_*_HOST_PORT}`；Integration Test job 依序 `docker compose … pull`、`up -d --wait kafka postgres clickhouse`，再在 runner 上 `make coverage`（`IT_*` 指向 localhost）；runner 的 docker daemon 設 `registry-mirrors` 為 `mirror.gcr.io` | 依 backend-standards 第 6 節，CI 在 runner 跑測試，報告路徑才對得回 repo；拉映像獨立成一步，耗時看得到；取代 `TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX` 與關閉 Ryuk |
 | 11 | 每次事件只跑一次整合測試：`make coverage` 與覆蓋率閘門搬進 Integration Test job（閘門仍只在 PR→develop），Check job 只剩 `make check`；job 名稱不變 | 現在 PR 跑兩次（量測） |
@@ -1179,7 +1179,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 
 - 與開發／e2e 環境（#41）：不同 compose 專案、網路與 volume，沒有對外 port，不需要也不會觸發 `stop-e2e`／`stop-dev`；三者可同時運作，限制只有記憶體（每套估 1.5～2 GB，`test-infra-compose` 實測後回寫）
 - `make check` 不變（不需容器）；`make coverage` 只在 CI 用，需要的服務由 CI 先開好
-- 實作補充（順序 1）：session 重置的順序是 PG → 刪 ClickHouse 所有 database（停掉 Kafka consumer）→ 刪 Kafka topic 並建 `labels`、`predictions`、`alerts`（Kafka engine 表要先有 topic）→ ClickHouse 重建 `radar` 並套 migration；各模組的 `clickhouse` fixture 開始時清空資料表。`test_clickhouse_migrations` 另建 database 時，套完 migration 立刻刪 Kafka engine 表（做法 9）。`test` 服務的 `uv sync` 與 Python 套件第一次約 1 分鐘，之後走 named volume 快取。實測：本機（macOS Docker Desktop）135 個測試約 375 秒，連跑兩次都全過；記憶體每套用量未量。
+- 實作補充（順序 1）：session 重置的順序是 PG → 刪 ClickHouse 所有 database（停掉 Kafka consumer）→ 刪 Kafka topic 並建 `labels`、`predictions`、`alerts`（Kafka engine 表要先有 topic）→ ClickHouse 重建 `radar` 並套 migration；各模組的 `clickhouse` fixture 開始時清空資料表。`test_clickhouse_migrations` 另建 database 時，套完 migration 立刻刪 Kafka engine 表（做法 9）。`test` 服務的 `uv sync` 與 Python 套件第一次約 1 分鐘，之後走 named volume 快取。實測：本機（macOS Docker Desktop）135 個測試約 375 秒，連跑兩次都全過。記憶體實測（`docker compose … stats --no-stream`，測試進行中，macOS Docker Desktop，上限 7.65 GiB）：kafka 約 390～470 MiB、clickhouse 約 210～365 MiB、postgres 約 80～90 MiB、test 約 80～450 MiB（`uv sync` 時較低，跑測試時約 330～450），合計尖峰約 1.4 GiB；原估 1.5～2 GB 偏高，以 1.5 GB 計。
 
 **設定**（寫進 `.env.example`，非機密）：`IT_KAFKA_HOST_PORT`、`IT_POSTGRES_HOST_PORT`、`IT_CLICKHOUSE_HOST_PORT`（只有 `compose.ci.yaml` 用）。`IT_KAFKA_BOOTSTRAP` 等連線變數由 compose 的 `test` 服務或 CI 步驟設定，不進 `.env`。
 
@@ -1188,7 +1188,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | 資產 | 威脅 | 對策 |
 |---|---|---|
 | 主機（compose 在 sandbox 外執行） | agent 寫的測試程式在容器裡改主機檔案或控制 docker | 只唯讀掛 worktree；不掛 docker socket、不 privileged、不用 host network；venv 與快取用 named volume |
-| 開發環境的資料（專案 `radar` 的 PG、Kafka、ClickHouse） | 測試連到開發 DB，session 重置把資料刪掉 | 測試只讀 `IT_*`，不讀 `POSTGRES_*`；重置前確認 DB 名稱為 `radar_it`，不是就 `pytest.exit`；compose 不引用 `infra/` 的 volume |
+| 開發環境的資料（專案 `radar` 的 PG、Kafka、ClickHouse） | 測試連到開發 DB，session 重置把資料刪掉 | 測試只讀 `IT_*`，不讀 `POSTGRES_*`；重置前確認 DB 名稱為 `radar_it`，不是就 `pytest.exit`；Kafka、ClickHouse 重置前確認主機在允許清單（做法 8）；compose 不引用 `infra/` 的 volume |
 | `.env` 內的 token | 容器讀到機密 | `--env-file` 只用來代換版本變數，容器只拿到 compose 明寫的環境變數；worktree 裡沒有 `.env` |
 | CI 的測試服務 | runner 上其他程序連線 | port 只綁 `127.0.0.1`；runner 用完即丟 |
 

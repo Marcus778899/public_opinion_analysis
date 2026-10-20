@@ -23,6 +23,7 @@ from radar.common.settings import (
 from tests.helpers.clickhouse import (
     apply_migrations,
     drop_databases,
+    is_test_host,
     it_clickhouse_settings,
     truncate_data_tables,
 )
@@ -55,6 +56,10 @@ def _user_topics(admin: AdminClient) -> list[str]:
 
 
 def reset_kafka(settings: KafkaSettings) -> None:
+    for server in settings.bootstrap_servers.split(","):
+        host = server.strip().rsplit(":", 1)[0]
+        if not is_test_host(host):
+            pytest.exit(f"拒絕重置 Kafka {host!r}：只能是測試服務或本機", returncode=2)
     admin = AdminClient(admin_config(settings))
     existing = _user_topics(admin)
     if existing:

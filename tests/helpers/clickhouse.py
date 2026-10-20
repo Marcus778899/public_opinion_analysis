@@ -4,6 +4,7 @@ import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import SecretStr
 
@@ -25,6 +26,23 @@ SYSTEM_DATABASES = ("system", "INFORMATION_SCHEMA", "information_schema", "defau
 NON_DATA_ENGINES = ("Kafka", "MaterializedView", "View")
 
 
+# 重置前的防呆：只允許 compose 的服務別名與本機（CI 的 runner），不是就拒絕
+TEST_HOSTS = frozenset({"kafka", "kafka_1", "kafka_2", "kafka_3", "postgres", "clickhouse"})
+TEST_HOSTS |= {"localhost", "127.0.0.1"}
+
+
+def is_test_host(host: str) -> bool:
+    return host in TEST_HOSTS
+
+
+def assert_test_clickhouse(settings: ClickHouseSettings) -> None:
+    host = urlparse(settings.url).hostname or ""
+    if not is_test_host(host) or settings.db != CH_DB:
+        raise PermissionError(
+            f"拒絕重置 ClickHouse {host!r} database {settings.db!r}：只能是測試服務的 {CH_DB!r}"
+        )
+
+
 def it_clickhouse_settings(url: str | None = None) -> ClickHouseSettings:
     return ClickHouseSettings(
         url=url or os.environ["IT_CLICKHOUSE_URL"],
@@ -36,6 +54,7 @@ def it_clickhouse_settings(url: str | None = None) -> ClickHouseSettings:
 
 def drop_databases(settings: ClickHouseSettings) -> None:
     """刪掉所有非系統 database（連同 Kafka engine 的 consumer），再建空的設定 database。"""
+    assert_test_clickhouse(settings)
     # NOTE: radar 被刪掉後帶 database=radar 的請求會被拒絕，所以管理操作連 default
     client = ClickHouseClient(settings.model_copy(update={"db": "default"}))
     try:
