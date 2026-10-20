@@ -6,8 +6,8 @@
 
 ## 目標與範圍
 
-- 本輪：（尚未設定）
-- 不做：（尚未設定）
+- 本輪：v0.7.0 階段 7：呈現方式（Grafana 面板，或 Grafana 只做監控＋web 前端，待 architect 評估與甲方決定）、compose test 服務＋CI 加速（#78）、bot 允許清單 fail closed（D-010）
+- 不做：Stock 重新標註、階段 5 的 3 天驗收（第 6 章之後再做）；其餘 backlog（#65～#71、#79～#82）
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
@@ -24,6 +24,7 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
+| dashboard-design | architect | todo | 0 |  |
 
 ## 卡住／待甲方決定
 
