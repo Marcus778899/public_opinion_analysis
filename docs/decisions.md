@@ -5,12 +5,6 @@
 
 ## 待決定
 
-### D-013 `task.py new` 建 worktree 時寫不進 `.claude/agents/`、`.mcp.json`、`.vscode/`，開單失敗
-- 背景：2026-10-20 開 test-infra-design，`git worktree add` 在 sandbox 內被禁止寫入這些受保護路徑，checkout 中斷；已留下 `tasks/test-infra-design.md` 與分支 `docs/test-infra-design`（沒開 issue）
-- 選項：A. 修上游範本：worktree 用 sparse-checkout 排除 `.claude/`、`.mcp.json`、`.vscode/`（agent 本來就不改這些，流程檔檢查在主目錄做）／B. 甲方調 sandbox 設定，放行 `.worktrees/` 底下這些路徑的寫入／C. 修好前甲方在 sandbox 外代跑 `task.py new`
-- 建議：A（修好前用 C）；B 等於讓 agent 能改 worktree 裡的 agent 設定，削弱保護
-- 提出：manager（test-infra-design）
-
 <!-- 範本：
 ### D-001 一句話問題
 - 背景：為什麼要決定（1–2 行）
@@ -80,4 +74,9 @@
 
 ### D-012 worktree 的 `.venv` 連結被當成未提交修改，`pr.py open` 拒絕
 - 決定：A. 甲方在本機 `.git/info/exclude` 加 `.venv`（已執行）；上游範本 GITIGNORE 改成不加斜線，併入 D-008 的範本修正
+- 日期：2026-10-20
+
+### D-013 `task.py new` 建 worktree 時寫不進 `.claude/agents/`、`.mcp.json`、`.vscode/`，開單失敗
+- 決定：A. 修上游範本：worktree 用 sparse-checkout 排除 `.claude/`、`.mcp.json`、`.vscode/`（甲方已更新範本）
+- 理由：B 會讓 agent 能改 worktree 裡的 agent 設定，削弱保護
 - 日期：2026-10-20

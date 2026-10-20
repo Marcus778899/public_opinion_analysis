@@ -19,6 +19,7 @@
 | 2026-10-20 | D-008 | 修上游範本：check_env 戳記取代讀 .env；修好前甲方代開單 |
 | 2026-10-20 | D-010 | bot 允許清單沒設就啟動失敗，開放所有人須 TELEGRAM_ALLOW_ALL=true（v0.7.0） |
 | 2026-10-20 | D-012 | 本機 .git/info/exclude 加 .venv；上游範本 .gitignore 不加斜線 |
+| 2026-10-20 | D-013 | worktree 用 sparse-checkout 排除 .claude/、.mcp.json、.vscode/（上游範本已修） |
 
 ## 任務狀態
 
@@ -29,7 +30,7 @@
 
 ## 卡住／待甲方決定
 
-- D-013：task.py new 建 worktree 被 sandbox 擋（受保護路徑），test-infra-design、dashboard-design 開不了單
+- （無）
 
 ## 注意事項（踩過的坑）
 
