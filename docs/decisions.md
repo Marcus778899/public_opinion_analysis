@@ -31,6 +31,12 @@
 - 建議：A；同時可順手處理 L-3（`http.server` 免詢問，#71）
 - 提出：security（v0.6.0 審查 M-3）
 
+### D-012 worktree 的 `.venv` 連結被當成未提交修改，`pr.py open` 拒絕
+- 背景：`task.py new` 會在 worktree 建 `.venv` 符號連結（共用主目錄環境），但 `.gitignore` 寫的是 `.venv/`（只比對目錄），符號連結不會被忽略 → `git status` 出現 `?? .venv` → 每張單的 `pr.py open` 都會拒絕。範本 `init_project.py` 的 GITIGNORE 也是 `.venv/`，是上游問題
+- 選項：A. 甲方在主目錄執行 `echo .venv >> .git/info/exclude`（只影響本機、所有 worktree 立即生效，不必 sync）／B. 甲方把 `.gitignore` 的 `.venv/` 改成 `.venv` 直接 commit 到 develop（既有兩張單要 sync 才拿得到）
+- 建議：A 立即解卡，另外在上游範本把 GITIGNORE 改成 `.venv`、`node_modules`（不加斜線），之後 update.sh 同步
+- 提出：manager（spec-release-order）
+
 ## 已決定
 
 <!-- 範本：
