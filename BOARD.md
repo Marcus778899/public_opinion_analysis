@@ -34,10 +34,11 @@
 | test-infra-compose | backend | done | 1 | PR #95 |
 | bot-allowlist-required | backend | done | 0 | PR #93 |
 | dashboard-test-align | architect | done | 0 | PR #94 |
+| test-infra-fast-waits | backend | todo | 0 |  |
 
 ## 卡住／待甲方決定
 
-- 待甲方：手動刪除 .worktrees/test-infra-compose 與分支 chore/test-infra-compose（sandbox 刪不掉）；改 CLAUDE.md 後再開 test-infra-fast-waits（含 cluster_id 防呆建議）
+- （無）
 
 ## 注意事項（踩過的坑）
 
