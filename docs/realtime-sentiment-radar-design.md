@@ -598,7 +598,7 @@ Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、�
   - 📈 看板概況：選看板後顯示近 24 小時的文章數、推文量、情緒比例（負面／中立／正面）、爭議度最高的文章、今天的警示數
   - ⚙️ 通知設定：文章警示、看板警示分別開關；「不再通知」的文章清單（可恢復）
 - 使用 long polling，不需要對外開放 HTTP；以 `httpx2` 直接呼叫 Bot API（含 inline keyboard、callback query），不加 SDK
-- 只回應允許清單內的 chat（`TELEGRAM_ALLOWED_CHAT_IDS`），按鈕回呼同樣檢查
+- 只回應允許清單內的 chat（`TELEGRAM_ALLOWED_CHAT_IDS`），按鈕回呼同樣檢查；清單沒設就啟動失敗，要開放所有人須明確設 `TELEGRAM_ALLOW_ALL=true`（D-010，細節見開發規格 7.21）
 - 之後：`/subscribe 台積電`（實體，15.2 進階 1）；Mini App（14.3，上雲、有 HTTPS 之後）
 - 細節見開發規格 7.21（MVP 文字指令）、7.23（按鈕選單與情緒呈現）
 - 每日摘要：APScheduler cron trigger，每天 08:00 用 LLM 摘要前一天的熱門話題（S5-08，非 MVP）

@@ -144,8 +144,9 @@ class TelegramSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="TELEGRAM_")
 
     bot_token: SecretStr
-    # 允許的 chat_id，逗號分隔；空白代表不限制
+    # 允許的 chat_id，逗號分隔；空白時 bot 啟動檢查要求 allow_all=true（D-010）
     allowed_chat_ids: Annotated[list[int], NoDecode] = []
+    allow_all: bool = False
     api_base_url: str = "https://api.telegram.org"
     poll_timeout_s: int = 30
     hot_window_min: int = 60

@@ -7,6 +7,7 @@ from radar.bot import main as bot_main
 from radar.bot.commands import COMMANDS
 from radar.bot.main import (
     PURGE_INTERVAL,
+    check_allowlist,
     forget_blocked_chat,
     handle_update,
     is_allowed,
@@ -144,6 +145,48 @@ def test_is_allowed_rejects_unlisted_chat():
 
 def test_is_allowed_none_chat_rejected():
     assert is_allowed(None, []) is False
+
+
+# --- check_allowlist ---
+
+
+def _allowlist_settings(allowed=(), allow_all=False) -> TelegramSettings:
+    return TelegramSettings(bot_token="t", allowed_chat_ids=list(allowed), allow_all=allow_all)
+
+
+def test_check_allowlist_empty_and_not_allow_all_exits_naming_variables():
+    with pytest.raises(SystemExit) as exc:
+        check_allowlist(_allowlist_settings())
+
+    assert "TELEGRAM_ALLOWED_CHAT_IDS" in str(exc.value)
+    assert "TELEGRAM_ALLOW_ALL" in str(exc.value)
+
+
+def test_check_allowlist_list_only_passes_silently(monkeypatch):
+    warnings: list[str] = []
+    monkeypatch.setattr(bot_main.log, "warning", lambda *a, **k: warnings.append(str(a)))
+
+    check_allowlist(_allowlist_settings(allowed=[1]))
+
+    assert warnings == []
+
+
+def test_check_allowlist_allow_all_only_warns(monkeypatch):
+    warnings: list[str] = []
+    monkeypatch.setattr(bot_main.log, "warning", lambda *a, **k: warnings.append(str(a)))
+
+    check_allowlist(_allowlist_settings(allow_all=True))
+
+    assert len(warnings) == 1 and "TELEGRAM_ALLOW_ALL" in warnings[0]
+
+
+def test_check_allowlist_list_and_allow_all_warns_ignored(monkeypatch):
+    warnings: list[str] = []
+    monkeypatch.setattr(bot_main.log, "warning", lambda *a, **k: warnings.append(str(a)))
+
+    check_allowlist(_allowlist_settings(allowed=[1], allow_all=True))
+
+    assert len(warnings) == 1 and "ignored" in warnings[0]
 
 
 # --- reply_to ---
