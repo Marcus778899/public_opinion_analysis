@@ -22,16 +22,15 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
-| v060-security | security | blocked | 0 | docs/security/v0.6.0.md FAIL fac0421：high 1（H-1 → bot-forbidden-crash）、medium 3（M-1 D-010、M-2 #68、M-3 D-011）、low 3（#69～#71） |
-| v060-uat | uat | review | 0 | docs/uat/v0.6.0.md：blocker 0、major 0、minor 4（F-1、F-2 README 已補；#65～#67 backlog）；甲方驗收清單 24 項待勾 |
-| spec-release-order | architect | qa | 0 | PR #74 |
-| bot-forbidden-crash | backend | review | 0 | PR #75 qa PASS 9af39cb |
-| ci-gitleaks-ignore | backend | todo | 0 |  |
+| v060-security | security | done | 0 | docs/security/v0.6.0.md PASS bd11330（H-1 已修；M ×3、L ×4 皆已處置：D-010、D-011、#68～#71、#79） |
+| v060-uat | uat | review | 0 | docs/uat/v0.6.0.md：blocker 0、major 0、minor 4（#65～#67）；甲方驗收清單 24 項待勾 |
+| spec-release-order | architect | done | 0 | PR #74 |
+| bot-forbidden-crash | backend | done | 0 | PR #75 |
+| ci-gitleaks-ignore | backend | done | 0 | PR #77 |
 
 ## 卡住／待甲方決定
 
-- v0.6.0 資安 FAIL（H-1）：修正中（bot-forbidden-crash #73），合併後重審
-- CI Security 紅燈（gitleaks 誤判 docs/security/v0.6.0.md:158 的 PTT 文章 ID）：#74、#75 無法合併，待 ci-gitleaks-ignore
+- （無）
 
 ## 注意事項（踩過的坑）
 

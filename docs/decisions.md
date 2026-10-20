@@ -63,7 +63,7 @@
 - 日期：2026-10-20
 
 ### D-008 `task.py new` 在 sandbox 裡無法開單
-- 決定：B. 修上游範本：甲方在 sandbox 外跑 `check_env.py` 時寫「設定齊全」戳記（`.env.example` 雜湊，不含值），`task.py` 讀不到 `.env` 時改查戳記；修好前用 A（甲方以 `!` 代開單）。同一次範本修正一併處理 D-012 與 worktree 內 pytest 碰 `.env` 失敗
+- 決定：B. 修上游範本：甲方在 sandbox 外跑 `check_env.py` 時寫「設定齊全」戳記（`.env.example` 雜湊，不含值），`task.py` 讀不到 `.env` 時改查戳記；修好前用 A（甲方以 `!` 代開單）。同一次範本修正一併處理 D-012 與 worktree 內 pytest 碰 `.env` 失敗、`pr.py merge` 在 sandbox 刪不掉 worktree 的 `.env` 連結而留下資料夾（甲方手動 `rm -rf .worktrees/<id>`）
 - 日期：2026-10-20
 
 ### D-010 bot 允許清單沒設時要不要改成拒絕（fail closed）
