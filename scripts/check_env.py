@@ -16,7 +16,6 @@ exit code：0 全部填好／安裝成功；1 還有沒填的（manager 要停�
 import argparse
 import hashlib
 import re
-import shutil
 import subprocess
 import sys
 
@@ -55,13 +54,23 @@ def example_hash() -> str:
     return hashlib.sha256(EXAMPLE.read_bytes()).hexdigest()
 
 
+def read_env() -> dict[str, tuple[str, str]] | None:
+    """讀 .env：不存在回傳 {}，sandbox 擋住讀取回傳 None。
+    不可用 Path.exists() 判斷：3.14 起碰到沒權限的檔案會回傳 False 而不是報錯，sandbox 內會被當成沒有 .env。"""
+    try:
+        return parse(ENV)
+    except FileNotFoundError:
+        return {}
+    except PermissionError:
+        return None
+
+
 def missing_settings() -> list[str]:
     """回傳還沒填的變數（含說明），不會建立或修改任何檔案。"""
     if not EXAMPLE.exists():
         return []
-    try:
-        actual = parse(ENV) if ENV.exists() else {}
-    except PermissionError:
+    actual = read_env()
+    if actual is None:
         # sandbox 內：只能看甲方上次確認時的 .env.example 有沒有變
         stamp = ENV_STAMP.read_text(encoding="utf-8").strip() if ENV_STAMP.exists() else ""
         if stamp == example_hash():
@@ -106,9 +115,10 @@ def main() -> None:
         print("沒有 .env.example，這個專案不需要設定")
         return
     try:
-        env_exists = ENV.exists()
-        if env_exists:
-            ENV.read_bytes()  # 有的 sandbox 查得到存在、讀不到內容
+        ENV.read_bytes()
+        env_exists = True
+    except FileNotFoundError:
+        env_exists = False
     except PermissionError:
         missing = missing_settings()
         if missing:
@@ -117,7 +127,9 @@ def main() -> None:
         print("sandbox 內讀不到 .env；甲方已確認過目前的 .env.example，設定齊全")
         return
     if not env_exists:
-        shutil.copy(EXAMPLE, ENV)
+        # "x"：已經有 .env 就失敗，絕不覆蓋甲方填好的值
+        with ENV.open("x", encoding="utf-8") as f:
+            f.write(EXAMPLE.read_text(encoding="utf-8"))
         print("已從 .env.example 建立 .env")
     example = parse(EXAMPLE)
     missing = missing_settings()
