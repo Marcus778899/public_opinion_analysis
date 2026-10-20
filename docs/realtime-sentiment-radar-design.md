@@ -579,6 +579,9 @@ Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED
 
 Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、情緒分布與趨勢、爭議度、近 24 小時警示、熱門文章排行。長時間的趨勢看 Dashboard；即時通知與快速查詢在 Telegram。
 
+- 呈現方式待甲方決定：全用 Grafana 面板（建議），或 Grafana 只做監控＋自建 web 前端；比較與設計見開發規格 7.25
+- 唯讀：Grafana 以專用的 ClickHouse 唯讀帳號查詢，只綁本機並需登入
+
 ### 9.2 Telegram bot
 
 主要介面。MVP（階段 5）只有文字指令；階段 6 改成按鈕選單（15.7），文字指令保留。

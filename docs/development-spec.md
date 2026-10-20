@@ -361,8 +361,9 @@
 | 推論快取重啟後從 ClickHouse 載入（7.19） | ✅ 完成；單元測試重現「重啟後快取空、既有文章被編輯不推論」；整合測試（真的 ClickHouse、PG）驗證 migration 0004、載入與補舊 hash。2026-10-16 部署：補 5,509 篇，重啟後 4 分鐘內 3 篇既有文章被編輯，都重新推論 | #37 |
 | S5-01～S5-05 熱度偵測、錄製回放（7.20） | ✅ 程式完成；加入 `quixstreams`，`confluent-kafka` 降到 2.12.x。整合測試（真實 Kafka、exactly-once）：暴增各單位只發一則、改寫不算新增、只靠 changelog 恢復後不重發、壞訊息進 DLQ。2026-10-17 實測推文進 PG 晚約 8 分鐘，時間基準由 `commented_at` 改成觀測時間（S5-02）。開發環境已部署 heat，待第 5 階段驗收 | — |
 | 文章基準每分鐘更新一次、分鐘結算才發警示（7.20，#49、#50） | ✅ 完成；單元測試重現兩個問題（40 篇活躍文章時文章基準 1 分鐘就洗掉舊值、一分鐘湧入 200 則警示只寫 30），修正後通過；整合測試（真實 Kafka）暴增 40 則的警示 `value` 為 40、重啟後不重發。待部署（重置 heat）後重跑階段 5 的 3 天驗收 | — |
-| S5-06～S5-07 Telegram bot（7.21） | ✅ 完成；2026-10-16 在開發環境以真的 Telegram 實測指令與推送，修正 compose 漏掉 `app-env`。階段 5 驗收第 1 項（人工暴增約 10 秒收到通知）通過 | — |
+| 階段 7 規劃：Dashboard 呈現方式（7.25） | ⬜ 文件完成（2026-10-20），待甲方選案 | — |
 | 整合測試改用 compose `test` 服務、CI 加速（7.26，#78） | ⬜ 設計完成（2026-10-20），待 `test-infra-compose`、`test-infra-fast-waits` | — |
+| S5-06～S5-07 Telegram bot（7.21） | ✅ 完成；2026-10-16 在開發環境以真的 Telegram 實測指令與推送，修正 compose 漏掉 `app-env`。階段 5 驗收第 1 項（人工暴增約 10 秒收到通知）通過 | — |
 
 階段 1 拆成 5 個 PR；全部完成後依下方「驗收」逐項驗證，通過才把 `develop` 合進 `main` 並打 `stage-1` tag；階段 2 相同。階段 3 起的發版方式見 D-003。
 
@@ -601,6 +602,8 @@
 
 **驗收**：`make up` 後打開 Grafana 不需手動設定即可看到所有面板。
 
+呈現方式（全用 Grafana 面板，或 Grafana 只做監控＋自建 web 前端）待甲方決定；兩案比較、建議案的查詢來源、面板與派工順序見 7.25。
+
 ### 階段 8：BERT 與 shadow 比較（M）
 
 | ID | 任務 |
@@ -615,7 +618,7 @@
 
 | ID | 任務 |
 |---|---|
-| S9-01 | 確認所有 image 有 arm64 版本（Oracle 免費 ARM） |
+| S9-01 | 確認所有 image 有 arm64 版本（Oracle 免費 ARM）；Grafana 的 ClickHouse plugin 沒有官方平台清單，以 arm64 建置 `infra/grafana/Dockerfile` 並跑 7.25 的測試 |
 | S9-02 | Terraform：VM、網路、磁碟；VM 上跑 docker-compose |
 | S9-03 | Secrets 不進 repo（`.env` 由部署流程注入） |
 | S9-04 | PG 每日備份到另一個磁碟或物件儲存 |
@@ -1003,6 +1006,98 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - **舊資料補值**：migration 依 `comments` 筆數補值，只更新筆數 > 0 的文章；每列產生一筆 CDC 事件（數千筆），`posts_history` 會多出一批推噓數沒變的列。不補值的話，舊文章要等下一次重爬才會更新，這段期間仍有誤刪的風險
 - **重爬門檻改讀 `comment_count`**：原本的 `comments` 子查詢（7.2，#51）是為了不在 `posts` 加欄位；欄位既然加了，Scheduler 直接讀它，省掉每次查詢的子查詢。補值後兩者相同
 
+### 7.25 Dashboard 的呈現方式（S7-01、S7-02，規劃，2026-10-20）
+
+**兩案比較**（選案待甲方決定；新增 Grafana 或前端技術棧都屬決策②）
+
+| 項目 | A：全用 Grafana 面板 | B：Grafana 只做監控＋自建 web 前端 |
+|---|---|---|
+| 工作量 | S（約 2～3 天）：compose 加一個服務、provisioning、1 個 ClickHouse migration（view）、1 份 dashboard JSON；不寫 Python | M～L（約 1～2 週）：API 契約、6 個唯讀端點（`api/routes/` 新增）、新前端專案（畫面、圖表、建置）、designer 畫面規格、前後端驗收測試與整合單；Grafana 監控另需決定監控什麼（目前沒有 metrics exporter，要嘛只查 ClickHouse，要嘛再引入 Prometheus） |
+| 新相依 | `grafana/grafana-oss` image、`grafana-clickhouse-datasource` plugin（都是設定，不進 `pyproject.toml`） | A 的全部（監控用）＋前端框架與圖表套件、node 建置工具鏈（CI 多一個語言）＋B 的 API 讀 ClickHouse 的程式 |
+| 維運 | 多一個容器（約 0.1～0.2 GB）；升級只換 image 與 plugin 版本；登入、權限、時間範圍、自動更新都是內建 | 多 1～2 個容器；前端相依要定期升級與稽核（osv-scanner 多一種 lockfile）；登入要自己做（API 目前沒有認證，只綁本機，設計文件 4.3） |
+| `make up` 免手動設定 | 可達：datasource、dashboard 以 provisioning 檔載入，plugin 在建置 image 時裝好 | 可達，但前端要先建置成 image；Grafana 監控面板同樣用 provisioning |
+| S7-02 面板 | 6 種都能用內建的 time series、bar、pie、table 表示 | 都能做，畫面可完全自訂 |
+| 之後的延伸 | 給維運與分析看長期趨勢（設計文件 9.1）；手機上的圖表留給 Mini App（「後續階段」15） | 前端可在 Mini App 重用一部分，但 Mini App 要 HTTPS 與 `initData` 驗證（設計文件 14.3），屆時仍要改 |
+
+**建議 A**：階段 7 規模為 S，S7-02 的面板都是唯讀的時間序列與排行，Grafana 內建即可；B 的主要好處（自訂畫面、手機使用）與 Mini App 重疊，等階段 9 有 HTTPS 後再一起做較省。以下為 A 的設計；選 B 時另出設計並派 designer。
+
+**查詢來源**
+
+- 新增 `infra/clickhouse/migrations/0005_dashboard_views.sql`，兩個一般 view（不是 materialized），把 bot 已在用的邏輯（`bot/stats.py` 的 `POST_STATS_QUERY`）收成固定的定義，面板與驗收測試都查它：
+  - `post_votes`：`comments_latest FINAL`、`is_deleted = 0`，每篇的 `post_id`、`board`、`push`、`boo`、`arrow`
+  - `post_sentiment_latest`：`predictions` 每篇最新一筆（`argMax(…, predicted_at)`）的 `post_id`、`model_version`、`polarity`、`score`（三類最高分）
+- 其餘直接查 `posts_latest FINAL`、`comments_latest FINAL`、`alerts`（設計文件 6.3）；資料量小（每天數千篇），先不加預先彙總的 MV，慢了再加
+
+**面板**（dashboard 變數：`board` 多選、來源 `SELECT DISTINCT board FROM posts_latest`；`min_score` 文字框、預設與 `TELEGRAM_SENTIMENT_MIN_SCORE` 的預設相同）
+
+| # | 面板 | 類型 | 來源 | 定義 |
+|---|---|---|---|---|
+| 1 | 各看板推文量 | time series | `comments_latest FINAL` | `is_deleted = 0`、`commented_at` 在時間範圍內，依看板與時間區間計數；用推文時間（看長期趨勢），不是熱度偵測的觀測時間（7.20） |
+| 2 | 情緒分布 | bar | `posts_latest FINAL` ⟕ `post_sentiment_latest` | 時間範圍內發文的文章，依看板分 負面／中立／正面／不確定（`score < min_score`）／尚無（沒有推論）；顯示 n（15.8） |
+| 3 | 情緒趨勢 | time series（百分比堆疊） | 同 2 | 依發文日（台北時間）的各類比例，只算有推論的文章 |
+| 4 | 爭議度最高的文章 | table | `posts_latest FINAL` ⨝ `post_votes` | 時間範圍內發文、推＋噓 ≥ 10，依噓 ÷（推＋噓）排序前 20（同 7.23） |
+| 5 | 近 24 小時警示 | table | `alerts` ⟕ `posts_latest FINAL` | `created_at >= now() - 24 小時`（不跟時間範圍）；時間、看板、單位、標題（文章警示）、推文數、倍數（`value ÷ max(baseline, 1)`）、z-score |
+| 6 | 熱門文章排行 | table | `comments_latest FINAL` ⨝ `posts_latest FINAL` ⟕ `post_votes` ⟕ `post_sentiment_latest` | 時間範圍內新增推文最多的前 20 篇，附推、噓、爭議度、文章情緒 |
+
+- 表格的標題連到原文：只用 `posts_latest.url`，且限 `https://www.ptt.cc/` 開頭（否則留空）
+- 面板 SQL 只用 ClickHouse plugin 的 `$__timeFilter_ms`（欄位都是 DateTime64；秒級的 `$__timeFilter` 展開方式各來源說法不一）、`$__timeInterval` 與上面兩個變數，驗收測試代換後直接在 ClickHouse 執行；plugin 實際展開的結果由 `dashboard-integration` 驗證
+
+**部署與權限**
+
+- compose 服務 `grafana`（預設 profile，`make up` 一併啟動），只綁 `127.0.0.1:${GRAFANA_PORT}`；volume `grafana_data`
+- **版本與 plugin**（調查：`docs/research/dashboard-grafana.md`）：`infra/grafana/Dockerfile` 以 `grafana/grafana-oss:${GRAFANA_VERSION}` 為底，建置時用 `grafana cli` 裝 `grafana-clickhouse-datasource` `${GRAFANA_CLICKHOUSE_PLUGIN_VERSION}`，並關閉啟動時的 plugin 預裝與自動更新。執行時不需要連網、版本不會自己變，「離線重啟會不會重抓」「預載 plugin 會自動更新」兩個查不到的行為因此不必依賴
+  - 釘法：兩個版本都寫完整的 patch 版號（不用 `latest`、`13` 這類浮動 tag）。`GRAFANA_VERSION` 取 Docker Hub 上實際存在的 tag（調查時 GitHub 標 13.2.4、Docker Hub 只列到 13.0.2，以拉得到的為準）；plugin 4.23.0（需 Grafana ≥ 11.6）
+  - 社群回報 Grafana 13.0.0 升級後 ClickHouse datasource 失效：以 `dashboard-grafana-infra` 的相容性測試為準，不過就退到通過的最新版，把選定的版本與理由寫回本節
+  - arm64：Grafana image 有 arm64，plugin 沒有官方平台清單；併入 S9-01，以 arm64 建置這個 image、跑同一組測試
+- 檔案：`infra/grafana/provisioning/datasources/clickhouse.yaml`（固定 uid `radar-clickhouse`）、`infra/grafana/provisioning/dashboards/radar.yaml`、`infra/grafana/dashboards/radar.json`；dashboard 設為 provisioning 管理（UI 改了存不回去，改 JSON 才算數）
+- 登入：`GRAFANA_ADMIN_PASSWORD` 必填（compose 用 `${…:?}`），關閉匿名與註冊；不設預設帳密
+- ClickHouse 專用唯讀帳號 `CLICKHOUSE_GRAFANA_USER`／`CLICKHOUSE_GRAFANA_PASSWORD`（`infra/clickhouse/users.d/grafana.xml`，密碼以 `from_env` 讀，有官方說明）：profile `readonly=1`、`allow_databases` 只有 `${CLICKHOUSE_DB}`、不給 `named_collection_control`（裡面有 Kafka、registry 設定），並設 `max_execution_time`、`max_memory_usage` 上限。不用 XML 的 `<grants>`：26.8 的行為查不到官方說明，`readonly` 與 `allow_databases` 是 XML 使用者一直支援的設定；升級 ClickHouse 時同一組測試要通過（26.9 起 users.xml 留有 `SYSTEM RELOAD MODEL` 會啟動失敗，本檔不用 grants，不受影響）
+- 時區顯示 `Asia/Taipei`，資料仍是 UTC；預設時間範圍近 7 天、每分鐘自動更新
+
+**威脅與對策**
+
+| 資產 | 威脅 | 對策 |
+|---|---|---|
+| Grafana 管理權限 | 預設帳密 admin/admin 被登入、改 datasource | 密碼必填、只綁本機、關閉匿名與註冊；上雲前（階段 9）重新評估對外存取 |
+| ClickHouse 資料與設定 | datasource 帳號能執行任意 SQL（DROP、讀 named collection） | 唯讀帳號、只能 SELECT `radar.*`、無 named collection 權限 |
+| ClickHouse 資源 | 拉長時間範圍讓 `FINAL` 查詢吃滿記憶體 | 唯讀帳號的 profile 設執行時間與記憶體上限 |
+| 看 dashboard 的人 | PTT 標題（外部文字）含 HTML、連結被換成 `javascript:` | 不用會渲染 HTML 的 Text 面板顯示資料；連結限 `https://www.ptt.cc/` 開頭 |
+
+**派工順序**（1、2 可平行；3 依賴 1、2；qa 先寫各單的驗收測試）
+
+| 順序 | task_id | 負責 | 負責檔案 | 驗收測試目錄 |
+|---|---|---|---|---|
+| 1 | `dashboard-grafana-infra` | backend | `infra/docker-compose.yaml`（`grafana` 服務、clickhouse 加唯讀帳號的環境變數）、`infra/grafana/Dockerfile`、`infra/clickhouse/users.d/grafana.xml`、`infra/grafana/provisioning/**`、`.env.example`、本文件 1.3、7.25（回寫選定的版本）與設計文件 10.3、11.1 | `tests/unit/acceptance/dashboard/`（compose、Dockerfile、provisioning 的靜態檢查：版本為完整 patch 號、只綁本機、密碼 `${…:?}`）；`tests/integration/acceptance/dashboard/test_grafana_infra.py`（見下方） |
+| 2 | `dashboard-views` | backend | `infra/clickhouse/migrations/0005_dashboard_views.sql` | `tests/integration/acceptance/dashboard/test_views.py`（ClickHouse `${CLICKHOUSE_VERSION}`；以唯讀帳號查 view，結果符合種子資料：刪除的推文不計、取最新一筆推論、沒有推論的文章不出現） |
+| 3 | `dashboard-panels` | backend | `infra/grafana/dashboards/radar.json` | `tests/integration/acceptance/dashboard/test_panels.py`（每個面板的 SQL 代換後在 ClickHouse 執行、結果符合種子資料） |
+| 4 | `dashboard-integration` | qa | — | `tests/integration/dashboard/`：testcontainers 開 Grafana＋ClickHouse 載入 provisioning，以 Grafana API（`/api/ds/query`）確認 dashboard 存在、每個面板查詢無錯誤；時間範圍邊界內外各 2 秒的種子資料分別被納入、排除（驗 `$__timeFilter_ms` 對 DateTime64(6) 的展開，1 秒以內的誤差可接受）；另以 `make up` 後的截圖當驗收證據 |
+
+`test_grafana_infra.py` 要驗的（把調查查不到的行為變成測試，失敗就改設定或換版本，不留懸案）：
+
+| 項目 | 通過條件 |
+|---|---|
+| 相容性 | 選定的 Grafana＋plugin 對 ClickHouse `${CLICKHOUSE_VERSION}` 的 datasource health check 成功 |
+| 離線啟動 | 以既有 volume 在無對外網路（`internal` network）的情況下重啟 Grafana，plugin 仍載入、版本與 `GRAFANA_CLICKHOUSE_PLUGIN_VERSION` 相同、health check 成功 |
+| 唯讀帳號 | SELECT `radar` 的表與 view 成功；INSERT、CREATE、DROP、`SET readonly = 0` 失敗；查其他 database、`system.named_collections` 失敗或為空；`getSetting('max_execution_time')` 等於設定值 |
+| 設定載入 | ClickHouse 以 `from_env` 讀到密碼：錯的密碼登入失敗、對的成功 |
+
+- 驗收測試放在 `tests/unit/`、`tests/integration/` 底下，`make check`、`make coverage` 與 CI 不必改就會跑到
+- 面板的版面、顏色由 worker 自行決定（Grafana 內建樣式），不另派 designer
+
+**自行決定**
+
+| 項目 | 決定 |
+|---|---|
+| 查詢共用 | 用 ClickHouse view，不用 Grafana library panel：測試能直接查、bot 之後也能改用 |
+| 推文量的時間 | 推文時間 `commented_at`（長期趨勢），與熱度偵測的觀測時間不同 |
+| 匿名檢視 | 不開；登入一次不算「手動設定」 |
+| Grafana 監控面板（Kafka lag 等） | 不在階段 7；需要 metrics exporter，屬新相依 |
+| 排行筆數 | 前 20（bot 是 5，Dashboard 畫面較大） |
+| plugin 安裝 | 建置 image 時裝（`infra/grafana/Dockerfile`），不用啟動時的 `GF_PLUGINS_PREINSTALL_SYNC`：執行時不連網、不自動更新 |
+| 版本釘法 | Grafana、plugin 都釘完整 patch 號，以相容性測試通過的最新版為準 |
+| 唯讀帳號的權限設定 | `readonly` profile＋`allow_databases`，不用 XML `<grants>`（26.8 行為查不到） |
+| 時間巨集 | `$__timeFilter_ms`（欄位都是 DateTime64） |
+
 ### 7.26 整合測試改用 compose `test` 服務、CI 加速（規劃，2026-10-20，#78、#84）
 
 agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能直接下 `docker compose …`（D-011）；CI 的 Integration Test 約 7 分鐘。本節是設計，實作見文末派工順序；實作合併前，5 章「整合」列仍是現況。
@@ -1093,7 +1188,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | 共用服務後模組間互相影響（固定名稱的 `alerts`、`dlq` topic） | 斷言只看自己產生的資料（現有寫法已以看板名稱過濾）；平行時見「平行執行的隔離」；qa 連跑兩次 `run --rm test` 確認 |
 | 有人漏標 `xdist_group`，平行時偶發失敗 | 新測試用到固定名稱的 topic 就要標；qa 驗收時以 `-n 0` 與 `-n auto` 各跑一次，比對結果 |
 | 多個 worktree 各留一套服務吃記憶體 | 用法表的 `down -v`，worker 交單前執行 |
-| `users.d` 若改用 `from_env`（dashboard 設計），測試的 ClickHouse 要補對應環境變數 | `test-infra-compose` 與 dashboard 實作單，後合併的一方補 |
+| `infra/clickhouse/users.d/grafana.xml` 以 `from_env` 讀密碼（7.25），測試的 ClickHouse 掛整個 `users.d` 時缺環境變數會啟動失敗 | 測試 compose 的 `clickhouse` 服務給這些變數測試用的值（compose 內寫明，不讀 `.env`）；`test-infra-compose` 與 `dashboard-grafana-infra` 後合併的一方補 |
 
 ## 8. 風險清單
 
@@ -1114,6 +1209,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | Telegram 選單的回呼資料超過 64 bytes 或格式改版 | 按鈕失效 | `callback_data` 帶版本號，解析失敗時重送主選單；單元測試檢查最長的 post_id 在上限內（7.23） |
 | 開發機休眠 | 長時間驗收中斷、數據缺一段 | 驗收期間 `caffeinate -dims` 並接電源、不闔上螢幕（闔上仍會強制睡眠）；`cdc-watchdog` 的外部 heartbeat 停止時會寄 email（7.16）；上雲後（階段 9）不再依賴開發機 |
 | 標註的系統性偏差 | 模型學到錯誤標準，資料越多越確定 | 固定主要標註者、改 prompt 修偏差、兩個不同家族的標註者交叉比對、人工測試集裁決（7.11） |
+| Grafana 的 ClickHouse plugin 與 Grafana、ClickHouse 版本不相容 | 升級後 dashboard 全部失效 | 版本釘完整 patch 號、plugin 在建置 image 時裝好（執行時不下載、不自動更新）；升級任一方都要過 `test_grafana_infra.py` 與 `tests/integration/dashboard/`（7.25） |
 | Python 端讀不了 CDC 的 Avro | S3-08 串流標註、階段 4 推論卡住 | 採用 `confluent-kafka[avro]`（fastavro + 官方 schema registry client，打 Apicurio 的 ccompat API）；已用 mock schema registry 與 S2-01 實測的欄位驗證解碼，待以實際 CDC 訊息確認 |
 
 ### 8.2 現有 repo 設定問題
