@@ -25,11 +25,13 @@
 | v060-security | security | blocked | 0 | docs/security/v0.6.0.md FAIL fac0421：high 1（H-1 → bot-forbidden-crash）、medium 3（M-1 D-010、M-2 #68、M-3 D-011）、low 3（#69～#71） |
 | v060-uat | uat | review | 0 | docs/uat/v0.6.0.md：blocker 0、major 0、minor 4（F-1、F-2 README 已補；#65～#67 backlog）；甲方驗收清單 24 項待勾 |
 | spec-release-order | architect | qa | 0 | PR #74 |
-| bot-forbidden-crash | backend | qa | 0 | PR #75 |
+| bot-forbidden-crash | backend | review | 0 | PR #75 qa PASS 9af39cb |
+| ci-gitleaks-ignore | backend | todo | 0 |  |
 
 ## 卡住／待甲方決定
 
 - v0.6.0 資安 FAIL（H-1）：修正中（bot-forbidden-crash #73），合併後重審
+- CI Security 紅燈（gitleaks 誤判 docs/security/v0.6.0.md:158 的 PTT 文章 ID）：#74、#75 無法合併，待 ci-gitleaks-ignore
 
 ## 注意事項（踩過的坑）
 
