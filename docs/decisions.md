@@ -90,5 +90,5 @@
 ### D-015 CI 加速要不要加新套件或付費 runner
 - 決定：B. 加 pytest-xdist（dev 相依）；不用付費 runner
 - 理由：甲方不要額外付費；免費的平行化可以加
-- 影響：開發規格 7.26（第 14 項改寫）、`test-infra-fast-waits`
+- 影響：開發規格 7.26（做法第 15 項）、`test-infra-fast-waits`
 - 日期：2026-10-20
