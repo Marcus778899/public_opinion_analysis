@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[4]
-SERVICES = {"kafka", "postgres", "clickhouse", "test"}
+SERVICES = {"kafka", "postgres", "clickhouse", "grafana", "test"}
 DEPS = ("kafka", "postgres", "clickhouse")
 
 
@@ -50,7 +50,7 @@ def _step_text(step: dict) -> str:
 # ---- 做法 1 ----
 
 
-def test_compose_only_defines_four_test_services(compose: dict) -> None:
+def test_compose_only_defines_five_test_services(compose: dict) -> None:
     assert set(compose["services"]) == SERVICES
 
 
