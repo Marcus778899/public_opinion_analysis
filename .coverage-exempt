@@ -1,0 +1,7 @@
+# 不量覆蓋率的路徑（scripts/coverage_gate.py 讀取；fnmatch，* 可跨目錄）
+# agent-engineering 範本擁有的程式（update.sh 覆蓋，不屬於專案）
+scripts/*
+templates/*
+.claude/*
+# 營運 CLI：只把 env 與檔案路徑接到 radar.common 裡已有單元測試的函式（D-006）
+tools/*

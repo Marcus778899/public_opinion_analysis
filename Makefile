@@ -1,10 +1,11 @@
 COMPOSE := docker compose -f infra/docker-compose.yaml --env-file .env
 COMPOSE_E2E := docker compose -f infra/docker-compose.yaml -f infra/docker-compose.e2e.yaml --env-file .env
 UV_ENV := uv run --env-file .env
+PRE_COMMIT_VERSION := 4.6.0
 # NOTE: 開發與 e2e 共用 compose 專案與容器名稱，不能同時運作；以假 PTT 容器判斷目前是哪一個（#41）
 E2E_RUNNING := docker ps -aq --filter name=^radar_fake_ptt$$
 
-.PHONY: stop-e2e stop-dev up up-app up-labeling up-inference up-alerting testset human-label down logs migrate topics connector ch-migrate seed api lint test test-int e2e-up e2e e2e-down
+.PHONY: setup ci-setup check coverage stop-e2e stop-dev up up-app up-labeling up-inference up-alerting testset human-label down logs migrate topics connector ch-migrate seed api lint test test-int e2e-up e2e e2e-down
 
 up: stop-e2e  ## 啟動基礎設施
 	$(COMPOSE) up -d --wait
@@ -41,16 +42,16 @@ migrate:
 	$(UV_ENV) alembic upgrade head
 
 topics:
-	$(UV_ENV) python scripts/create_topics.py
+	$(UV_ENV) python tools/create_topics.py
 
 connector:  ## 註冊或更新 Debezium connector（冪等，需先 make migrate 建立 publication）
-	$(UV_ENV) python scripts/register_connector.py
+	$(UV_ENV) python tools/register_connector.py
 
 ch-migrate:  ## 套用 ClickHouse 尚未執行的 migration
-	$(UV_ENV) python scripts/migrate_clickhouse.py
+	$(UV_ENV) python tools/migrate_clickhouse.py
 
 seed:  ## 透過 API 建立初始看板（需先 make api）
-	$(UV_ENV) python scripts/seed_boards.py
+	$(UV_ENV) python tools/seed_boards.py
 
 testset:  ## 依看板配額抽出 300 篇人工測試集（S3-04，只能抽一次；配額見開發規格 7.11）
 	$(UV_ENV) python -m radar.ml.labeling.testset --counts Gossiping=180 Stock=90 Tech_Job=30
@@ -60,6 +61,20 @@ human-label:  ## 本機人工標註頁（http://127.0.0.1:8090）
 
 api:  ## 本機啟動管理 API（http://localhost:8000/docs）
 	$(UV_ENV) uvicorn radar.api.main:app --reload --port 8000
+
+setup:  ## 本機建立 .venv 與相依（check_env.py setup 會呼叫；worktree 共用主目錄的 .venv）
+	uv sync
+
+ci-setup:  ## CI 安裝相依
+	pip install -q pre-commit==$(PRE_COMMIT_VERSION)
+	uv sync --dev
+
+check:  ## lint + 不需要容器的測試（CI 每個 PR 都跑）
+	pre-commit run --all-files
+	uv run pytest tests/unit
+
+coverage:  ## 單元 + 整合測試的覆蓋率，Cobertura XML 寫到 coverage-reports/（CI 檢查改到的程式碼 ≥ 80%）
+	uv run pytest tests/unit tests/integration --cov=src/radar --cov-report=xml:coverage-reports/python.xml -q
 
 lint:
 	uv run ruff check .

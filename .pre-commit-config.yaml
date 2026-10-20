@@ -1,3 +1,5 @@
+# NOTE: 範本擁有的路徑（update.sh 覆蓋）不檢查；.claude/、.vscode/ 在 sandbox 裡不可寫，hook 一開檔就失敗
+exclude: ^(\.claude/|\.vscode/|scripts/|templates/|contracts/|CLAUDE\.md$|BOARD\.md$|\.mcp\.json$)
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0

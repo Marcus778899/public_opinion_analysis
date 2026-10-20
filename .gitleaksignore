@@ -1,0 +1,9 @@
+# gitleaks 誤判（2026-10-20 逐筆確認，不是密鑰）：
+# - apicurio:8080 是 schema registry 的 URL（docker 內部主機名＋port），被 generic-api-key 規則誤認
+# - unit_key 是文件範例裡的 PTT 文章 ID
+cd3d88f9aa55605b108e7ee3cf1b5202ed7de01b:infra/docker-compose.yaml:generic-api-key:26
+301f13d3b03b847f7c8aad80e3f0ed31cf0cbb9d:src/radar/common/settings.py:generic-api-key:82
+077dc6d3d69dd6e577b552c62cf0b03012f8928c:infra/docker-compose.yaml:generic-api-key:305
+172aa903d50da168eae3215cf6bb84d57967455e:docs/realtime-sentiment-radar-design.md:generic-api-key:382
+e245c302c8020f4a4b10852a80f181c96f8e26c5:infra/docker-compose.yaml:generic-api-key:111
+5a4d91fab558437694f6cc93d4cea8f0e71643ed:docs/development-spec.md:generic-api-key:208

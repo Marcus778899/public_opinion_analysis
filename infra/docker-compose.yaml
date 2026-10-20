@@ -135,8 +135,8 @@ services:
       - sh
       - -c
       - >-
-        alembic upgrade head && python scripts/create_topics.py
-        && python scripts/migrate_clickhouse.py && python scripts/register_connector.py
+        alembic upgrade head && python tools/create_topics.py
+        && python tools/migrate_clickhouse.py && python tools/register_connector.py
     environment:
       <<: *app-env
       CONNECT_URL: 'http://connect:8083'

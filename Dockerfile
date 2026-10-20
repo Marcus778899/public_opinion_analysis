@@ -19,7 +19,7 @@ COPY infra/postgres/migrations/ infra/postgres/migrations/
 COPY infra/kafka/topics.yaml infra/kafka/topics.yaml
 COPY infra/clickhouse/migrations/ infra/clickhouse/migrations/
 COPY infra/debezium/radar-cdc.json infra/debezium/radar-cdc.json
-COPY scripts/ scripts/
+COPY tools/ tools/
 RUN uv sync --frozen --no-dev
 
 # NOTE: named volume 第一次掛載時沿用 image 內目錄的擁有者；不先建好會是 root，服務寫不進去

@@ -23,6 +23,7 @@ dependencies = [
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
     "ruff>=0.16.10",
     "testcontainers[kafka,postgres]>=4.15.0",
 ]
@@ -37,7 +38,8 @@ module-name = "radar"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["docs"]
+# NOTE: scripts/、templates/、.claude/ 歸 agent-engineering 範本（update.sh 覆蓋），不套專案的 lint
+extend-exclude = ["docs", "scripts", "templates", ".claude"]
 src = ["src"]
 
 [tool.ruff.lint]
@@ -47,7 +49,8 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = ["e2e: 端到端測試，需先 make e2e-up，只由 make e2e 執行"]
-addopts = "-m 'not e2e'"
+# NOTE: sandbox 禁止讀 .env，連 stat 都不行；不先 ignore，pytest 走訪根目錄時就會失敗
+addopts = "-m 'not e2e' --ignore=.env"
 
 [tool.uv.sources]
 loggerhelper = { path = "lib/loggerhelper-2.0.0-py3-none-any.whl" }
