@@ -1066,25 +1066,37 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | ClickHouse 資源 | 拉長時間範圍讓 `FINAL` 查詢吃滿記憶體 | 唯讀帳號的 profile 設執行時間與記憶體上限 |
 | 看 dashboard 的人 | PTT 標題（外部文字）含 HTML、連結被換成 `javascript:` | 不用會渲染 HTML 的 Text 面板顯示資料；連結限 `https://www.ptt.cc/` 開頭 |
 
-**派工順序**（1、2 可平行；3 依賴 1、2；qa 先寫各單的驗收測試）
+**測試環境**（整合測試一律走 7.26 的 compose `test` 服務）
+
+| 項目 | 做法 |
+|---|---|
+| 服務 | 根目錄 `compose.yaml` 加 `grafana`：以 `infra/grafana/Dockerfile` 建置（build args 用 `${GRAFANA_VERSION:?}`、`${GRAFANA_CLICKHOUSE_PLUGIN_VERSION:?}`，與開發環境同一個 image）、唯讀掛 `infra/grafana/provisioning` 與 `infra/grafana/dashboards`、資料放 tmpfs、不對外開 port |
+| 網路 | 另設 `internal: true` 的 network `grafana_offline`，`grafana` 只接這個；`clickhouse`、`test` 同時接預設 network 與它（`test` 的 `uv sync` 要連網，所以不能整個 compose 都 internal）。Grafana 每次啟動都沒有對外網路，等於每次都是離線啟動 |
+| 連線 | `test` 服務設 `IT_GRAFANA_URL`（`http://grafana:3000`），併入 7.26 做法 2 的必填清單（缺就 `pytest.exit`） |
+| 測試用帳密 | Grafana admin 密碼、`CLICKHOUSE_GRAFANA_USER`／`CLICKHOUSE_GRAFANA_PASSWORD` 在 `compose.yaml` 寫測試用的固定值給 `grafana`、`clickhouse`、`test`，不讀 `.env`（同 7.26 風險表 users.d 一列） |
+| 查詢的 DB | 唯讀帳號的 `allow_databases` 只有 `${CLICKHOUSE_DB}`（測試環境為 `radar`），所以 dashboard 的驗收與整合測試一律在 `radar` DB 放種子資料、以唯讀帳號查，不用 xdist 的 `radar_<worker>`（7.26 平行隔離表）；種子資料的看板名稱帶 uuid、斷言只看自己的看板，不需 `xdist_group` |
+| CI | `compose.ci.yaml` 把 `grafana` 的 port 綁 `127.0.0.1:${IT_GRAFANA_HOST_PORT}`，並讓它另接預設 network（只接 internal network 的容器無法發布 port）；CI 的 `up -d --wait` 加 `grafana`、`IT_GRAFANA_URL` 指向 localhost |
+| 離線檢查的限制 | CI 的 Grafana 有對外網路，CI 綠燈**不代表**離線啟動通過；離線只由 `run --rm test` 證明：worker 與 qa 交單時附這個指令跑 `test_grafana_infra.py` 的輸出。CI 仍會跑同一個測試檔（驗 plugin 載入、版本、health check），只是不構成離線證據 |
+
+**派工順序**（依序；1 依賴 `test-infra-compose` 合併；1 與 `test-infra-fast-waits` 都改 `compose.yaml`、`tests/integration/conftest.py`，不可平行，後開的一方 rebase；qa 先寫各單的驗收測試）
 
 | 順序 | task_id | 負責 | 負責檔案 | 驗收測試目錄 |
 |---|---|---|---|---|
-| 1 | `dashboard-grafana-infra` | backend | `infra/docker-compose.yaml`（`grafana` 服務、clickhouse 加唯讀帳號的環境變數）、`infra/grafana/Dockerfile`、`infra/clickhouse/users.d/grafana.xml`、`infra/grafana/provisioning/**`、`.env.example`、本文件 1.3、7.25（回寫選定的版本）與設計文件 10.3、11.1 | `tests/unit/acceptance/dashboard/`（compose、Dockerfile、provisioning 的靜態檢查：版本為完整 patch 號、只綁本機、密碼 `${…:?}`）；`tests/integration/acceptance/dashboard/test_grafana_infra.py`（見下方） |
-| 2 | `dashboard-views` | backend | `infra/clickhouse/migrations/0005_dashboard_views.sql` | `tests/integration/acceptance/dashboard/test_views.py`（ClickHouse `${CLICKHOUSE_VERSION}`；以唯讀帳號查 view，結果符合種子資料：刪除的推文不計、取最新一筆推論、沒有推論的文章不出現） |
-| 3 | `dashboard-panels` | backend | `infra/grafana/dashboards/radar.json` | `tests/integration/acceptance/dashboard/test_panels.py`（每個面板的 SQL 代換後在 ClickHouse 執行、結果符合種子資料） |
-| 4 | `dashboard-integration` | qa | — | `tests/integration/dashboard/`：testcontainers 開 Grafana＋ClickHouse 載入 provisioning，以 Grafana API（`/api/ds/query`）確認 dashboard 存在、每個面板查詢無錯誤；時間範圍邊界內外各 2 秒的種子資料分別被納入、排除（驗 `$__timeFilter_ms` 對 DateTime64(6) 的展開，1 秒以內的誤差可接受）；另以 `make up` 後的截圖當驗收證據 |
+| 1 | `dashboard-grafana-infra` | backend | `infra/docker-compose.yaml`（`grafana` 服務、clickhouse 加唯讀帳號的環境變數）、`infra/grafana/Dockerfile`、`infra/clickhouse/users.d/grafana.xml`、`infra/grafana/provisioning/**`、`compose.yaml`、`compose.ci.yaml`（上方「測試環境」）、`tests/integration/conftest.py`（`IT_GRAFANA_URL`）、`.github/workflows/ci.yml`（`up` 加 `grafana`、`IT_GRAFANA_URL`）、`.env.example`（含 `IT_GRAFANA_HOST_PORT`）、本文件 1.3、7.25（回寫選定的版本）與設計文件 10.3、11.1 | `tests/unit/acceptance/dashboard/`（compose、Dockerfile、provisioning 的靜態檢查：版本為完整 patch 號、只綁本機、密碼 `${…:?}`；`compose.yaml` 的 `grafana` 只接 internal network、不開 port、與 `infra/docker-compose.yaml` 用同一個 Dockerfile）；`tests/integration/acceptance/dashboard/test_grafana_infra.py`（見下方）。**本單 qa 另要調整 `test-infra-compose` 已鎖定的 `tests/unit/acceptance/test_infra/test_compose_static.py`**：`test_compose_only_defines_four_test_services` 的服務集合加 `grafana`（測試名稱一併改），其餘斷言不動 |
+| 2 | `dashboard-views` | backend | `infra/clickhouse/migrations/0005_dashboard_views.sql` | `tests/integration/acceptance/dashboard/test_views.py`（`radar` DB 放種子資料、以唯讀帳號查 view，結果符合種子資料：刪除的推文不計、取最新一筆推論、沒有推論的文章不出現）；依賴 1（唯讀帳號） |
+| 3 | `dashboard-panels` | backend | `infra/grafana/dashboards/radar.json` | `tests/integration/acceptance/dashboard/test_panels.py`（每個面板的 SQL 代換後以唯讀帳號在 `radar` DB 執行、結果符合種子資料）；依賴 2 |
+| 4 | `dashboard-integration` | qa | — | `tests/integration/dashboard/`：用 compose 的 `grafana`（`IT_GRAFANA_URL`）與 `clickhouse`，以 Grafana API（`/api/ds/query`）確認 provisioning 的 dashboard 存在、每個面板查詢無錯誤；時間範圍邊界內外各 2 秒的種子資料（`radar` DB）分別被納入、排除（驗 `$__timeFilter_ms` 對 DateTime64(6) 的展開，1 秒以內的誤差可接受）；另以 `make up` 後的截圖當驗收證據 |
 
 `test_grafana_infra.py` 要驗的（把調查查不到的行為變成測試，失敗就改設定或換版本，不留懸案）：
 
 | 項目 | 通過條件 |
 |---|---|
 | 相容性 | 選定的 Grafana＋plugin 對 ClickHouse `${CLICKHOUSE_VERSION}` 的 datasource health check 成功 |
-| 離線啟動 | 以既有 volume 在無對外網路（`internal` network）的情況下重啟 Grafana，plugin 仍載入、版本與 `GRAFANA_CLICKHOUSE_PLUGIN_VERSION` 相同、health check 成功 |
-| 唯讀帳號 | SELECT `radar` 的表與 view 成功；INSERT、CREATE、DROP、`SET readonly = 0` 失敗；查其他 database、`system.named_collections` 失敗或為空；`getSetting('max_execution_time')` 等於設定值 |
+| 離線啟動 | 透過 `IT_GRAFANA_URL`：plugin 已載入、版本與 `GRAFANA_CLICKHOUSE_PLUGIN_VERSION` 相同、health check 成功。`run --rm test` 下 Grafana 只接 internal network，每次啟動都是離線啟動；plugin 在 image 裡、不在資料目錄，所以不另測「沿用 volume 重啟」。CI 的限制見「測試環境」 |
+| 唯讀帳號 | SELECT `radar` 的表與 view 成功；INSERT、CREATE、DROP、`SET readonly = 0` 失敗；查其他 database（例：xdist 建的 `radar_<worker>`）、`system.named_collections` 失敗或為空；`getSetting('max_execution_time')` 等於設定值 |
 | 設定載入 | ClickHouse 以 `from_env` 讀到密碼：錯的密碼登入失敗、對的成功 |
 
-- 驗收測試放在 `tests/unit/`、`tests/integration/` 底下，`make check`、`make coverage` 與 CI 不必改就會跑到
+- 驗收測試放在 `tests/unit/`、`tests/integration/` 底下，`make check`、`make coverage` 會跑到；CI 只需上方「測試環境」的 `grafana` 啟動與 `IT_GRAFANA_URL`（屬 `dashboard-grafana-infra`）
 - 面板的版面、顏色由 worker 自行決定（Grafana 內建樣式），不另派 designer
 
 **自行決定**
@@ -1100,6 +1112,9 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | 版本釘法 | Grafana、plugin 都釘完整 patch 號，以相容性測試通過的最新版為準 |
 | 唯讀帳號的權限設定 | `readonly` profile＋`allow_databases`，不用 XML `<grants>`（26.8 行為查不到） |
 | 時間巨集 | `$__timeFilter_ms`（欄位都是 DateTime64） |
+| 測試的 Grafana | 放進 7.26 的 `compose.yaml`、只接 internal network（每次都是離線啟動），取代原本的「測試自己開 Grafana 容器」與「沿用 volume 重啟」 |
+| 測試查詢的 DB | 一律 `radar`（唯讀帳號只允許這個 DB），以 uuid 看板名稱隔離，不用 xdist 的 worker DB |
+| dashboard 單的順序 | 依序 1→2→3→4，排在 `test-infra-compose` 之後：2 的驗收要用 1 的唯讀帳號 |
 
 ### 7.26 整合測試改用 compose `test` 服務、CI 加速（規劃，2026-10-20，#78、#84）
 
@@ -1126,7 +1141,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 
 | # | 決策 | 理由 |
 |---|---|---|
-| 1 | 根目錄新增 `compose.yaml`，只放測試用的 `kafka`、`postgres`、`clickhouse`、`test`；不設 `name:`、`container_name`、對外 port | 專案名稱取自 compose 檔所在目錄，每個 worktree 一套；與開發／e2e（專案 `radar`、固定容器名稱）互不相干 |
+| 1 | 根目錄新增 `compose.yaml`，只放測試用的 `kafka`、`postgres`、`clickhouse`、`test`；不設 `name:`、`container_name`、對外 port。`grafana`（含 internal network、`compose.ci.yaml` 的 port）由 `dashboard-grafana-infra` 之後加入，`test-infra-compose` 不加，做法見 7.25「測試環境」 | 專案名稱取自 compose 檔所在目錄，每個 worktree 一套；與開發／e2e（專案 `radar`、固定容器名稱）互不相干 |
 | 2 | 整合測試不再用 testcontainers：fixture 讀 `IT_KAFKA_BOOTSTRAP`、`IT_POSTGRES_HOST`、`IT_POSTGRES_PORT`、`IT_CLICKHOUSE_URL`，缺一個就 `pytest.exit` 並印出下方指令（不 skip）；移除 dev 相依 `testcontainers` | 只留一條路徑，CI 與 agent 跑的是同一套；skip 會讓 CI 假綠 |
 | 3 | `test` 服務：uv 官方 Python 3.12 映像；worktree **唯讀**掛進容器；venv（`UV_PROJECT_ENVIRONMENT`）與 uv 快取放 named volume；先 `uv sync --frozen` 再執行 command，預設 `pytest tests/integration` | 唯讀：容器改不到主機檔案、不留 root 擁有的檔（所以不設 `HOST_UID`）；不覆蓋主機的 `.venv`（macOS 與 Linux 的 wheel 不同） |
 | 4 | 不掛 docker socket（不採「容器裡照跑 testcontainers」） | socket 等於主機 root；testcontainers 的 volume 路徑也要對應主機路徑 |
