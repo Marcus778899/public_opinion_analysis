@@ -1177,7 +1177,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | 做完單、釋放記憶體 | `docker compose --env-file .env -f .worktrees/<task_id>/compose.yaml down -v` |
 | 人在主目錄 | `make test-int`（包 `docker compose -f compose.yaml --env-file .env run --rm test`） |
 
-- 與開發／e2e 環境（#41）：不同 compose 專案、網路與 volume，沒有對外 port，不需要也不會觸發 `stop-e2e`／`stop-dev`；三者可同時運作，限制只有記憶體（每套估 1.5～2 GB，`test-infra-compose` 實測後回寫）
+- 與開發／e2e 環境（#41）：不同 compose 專案、網路與 volume，沒有對外 port，不需要也不會觸發 `stop-e2e`／`stop-dev`；三者可同時運作，限制只有記憶體（每套實測尖峰約 1.4 GiB）
 - `make check` 不變（不需容器）；`make coverage` 只在 CI 用，需要的服務由 CI 先開好
 - 實作補充（順序 1）：session 重置的順序是 PG → 刪 ClickHouse 所有 database（停掉 Kafka consumer）→ 刪 Kafka topic 並建 `labels`、`predictions`、`alerts`（Kafka engine 表要先有 topic）→ ClickHouse 重建 `radar` 並套 migration；各模組的 `clickhouse` fixture 開始時清空資料表。`test_clickhouse_migrations` 另建 database 時，套完 migration 立刻刪 Kafka engine 表（做法 9）。`test` 服務的 `uv sync` 與 Python 套件第一次約 1 分鐘，之後走 named volume 快取。實測：本機（macOS Docker Desktop）135 個測試約 375 秒，連跑兩次都全過。記憶體實測（`docker compose … stats --no-stream`，測試進行中，macOS Docker Desktop，上限 7.65 GiB）：kafka 約 390～470 MiB、clickhouse 約 210～365 MiB、postgres 約 80～90 MiB、test 約 80～450 MiB（`uv sync` 時較低，跑測試時約 330～450），合計尖峰約 1.4 GiB；原估 1.5～2 GB 偏高，以 1.5 GB 計。
 
@@ -1207,7 +1207,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | 共用服務後模組間互相影響（固定名稱的 `alerts`、`dlq` topic） | 斷言只看自己產生的資料（現有寫法已以看板名稱過濾）；平行時見「平行執行的隔離」；qa 連跑兩次 `run --rm test` 確認 |
 | 有人漏標 `xdist_group`，平行時偶發失敗 | 新測試用到固定名稱的 topic 就要標；qa 驗收時以 `-n 0` 與 `-n auto` 各跑一次，比對結果 |
 | 多個 worktree 各留一套服務吃記憶體 | 用法表的 `down -v`，worker 交單前執行 |
-| `infra/clickhouse/users.d/grafana.xml` 以 `from_env` 讀密碼（7.25），測試的 ClickHouse 掛整個 `users.d` 時缺環境變數會啟動失敗 | 測試 compose 的 `clickhouse` 服務給這些變數測試用的值（compose 內寫明，不讀 `.env`）；`test-infra-compose` 與 `dashboard-grafana-infra` 後合併的一方補 |
+| `infra/clickhouse/users.d/grafana.xml` 以 `from_env` 讀密碼（7.25） | 測試 compose 的 `clickhouse` 只單檔掛 `named_collections.xml`、`radar.xml`（做法 7），不會載入 `grafana.xml`，缺環境變數不會讓它啟動失敗；需要唯讀帳號的測試，由 `dashboard-grafana-infra` 在 `compose.yaml` 加掛該檔並給測試用的固定值（不讀 `.env`） |
 
 ## 8. 風險清單
 
