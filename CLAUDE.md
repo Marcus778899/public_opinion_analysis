@@ -39,6 +39,7 @@ pre-commit run --all-files
 Makefile 裡碰 docker 或 `.env` 的目標（`make up`、`up-app`、`migrate`、`topics`、`e2e-up`…）在 sandbox 裡會失敗：
 agent 改成直接下 `docker compose -f infra/docker-compose.yaml --env-file .env …`（對應寫法見 Makefile）。
 開發與 e2e 共用容器名稱，不能同時運作（#41）；e2e 只用假 PTT（`infra/docker-compose.e2e.yaml`）。
+整合測試：agent 下 `docker compose --env-file .env -f .worktrees/<task_id>/compose.yaml run --rm test`，做完用同一條指令把 `run --rm test` 換成 `down -v` 釋放記憶體；這組容器與開發／e2e（專案 `radar`）互不相干，可以同時運作。`make test-int` 也包 docker，同樣在 sandbox 裡會失敗。
 
 ### 目錄
 
@@ -83,7 +84,7 @@ agent 改成直接下 `docker compose -f infra/docker-compose.yaml --env-file .e
 
 - **每個新增或修改的函式都要有單元測試**，沒有測試的實作不算完成
 - 單元測試不連網路、不連真實 Kafka／PG；需要時用 fake 或 mock
-- 整合測試用 testcontainers，放 `tests/integration/`
+- 整合測試放 `tests/integration/`，連 `compose.yaml` 的 kafka／postgres／clickhouse（讀 `IT_*` 環境變數，不用 testcontainers；指令見開發規格 7.26）
 - **任何測試都不可對真實 PTT 發請求**，只讀 `tests/fixtures/ptt/` 或使用假 PTT 伺服器（`tests/e2e/fake_ptt.py`）
 - 測試名稱描述行為：`test_<情境>_<預期結果>`
 - 至少涵蓋：正常路徑、邊界值、錯誤輸入；consumer 另需涵蓋重複訊息（冪等）與 DLQ
