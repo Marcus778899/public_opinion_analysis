@@ -34,7 +34,7 @@
 | test-infra-compose | backend | done | 1 | PR #95 |
 | bot-allowlist-required | backend | done | 0 | PR #93 |
 | dashboard-test-align | architect | done | 0 | PR #94 |
-| test-infra-fast-waits | backend | todo | 0 |  |
+| test-infra-fast-waits | backend | done | 0 | PR #97 |
 
 ## 卡住／待甲方決定
 
