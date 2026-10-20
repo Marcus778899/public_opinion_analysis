@@ -29,7 +29,7 @@
 
 ## 卡住／待甲方決定
 
-- （無）
+- D-013：task.py new 建 worktree 被 sandbox 擋（受保護路徑），test-infra-design、dashboard-design 開不了單
 
 ## 注意事項（踩過的坑）
 
