@@ -25,8 +25,8 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
-| dashboard-design | architect | todo | 0 |  |
-| test-infra-design | architect | todo | 0 |  |
+| dashboard-design | architect | qa | 0 |  |
+| test-infra-design | architect | in-progress | 0 |  |
 
 ## 卡住／待甲方決定
 
