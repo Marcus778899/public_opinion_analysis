@@ -29,7 +29,7 @@
 
 ## 卡住／待甲方決定
 
-- 等甲方修上游範本（claude_workflow#1，D-008 B）並跑 update.sh；修好後 manager 自行開 test-infra-design → dashboard-design
+- （無）
 
 ## 注意事項（踩過的坑）
 
