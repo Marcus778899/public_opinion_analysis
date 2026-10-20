@@ -26,11 +26,11 @@
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
 | dashboard-design | architect | qa | 0 |  |
-| test-infra-design | architect | in-progress | 0 |  |
+| test-infra-design | architect | qa | 0 |  |
 
 ## 卡住／待甲方決定
 
-- （無）
+- D-014、D-015：階段 7 設計待甲方決定與核可（PR #86、#87）
 
 ## 注意事項（踩過的坑）
 

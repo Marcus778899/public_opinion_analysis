@@ -5,6 +5,18 @@
 
 ## 待決定
 
+### D-014 階段 7 Dashboard 的呈現方式
+- 背景：開發規格 7.25 比較兩案；選 A 等於同時核可新增 `grafana/grafana-oss` image 與 `grafana-clickhouse-datasource` plugin（決策①②）
+- 選項：A. 全用 Grafana（S，約 2～3 天，S7-01／S7-02 驗收都可達）／B. Grafana 只做監控＋自建 web 前端（M～L，約 1～2 週；新前端技術棧、API、登入另做，需再決定框架並派 designer）
+- 建議：A；B 的好處（自訂畫面、手機）與階段 15 Mini App 重疊，等階段 9 有 HTTPS 再一起做
+- 提出：architect（dashboard-design）
+
+### D-015 CI 加速要不要加新套件或付費 runner
+- 背景：開發規格 7.26；CI 整合測試約 7 分鐘，主因是測試內固定等待（約 59%）與整合測試在兩個 job 各跑一次
+- 選項：A. 都不加，先做 7.26 的 compose 化與去除固定等待，`test-infra-fast-waits` 量完再議／B. 加 pytest-xdist（新 dev 相依）／C. 改用付費大型 GitHub Actions runner
+- 建議：A；時間耗在固定等待，加平行或換機器收益小
+- 提出：architect（test-infra-design）
+
 <!-- 範本：
 ### D-001 一句話問題
 - 背景：為什麼要決定（1–2 行）
