@@ -1,66 +1,77 @@
 # 即時輿情雷達
 
-追蹤 PTT 等社群上的話題，在討論開始發酵的前幾分鐘偵測並通知，同時提供情緒分析與話題摘要。
+追蹤 PTT 看板的話題，在討論開始發酵的前幾分鐘偵測並用 Telegram 通知，同時提供情緒分析、推噓與爭議度。給想第一時間掌握 PTT 輿情的個人使用。
 
-## 文件
+## 快速開始
 
-- [設計文件](docs/realtime-sentiment-radar-design.md)
-- [開發流程規格](docs/development-spec.md)
-- [情緒標註準則](docs/labeling-guideline.md)：LLM、Claude 與人工標註共用
+1. 設定：`python3 scripts/check_env.py`，依提示在 `.env` 填入缺少的值（Telegram 需要 `TELEGRAM_BOT_TOKEN`；情緒推論需要 `INFERENCE_MODEL_VERSION` 與 `models/` 下的模型）
+2. 安裝：`make setup`（Python 3.12、[uv](https://docs.astral.sh/uv/)、Docker；`pre-commit install` 啟用 commit 前檢查）
+3. 啟動整套服務（會對真實 PTT 發請求；自動建表、topic 與 CDC connector）：
 
-## 開發環境
+   ```bash
+   docker compose -f infra/docker-compose.yaml --env-file .env --profile app --profile alerting up -d --build --wait
+   ```
 
-需要：Python 3.12、[uv](https://docs.astral.sh/uv/)、Docker、pre-commit
+   要情緒推論再加這一行：
 
-```bash
-uv sync                 # 建立 .venv 並安裝相依套件
-cp .env.example .env    # 填入本地設定
-pre-commit install      # 啟用 commit 前檢查
-make test               # 單元測試（make test-int 為整合測試，需要 Docker）
-```
+   ```bash
+   docker compose -f infra/docker-compose.yaml --env-file .env --profile app --profile inference up -d --wait inference
+   ```
 
-## 本機執行
+4. 建立看板：`make seed`（Gossiping、Stock、Tech_Job，Scheduler 30 秒內開始爬取）；狀態：`curl localhost:8000/status`
+5. 在 Telegram 對 bot 傳 `/start`，用主選單按鈕訂閱看板、看現在熱門與看板概況
+6. 停止（資料保留在 volume）：
 
-**整套以 docker-compose 執行**（會對真實 PTT 發請求）：
+   ```bash
+   docker compose -f infra/docker-compose.yaml --env-file .env --profile app --profile labeling --profile inference --profile alerting down --remove-orphans
+   ```
 
-```bash
-make up-app             # Kafka（3 節點）+ Postgres + CDC + ClickHouse + api / scheduler / crawler ×3 / ingest
-make seed               # 建立 Gossiping、Stock、Tech_Job 三個看板，Scheduler 30 秒內開始爬取
-curl localhost:8000/status
-make down               # 停止（資料保留在 volume）
-```
+7. 檢查：`make check`（lint + 單元測試；整合測試 `make test-int` 需要 Docker）
 
-**開發時只啟動基礎設施**，服務在本機執行：
+端到端測試用假 PTT、獨立 volume，不碰開發資料：`make e2e-up && make e2e && make e2e-down`（開發與 e2e 共用容器名稱，不能同時運作，#41）。
 
-```bash
-make up && make migrate && make topics && make ch-migrate && make connector
-make api                                                    # 另開終端機
-uv run --env-file .env python -m radar.collector.scheduler  # 另開終端機
-uv run --env-file .env python -m radar.collector.crawler    # 另開終端機
-uv run --env-file .env python -m radar.ingest.main          # 另開終端機
-make seed
-```
+標註與訓練（階段 3）的指令見[開發規格](docs/development-spec.md)第 6 章與 [docs/labeling-guideline.md](docs/labeling-guideline.md)。
 
-**階段 3：標註與訓練**（需要 `.env` 的 `GROQ_API_KEY`、`GEMINI_API_KEY`，以及 ClickHouse 已有資料；準則見 [docs/labeling-guideline.md](docs/labeling-guideline.md)）：
+## 功能
 
-```bash
-make testset                                                          # 抽 300 篇人工測試集（只做一次）
-make human-label                                                      # 人工標註測試集
-uv run --env-file .env python -m radar.ml.labeling.backfill --per-board 1000   # 主要標註者批次標註，可中斷續跑
-# Claude Code 中執行 /label-posts                                       # 第二標註者（Claude），一次 50 篇
-uv run --env-file .env python -m radar.ml.labeling.cross_check        # 交叉比對，輸出不一致清單
-uv run --env-file .env python -m radar.ml.experiments.push_ratio      # 推噓比弱標註實驗
-uv run --env-file .env python -m radar.ml.training.export             # 匯出訓練資料
-uv run --env-file .env python -m radar.ml.training.train --data data/datasets/<名稱>.jsonl
-uv run --env-file .env python -m radar.ml.training.evaluate --model models/<model_version>
-make up-labeling                                                      # 串流抽樣標註新文章
-```
+| 功能 | 版本 | 說明 |
+|---|---|---|
+| PTT 爬取與入庫 | v0.6.0 | Scheduler 排程、crawler ×3、ingest 寫入 PostgreSQL；管理 API 管看板 |
+| CDC → ClickHouse | v0.6.0 | Debezium 把 PG 變更送進 Kafka，再寫入 ClickHouse 供查詢 |
+| 情緒標註與模型 | v0.6.0 | LLM 主標註、Claude 交叉比對、人工測試集、訓練與評估（Stock 重新標註待補，見開發規格第 6 章） |
+| 情緒推論 | v0.6.0 | 新文章即時推論情緒，結果寫 ClickHouse |
+| 熱度偵測與警示 | v0.6.0 | 依推文速度與平常的倍數發出文章、看板警示（3 天驗收待做，見開發規格第 6 章） |
+| Telegram bot | v0.6.0 | 按鈕操作訂閱、現在熱門、看板概況、通知設定；警示含推／噓／箭頭、爭議度與情緒 |
 
-**端到端測試**（假 PTT 伺服器、獨立的資料 volume，不碰開發資料也不連真的 PTT）：
+## 架構
 
-```bash
-make e2e-up && make e2e && make e2e-down
-```
+| 目錄 | 用途 |
+|---|---|
+| `src/radar/collector/` | Scheduler 與 crawler |
+| `src/radar/ingest/` | 爬取結果寫入 PG |
+| `src/radar/cdc/` | CDC 監控 |
+| `src/radar/streaming/` | 熱度偵測 |
+| `src/radar/ml/` | 標註、訓練、推論 |
+| `src/radar/bot/` | Telegram bot |
+| `src/radar/api/` | 管理 API |
+| `src/radar/common/` | 設定、log、Kafka、DB 共用元件 |
+| `infra/` | docker-compose、Kafka、PG、ClickHouse、Debezium 設定 |
+| `tools/` | 營運腳本：建 topic、ClickHouse migration、註冊 connector、seed（D-006） |
+| `scripts/` | agent 團隊流程腳本 |
+
+設計見 [docs/realtime-sentiment-radar-design.md](docs/realtime-sentiment-radar-design.md)，開發規格見 [docs/development-spec.md](docs/development-spec.md)。
+
+## 開發方式
+
+由 agent 團隊開發（規則見 `CLAUDE.md`）。分支：`main` ← `develop` ← `feat/…`、`fix/…`；每個階段合回 `main` 並打 tag（D-003）。
+決策紀錄：`docs/decisions.md`；使用者測試：`docs/uat/`；資安審查：`docs/security/`。
+
+## 版本
+
+| 版本 | 日期 | 內容 |
+|---|---|---|
+| `stage-1`、`stage-2` | 2026-10 | 爬取入庫、CDC → ClickHouse |
+| v0.6.0 | （發版中） | 階段 3～6：情緒標註與模型、推論、熱度警示、Telegram 互動 |
 
 ## 授權
 
