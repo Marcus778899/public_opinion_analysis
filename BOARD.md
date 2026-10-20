@@ -24,6 +24,7 @@
 ## 卡住／待甲方決定
 
 - D-008：task.py new 在 sandbox 讀不到 .env 而當掉，所有派工單（spec-release-order、階段 7）卡住
+- D-009：.env.example 的 OPENROUTER_API_KEY、API_CORS_ORIGINS 是選填卻被當必填，task.py new 拒絕開單
 
 ## 注意事項（踩過的坑）
 
