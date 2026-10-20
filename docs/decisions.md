@@ -13,12 +13,6 @@
 - 提出：architect（todo-design）
 -->
 
-### D-012 worktree 的 `.venv` 連結被當成未提交修改，`pr.py open` 拒絕
-- 背景：`task.py new` 會在 worktree 建 `.venv` 符號連結（共用主目錄環境），但 `.gitignore` 寫的是 `.venv/`（只比對目錄），符號連結不會被忽略 → `git status` 出現 `?? .venv` → 每張單的 `pr.py open` 都會拒絕。範本 `init_project.py` 的 GITIGNORE 也是 `.venv/`，是上游問題
-- 選項：A. 甲方在主目錄執行 `echo .venv >> .git/info/exclude`（只影響本機、所有 worktree 立即生效，不必 sync）／B. 甲方把 `.gitignore` 的 `.venv/` 改成 `.venv` 直接 commit 到 develop（既有兩張單要 sync 才拿得到）
-- 建議：A 立即解卡，另外在上游範本把 GITIGNORE 改成 `.venv`、`node_modules`（不加斜線），之後 update.sh 同步
-- 提出：manager（spec-release-order）
-
 ## 已決定
 
 <!-- 範本：
@@ -76,4 +70,8 @@
 - 決定：A. `TELEGRAM_ALLOWED_CHAT_IDS` 沒設就啟動失敗；要開放所有人必須明確設 `TELEGRAM_ALLOW_ALL=true`
 - 理由：權限預設值應 fail closed，避免上雲或重建 `.env` 時漏設而默默對外開放（資安 v0.6.0 M-1）
 - 影響：設計文件 9.2、開發規格 7.21、`.env.example`；不擋 v0.6.0，排進 v0.7.0（派工單 `bot-allowlist-required`）
+- 日期：2026-10-20
+
+### D-012 worktree 的 `.venv` 連結被當成未提交修改，`pr.py open` 拒絕
+- 決定：A. 甲方在本機 `.git/info/exclude` 加 `.venv`（已執行）；上游範本 GITIGNORE 改成不加斜線，併入 D-008 的範本修正
 - 日期：2026-10-20
