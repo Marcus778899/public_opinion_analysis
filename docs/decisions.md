@@ -80,3 +80,15 @@
 - 決定：A. 修上游範本：worktree 用 sparse-checkout 排除 `.claude/`、`.mcp.json`、`.vscode/`（甲方已更新範本）
 - 理由：B 會讓 agent 能改 worktree 裡的 agent 設定，削弱保護
 - 日期：2026-10-20
+
+### D-014 階段 7 Dashboard 的呈現方式
+- 決定：A. 階段 7 全用 Grafana（同時核可 `grafana/grafana-oss` image 與 `grafana-clickhouse-datasource` plugin）；自建 web 前端延到階段 9 一起做
+- 理由：B 的好處與之後的前端需求重疊，等階段 9 有 HTTPS 再一起做
+- 影響：開發規格 7.25、階段 9 範圍
+- 日期：2026-10-20
+
+### D-015 CI 加速要不要加新套件或付費 runner
+- 決定：B. 加 pytest-xdist（dev 相依）；不用付費 runner
+- 理由：甲方不要額外付費；免費的平行化可以加
+- 影響：開發規格 7.26（做法第 15 項）、`test-infra-fast-waits`
+- 日期：2026-10-20
