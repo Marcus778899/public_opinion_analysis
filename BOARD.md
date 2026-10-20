@@ -27,8 +27,9 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
-| dashboard-design | architect | qa | 0 |  |
-| test-infra-design | architect | qa | 0 |  |
+| dashboard-design | architect | done | 0 | PR #86 |
+| test-infra-design | architect | done | 0 | PR #87 |
+| gitleaks-archive-ignore | backend | done | 0 | PR #89 |
 
 ## 卡住／待甲方決定
 
