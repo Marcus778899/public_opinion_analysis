@@ -18,8 +18,8 @@ def created(age: timedelta) -> datetime:
 
 
 @pytest.mark.parametrize("age_minutes", [0, 30, 59])
-def test_next_crawl_under_1h_is_2_minutes(age_minutes):
-    assert next_crawl_at(created(timedelta(minutes=age_minutes)), NOW) == NOW + timedelta(minutes=2)
+def test_next_crawl_under_1h_is_5_minutes(age_minutes):
+    assert next_crawl_at(created(timedelta(minutes=age_minutes)), NOW) == NOW + timedelta(minutes=5)
 
 
 @pytest.mark.parametrize("age_hours", [1, 3, 5.9])
@@ -40,7 +40,7 @@ def test_next_crawl_over_24h_stops(age_hours):
 def test_next_crawl_time_scale_shrinks_interval():
     result = next_crawl_at(created(timedelta(minutes=5)), NOW, time_scale=0.05)
 
-    assert result == NOW + timedelta(seconds=6)
+    assert result == NOW + timedelta(seconds=15)
 
 
 class FakeSession:

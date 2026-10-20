@@ -1,7 +1,8 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated
 
-from pydantic import SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -76,6 +77,16 @@ class ConnectSettings(BaseSettings):
     ready_timeout_s: float = 180.0
 
 
+class InferenceSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="INFERENCE_")
+
+    # models/<model_version>/；compose 內為 /app/models/<model_version>
+    model_dir: Path
+    # 文章 → 模型輸入文字 hash 的 LRU 上限（開發規格 7.18）
+    cache_size: int = 200_000
+    batch_size: int = 100
+
+
 class CdcWatchdogSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CDC_WATCHDOG_")
 
@@ -97,6 +108,58 @@ class CdcWatchdogSettings(BaseSettings):
         # NOTE: e2e 以空字串覆寫 .env 的值來關閉 heartbeat（infra/docker-compose.e2e.yaml）
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+
+class HeatSettings(BaseSettings):
+    """熱度偵測（開發規格 7.20）；門檻預設值見 S5-04。"""
+
+    model_config = SettingsConfigDict(env_prefix="HEAT_")
+
+    # 回放與驗收時改成 replay.cdc.comments，並換 consumer_group，state 才不會和正式的混在一起
+    input_topic: str = "cdc.public.comments"
+    consumer_group: str = "heat"
+    state_dir: Path = Path("state")
+    window_min: int = 10
+    grace_min: int = 2
+    # 推文時間比觀測時間早超過這麼久的不計入（補抓、舊爆文；開發規格 7.20）
+    max_delay_min: int = 30
+    # 觀測時間比處理當下早超過這麼久的只更新基準、不觸發警示
+    stale_after_min: int = 60
+    ewma_alpha: float = 0.02
+    # watermark 一次前進超過這麼多分鐘時，只補最後這幾分鐘的 0
+    max_gap_min: int = 1440
+    z_threshold: float = 3.0
+    min_count: int = 30
+    # 文章的最低推文數另設較高的值：大多數文章推文很少，z-score 篩不掉（開發規格 7.20、#59）
+    post_min_count: int = 80
+    cooldown_min: int = 30
+    warmup_min: int = 60
+    min_std: float = 1.0
+
+
+class TelegramSettings(BaseSettings):
+    """Telegram bot（開發規格 7.21）。"""
+
+    model_config = SettingsConfigDict(env_prefix="TELEGRAM_")
+
+    bot_token: SecretStr
+    # 允許的 chat_id，逗號分隔；空白代表不限制
+    allowed_chat_ids: Annotated[list[int], NoDecode] = []
+    api_base_url: str = "https://api.telegram.org"
+    poll_timeout_s: int = 30
+    hot_window_min: int = 60
+    hot_limit: int = 5
+    # 推論最高分數低於此值顯示「不確定」（開發規格 7.23）
+    sentiment_min_score: float = Field(default=0.5, ge=0, le=1)
+    # 「不再通知」保留多久；文章 24 小時後就不再重爬
+    mute_retention_h: int = Field(default=48, gt=0)
+
+    @field_validator("allowed_chat_ids", mode="before")
+    @classmethod
+    def _split_chat_ids(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [int(v) for v in value.split(",") if v.strip()]
         return value
 
 

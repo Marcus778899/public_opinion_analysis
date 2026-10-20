@@ -135,8 +135,8 @@ services:
       - sh
       - -c
       - >-
-        alembic upgrade head && python scripts/create_topics.py
-        && python scripts/migrate_clickhouse.py && python scripts/register_connector.py
+        alembic upgrade head && python tools/create_topics.py
+        && python tools/migrate_clickhouse.py && python tools/register_connector.py
     environment:
       <<: *app-env
       CONNECT_URL: 'http://connect:8083'
@@ -199,6 +199,40 @@ services:
     environment:
       <<: *app-env
       CONNECT_URL: 'http://connect:8083'
+
+  # 情緒推論（S4，設計文件 8.2）：需要先訓練好模型，獨立 profile，make up-inference 才啟動
+  inference:
+    <<: *app
+    container_name: radar_inference
+    profiles: ["inference"]
+    command: ["python", "-m", "radar.ml.inference.main"]
+    environment:
+      <<: *app-env
+      INFERENCE_MODEL_DIR: '/app/models/${INFERENCE_MODEL_VERSION:-}'
+    volumes:
+      - app_logs:/app/log
+      - ../models:/app/models:ro
+
+  # 熱度偵測（S5-01～S5-04，開發規格 7.20）與 Telegram bot（S5-07，7.21）：make up-alerting 才啟動
+  heat:
+    <<: *app
+    container_name: radar_heat
+    profiles: ["alerting"]
+    command: ["python", "-m", "radar.streaming.heat"]
+    environment:
+      <<: *app-env
+      HEAT_STATE_DIR: '/app/state'
+    volumes:
+      - app_logs:/app/log
+      - heat_state:/app/state
+
+  bot:
+    <<: *app
+    container_name: radar_bot
+    profiles: ["alerting"]
+    command: ["python", "-m", "radar.bot.main"]
+    environment:
+      <<: *app-env
 
   # 串流抽樣標註（S3-08）：會持續呼叫 LLM API，獨立 profile，make up-labeling 才啟動
   label-stream:
@@ -338,6 +372,7 @@ services:
 
 volumes:
   app_logs:
+  heat_state:
   kafka_1_data:
   kafka_2_data:
   kafka_3_data:

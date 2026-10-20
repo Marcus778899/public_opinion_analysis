@@ -1,87 +1,72 @@
-# CLAUDE.md
+# CLAUDE.md（團隊共用規範）
 
-AI 協作開發規範。動手前先讀相關文件：
+所有 agent 啟動時都會讀這份。只放永遠成立的規則，越短越好；情境知識放 skills。
+
+@BOARD.md
+
+## 團隊規則
+
+- 布告欄（BOARD.md）上的「已定案決策」不可推翻；與之矛盾時停下來回報 manager
+- 只有 manager 可以改 BOARD.md（透過 `scripts/board.py`）、README.md、docs/decisions.md
+- 每件工作都有派工單 `tasks/<task_id>.md`（task_id 是有意義的名稱，例 `todo-create-api`）；只在派工單的工作目錄 `.worktrees/<task_id>` 修改「負責檔案」；主目錄只寫自己角色規定的檔（回報與證據 `reports/`，uat、researcher、security 各自的 `docs/` 子目錄），其他一律不碰；過去階段的派工單封存在 `tasks/<tag>/`
+- 分支：`main` ← `develop` ← `feat/`、`fix/`、`chore/`…；主目錄永遠停在 develop；不可直接 git push、merge、rebase、切換分支，一律透過 `scripts/`
+- 需要甲方決定的事寫成 D-編號，集中在 `docs/decisions.md`；其他文件只引用編號
+- 決策分級：只有這四類開 D-編號問甲方——①範圍（做不做、做多少）②成本與外部依賴（付費服務、新技術棧或套件）③品牌與對外語氣（品牌色、名稱、文案語氣）④不可逆或有風險（刪資料、權限、資料遷移、安全與法規）。其他可逆、在範圍內的細節（互動方式、版面、元件、欄位排序、命名…）由負責角色自己決定，寫進設計或 UI 規格的「自行決定」表，甲方核可設計時一起看
+- 設定值（port、domain、token…）只放 `.env`；文件與程式只寫變數名稱；不可讀 `.env`
+- 文件精簡：同一件事只寫一次，其他地方引用
+- 「完成」必須附實際執行的驗證指令與輸出；沒跑過不算完成
+- 回報格式依 `contracts/report.schema.json`（做派工單的角色都要寫）
+- Bash 在 sandbox 裡；docker 只能直接下 `docker compose …`（唯一在 sandbox 外的例外），不要包在 make、script 裡或跟 `cd`、`&&` 寫在同一個指令
+
+## 專案規範（PTT 即時輿情雷達）
+
+動手前先讀相關文件：
 
 - 設計：[docs/realtime-sentiment-radar-design.md](docs/realtime-sentiment-radar-design.md)（做什麼、為什麼）
-- 開發規格：[docs/development-spec.md](docs/development-spec.md)（怎麼做、驗收標準、任務 ID）
+- 開發規格：[docs/development-spec.md](docs/development-spec.md)（怎麼做、各階段範圍與驗收標準；進度看布告欄，見 D-004）
 
 回覆與文件一律使用繁體中文；程式碼識別字用英文。
 
-## 指令
+### 指令
 
 ```bash
 uv sync                                   # 安裝相依套件（含 radar 套件，editable）
 uv run pytest tests/unit                  # 單元測試
 uv run ruff check --fix . && uv run ruff format .
-uv run --env-file .env alembic upgrade head
 pre-commit run --all-files
-
-make up && make migrate && make topics    # 啟動 Kafka（3 節點）+ Postgres + CDC + ClickHouse，建表與 topic
-make ch-migrate && make connector         # ClickHouse 建表、註冊 Debezium connector
-make api                                  # 本機啟動管理 API
-make seed                                 # 透過 API 建立初始看板
-make up-app                               # 整套服務以 compose 啟動（自動建表與 topic）
-make e2e-up && make e2e && make e2e-down  # 端到端測試（假 PTT，不碰開發資料）
 ```
 
-## 目錄
+Makefile 裡碰 docker 或 `.env` 的目標（`make up`、`up-app`、`migrate`、`topics`、`e2e-up`…）在 sandbox 裡會失敗：
+agent 改成直接下 `docker compose -f infra/docker-compose.yaml --env-file .env …`（對應寫法見 Makefile）。
+開發與 e2e 共用容器名稱，不能同時運作（#41）；e2e 只用假 PTT（`infra/docker-compose.e2e.yaml`）。
+
+### 目錄
 
 - 程式碼都在 `src/radar/`，import 一律寫 `from radar.xxx import ...`
 - 每個服務的入口是自己的模組，用 `main()` + `if __name__ == "__main__": main()`，執行方式為 `python -m radar.<module>`
-- 測試放 `tests/unit/`、`tests/integration/`，目錄結構對應 `src/radar/`
+- 營運腳本（建 topic、ClickHouse migration、註冊 connector、seed）放 `tools/`；`scripts/` 是流程腳本，不放專案程式（D-006）
+- 測試放 `tests/unit/`、`tests/integration/`，目錄結構對應 `src/radar/`；驗收測試目錄由設計指定
 - PTT HTML 測試資料放 `tests/fixtures/ptt/`
-
-## 開發流程：先刻骨架，審過再實作
-
-每個任務分兩輪，**第一輪結束必須停下來等我確認**，不可直接進入第二輪。
-
-### 第一輪：骨架
-
-1. 建立模組、類別、函式簽名（含完整 type hints）、pydantic / ORM model
-2. 函式本體只放 `raise NotImplementedError` 與標記，例如：
-   ```python
-   def upsert_posts(session: Session, posts: list[RawPost]) -> int:
-       # TODO(S1-05): 同批依 post_id 去重，保留 crawled_at 最新的一筆
-       raise NotImplementedError
-   ```
-3. 測試檔一併建立，列出測試案例名稱，先標記 skip：
-   ```python
-   @pytest.mark.skip(reason="TODO(S1-05)")
-   def test_upsert_same_post_twice_in_batch_keeps_latest(): ...
-   ```
-4. 回報：新增了哪些檔案、介面設計的取捨、有疑問的地方
-
-### 第二輪：實作
-
-- 依確認後的骨架實作，移除對應的 `NotImplementedError` 與 skip
-- 實作中發現骨架需要調整，先說明再改
 
 ### 標記規則
 
 | 標記 | 用途 |
 |---|---|
-| `TODO(<任務 ID>)` | 尚未實作，任務 ID 對應開發規格第 6 章，例如 `TODO(S1-04)` |
+| `TODO(<task_id>)` | 骨架中尚未實作，`<task_id>` 是派工單名稱；沒有派工單的修正用 `TODO(#<issue>)` |
 | `FIXME` | 已知的錯誤，需要修 |
 | `HACK` | 暫時的繞道寫法，附上應改成什麼 |
 | `NOTE` | 不看註解會誤會的設計理由 |
 
-階段驗收前，`grep -rn "TODO(S<n>-" src tests` 必須沒有結果。
+一張單合併前，`grep -rn "TODO(<task_id>)" src tests` 必須沒有結果。
 
-## 程式碼規範
+### 程式碼規範
 
-### 註解
-
-- 每段註解最多 3 行；需要更長的說明代表該寫進 docs
-- 只寫「為什麼」，不寫「做了什麼」（程式碼本身說明）
-- docstring 同樣以 3 行為限，簡單函式不寫
-
-### 風格
-
+- 註解每段最多 3 行，只寫「為什麼」；需要更長的說明代表該寫進 docs。docstring 同樣以 3 行為限，簡單函式不寫
 - ruff 設定見 `pyproject.toml`（行寬 100），提交前必須通過
 - 全部使用 type hints；不用 `Any`，除非接外部無型別資料
 - 設定從環境變數讀，不寫死；新增的環境變數同步加到 `.env.example`
 - Log 一律用 `from radar.common.log import log`（包裝 loggerhelper），不用 `print`、標準 `logging` 或直接 import loggerhelper；服務入口的 `main()` 第一行呼叫 `setup_logging("<服務名>")`，並加上 `@log.catch(level="CRITICAL")`
-- 不新增相依套件，除非先問過我
+- 新增相依套件屬於決策分級②，要先開 D-編號
 
 ### 資料與架構約定（違反會造成資料錯誤）
 
@@ -94,32 +79,23 @@ make e2e-up && make e2e && make e2e-down  # 端到端測試（假 PTT，不碰�
 - 批次寫入用 SQLAlchemy Core，單筆 CRUD 用 ORM（開發規格 2.4）
 - Schema 只透過 Alembic migration 變更；已合併的 migration 不可修改，要改就新增一個
 
-## 測試規範
+### 測試規範
 
 - **每個新增或修改的函式都要有單元測試**，沒有測試的實作不算完成
-- 單元測試不連網路、不連真實 Kafka / PG；需要時用 fake 或 mock
+- 單元測試不連網路、不連真實 Kafka／PG；需要時用 fake 或 mock
 - 整合測試用 testcontainers，放 `tests/integration/`
 - **任何測試都不可對真實 PTT 發請求**，只讀 `tests/fixtures/ptt/` 或使用假 PTT 伺服器（`tests/e2e/fake_ptt.py`）
 - 測試名稱描述行為：`test_<情境>_<預期結果>`
 - 至少涵蓋：正常路徑、邊界值、錯誤輸入；consumer 另需涵蓋重複訊息（冪等）與 DLQ
 - 修 bug 先寫一個會失敗的測試重現它，再修
 
-## Git
+### Git
 
-- 不主動 commit 或 push，除非我要求
-- 分支：`feat/s<階段>-<簡述>`、`fix/<簡述>`，從 `develop` 開，合回 `develop`
-- Commit 使用 Conventional Commits：`feat(crawler): ...`、`test(ingest): ...`
-- 不提交 `.env`、爬下來的資料、模型檔
+- commit 使用 Conventional Commits：`<類型>(<task_id>): 說明`，例 `feat(dashboard-board-trend): ...`
+- 不提交 `.env`、爬下來的資料（`data/`）、模型檔（`models/`）
 
-### 同時有多個 PR 時（避免 docs 衝突）
-
-- 已有未合併的 PR、新分支又會改到 docs 時，新分支從**前一個分支**開（stacked），PR 的 base 設為前一個分支；前一個合併後 GitHub 會自動把 base 改回 `develop`，合併時照順序
-- 交給我 review 前，先在本機把所有未合併的 PR 模擬合併一次（`git merge --no-commit --no-ff`）；有衝突就先 rebase 該功能分支解決（只對功能分支 `--force-with-lease`），不把會衝突的 PR 交給我
-- 寫 docs 時避開熱點：進度表的新列放在相關階段的列旁邊；第 7 章新小節的標題寫上 issue 編號
-
-## 文件同步
+### 文件同步
 
 - **文件必須與程式同步**：行為、資料流、表、topic、訊息格式、API、相依套件有變動時，在同一個 PR 內更新設計文件或開發規格
 - 先改文件再改程式；實作中做出新決定時，回寫到文件後才算完成
-- 完成任務時更新開發規格第 6 章的進度表
 - 發現文件與實作不一致時，指出來，不要自行決定以哪邊為準

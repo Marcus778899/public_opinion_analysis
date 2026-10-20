@@ -6,6 +6,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -52,6 +53,8 @@ class Post(Base):
     url: Mapped[str] = mapped_column(Text)
     push_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     boo_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    # NOTE: 推＋噓＋箭頭；只多了箭頭也要讓 crawled_at 前進（開發規格 7.24）
+    comment_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     created_at: Mapped[datetime]
     crawled_at: Mapped[datetime]
     is_deleted: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
@@ -105,3 +108,41 @@ class CrawlState(Base):
     post_id: Mapped[str] = mapped_column(Text, ForeignKey("posts.post_id"), primary_key=True)
     next_crawl_at: Mapped[datetime]
     last_dispatched: Mapped[datetime]
+
+
+class Subscription(Base):
+    """Telegram bot 的訂閱（開發規格 7.21）；MVP 只有看板。"""
+
+    __tablename__ = "subscriptions"
+    __table_args__ = (
+        CheckConstraint("unit_type IN ('board')", name="unit_type_allowed"),
+        {"comment": "writer: bot; debezium: no"},
+    )
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    unit_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    unit_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class ChatSettings(Base):
+    """各 chat 的通知開關（開發規格 7.23）；沒有列時視為全部開啟。"""
+
+    __tablename__ = "chat_settings"
+    __table_args__ = ({"comment": "writer: bot; debezium: no"},)
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    post_alerts: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    board_alerts: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+
+class MutedPost(Base):
+    """「這篇不再通知」（開發規格 7.23）；文章 24 小時後不再重爬，bot 定期刪掉舊的。"""
+
+    __tablename__ = "muted_posts"
+    __table_args__ = ({"comment": "writer: bot; debezium: no"},)
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    post_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    muted_at: Mapped[datetime] = mapped_column(server_default=func.now())

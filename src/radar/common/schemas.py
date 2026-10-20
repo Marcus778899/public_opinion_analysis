@@ -2,7 +2,7 @@
 
 from collections import Counter
 from datetime import UTC, datetime
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 from uuid import UUID
 
 from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field, model_validator
@@ -134,6 +134,32 @@ class Label(KafkaMessage):
         return self
 
 
+# predict_proba 的浮點誤差遠小於此值
+_SCORE_SUM_TOLERANCE = 1e-3
+
+
+class Prediction(KafkaMessage):
+    """topic: predictions；key: post_id（開發規格 3.5）。同一篇可能有多筆，下游取最新。"""
+
+    post_id: str
+    model_version: str
+    predicted_at: UtcDatetime
+    polarity: Polarity
+    scores: dict[Polarity, float]
+    # 模型輸入文字的 SHA-256 hex；推論服務重啟時用來重建快取（開發規格 7.19）
+    text_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def _check_scores(self) -> Self:
+        if set(self.scores) != set(Polarity):
+            raise ValueError(f"scores must have exactly {[p.value for p in Polarity]}")
+        if abs(sum(self.scores.values()) - 1.0) > _SCORE_SUM_TOLERANCE:
+            raise ValueError(f"scores must sum to 1, got {sum(self.scores.values())}")
+        if self.scores[self.polarity] < max(self.scores.values()):
+            raise ValueError(f"polarity {self.polarity} is not the highest score")
+        return self
+
+
 class CdcPost(BaseModel):
     """cdc.public.posts 經 ExtractNewRecordState 攤平後的 value（設計文件 6.1）；只取需要的欄位。"""
 
@@ -148,6 +174,37 @@ class CdcPost(BaseModel):
     # PG 端刪除列時為 "true"；系統不刪 PG 的列，正常不會出現
     deleted: str | None = Field(default=None, alias="__deleted")
     source_lsn: int | None = Field(default=None, alias="__source_lsn")
+
+
+class CdcComment(BaseModel):
+    """cdc.public.comments 攤平後的 value（設計文件 6.1）；只取需要的欄位。"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    post_id: str
+    floor: int
+    type: CommentType
+    commented_at: UtcDatetime | None = None
+    op: str | None = Field(default=None, alias="__op")
+    # PG 的 commit 時間（毫秒）；推文沒有時間時當作 event time（開發規格 7.20）
+    source_ts_ms: int | None = Field(default=None, alias="__source_ts_ms")
+    deleted: str | None = Field(default=None, alias="__deleted")
+
+
+class Alert(KafkaMessage):
+    """topic: alerts；key: unit_key（開發規格 3.6）。寫入者只有 heat。"""
+
+    alert_id: UUID
+    unit_type: Literal["post", "board"]
+    unit_key: str
+    board: str
+    window_start: UtcDatetime
+    window_end: UtcDatetime
+    value: int = Field(ge=0)
+    baseline: float
+    zscore: float
+    sample_post_ids: list[str]
+    created_at: UtcDatetime
 
 
 def check_sentiments(sentiments: list[Sentiment]) -> None:

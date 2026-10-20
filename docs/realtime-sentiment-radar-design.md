@@ -1,7 +1,7 @@
 # 即時輿情雷達：設計草案
 
-> 狀態：實作中（階段 1 待 24 小時驗收，階段 2 進行中；進度見開發規格第 6 章）
-> 最後更新：2026-10-07
+> 狀態：實作中（階段 1～4 已驗收；階段 5 MVP 待 3 天驗收；進度見開發規格第 6 章）
+> 最後更新：2026-10-17
 >
 > 本文件需與程式同步：改動資料流、表、topic、訊息格式時先更新這裡（CLAUDE.md）。
 
@@ -27,7 +27,14 @@
 
 ## 1. 產品定位
 
-追蹤 PTT 等社群上的話題，在討論**開始發酵的前幾分鐘**偵測並通知使用者，同時提供情緒分析與話題摘要。
+追蹤 PTT 等社群上的話題，在討論**開始發酵時**偵測並通知使用者，同時告訴使用者這個話題的**風向**。
+
+- **主要介面是 Telegram bot**：警示推送，與用按鈕選單管理訂閱、查詢熱門與看板概況（9.2）；Dashboard 看長時間的趨勢（9.1）
+- **兩類訊號**：
+  - 熱度：推文增加的速度（8.3）
+  - 風向：文章本身的情緒（模型推論，8.2）、共鳴度與爭議度（推、噓、箭頭的數量與比例，15.6）。推文內容的情緒（群眾反應）列為延伸功能（14.4）
+- **即時性**：受 PTT 網頁版約 10 分鐘的更新週期限制（4.2）；要更即時需改用 PTT BBS（開發規格「後續階段」）
+- 每日話題摘要（LLM）為非 MVP 功能
 
 ### 1.1 為什麼用 Kafka
 
@@ -92,7 +99,7 @@
 | CDC watchdog | 1 | 監看 connector 與 replication slot，task 失敗時自動重啟（6.4） |
 | Apicurio | 1 | Schema Registry |
 | ClickHouse | 1 | OLAP 分析、熱度曲線、訓練資料來源 |
-| Telegram bot | 1 | 推送警示與每日摘要、接收訂閱指令 |
+| Telegram bot | 1 | 推送警示（熱度、推噓與爭議度、文章情緒）與每日摘要；按鈕選單管理訂閱、查詢熱門與看板概況 |
 
 ---
 
@@ -159,14 +166,16 @@ Apicurio 使用 SQL 儲存，不建立 topic。PG connector 不需要 schema his
 
 #### 近期文章：依年齡分級重爬
 
+PTT 網頁版的文章頁約 10 分鐘才更新一次（開發規格 7.22），重爬再密也拿不到更新的內容；即時性的下限約 10 分鐘，要更低需改用即時的資料來源（PTT BBS，見開發規格「後續階段」）。
+
 | 文章年齡 | 重爬頻率 |
 |---|---|
-| < 1 小時 | 每 2 分鐘 |
+| < 1 小時 | 每 5 分鐘 |
 | 1～6 小時 | 每 10 分鐘 |
 | 6～24 小時 | 每小時 |
 | > 24 小時 | 停止 |
 
-**重爬門檻**：文章滿 1 小時後，推文數低於該看板的 `boards.recrawl_min_push` 就停止重爬。依上表每篇 24 小時內約重爬 78 次，Gossiping 一天數千篇會超出請求預算，門檻用來只追蹤有在發酵的文章（Gossiping 預設 10，其餘 0）。
+**重爬門檻**：文章滿 1 小時後，推文總數（推、噓、箭頭都算）低於該看板的 `boards.recrawl_min_push` 就停止重爬（欄位名稱沿用，見開發規格 7.2）。依上表每篇 24 小時內約重爬 60 次，Gossiping 一天數千篇會超出請求預算，門檻用來只追蹤有在發酵的文章（Gossiping 預設 10，其餘 0）。
 
 ### 4.3 管理後端（FastAPI）
 
@@ -233,7 +242,7 @@ WHERE b.enabled                                          -- 停用的看板不�
   AND NOT p.is_deleted
   AND p.created_at > now() - interval '24 hours'
   AND (p.created_at > now() - interval '1 hour'          -- 1 小時內一律重爬
-       OR p.push_count >= b.recrawl_min_push)            -- 之後只追蹤達門檻的
+       OR p.comment_count >= b.recrawl_min_push)         -- 之後只追蹤推文總數（推＋噓＋→）達門檻的
   AND (cs.next_crawl_at IS NULL OR cs.next_crawl_at <= now())
 ORDER BY cs.next_crawl_at NULLS FIRST, p.created_at DESC  -- 沒派發過的優先
 LIMIT 500;                                               -- 其餘留到下一輪
@@ -278,7 +287,7 @@ LIMIT 500;                                               -- 其餘留到下一�
 - **同批去重**：同一個 `post_id` 只留 `crawled_at` 最新的一筆；`ON CONFLICT DO UPDATE` 不能在同一個語句更新同一列兩次
 - **推文分段**：每 5000 列送一次，避開 PG 單一語句 65535 個參數的上限
 - **刪除快照**：只把既有文章的 `is_deleted` 設為 true 並更新 `crawled_at`，保留刪除前的內容；從未見過的文章略過，已標記的不重複寫；比 `posts.crawled_at` 舊的刪除快照略過（較晚到的舊 404 不可蓋掉較新的 200）
-- **推文同步**：推文以頁面上的順序編樓層，中間有推文被刪時後面全部往前移一層。快照不比 `posts.crawled_at` 舊時才同步：同一樓層內容不同就更新，超過新快照最大樓層的刪除；比較舊的快照不碰推文（否則晚到、推文較少的舊快照會刪掉新推文）。一般重爬只是新推文接在後面，舊樓層不變，不會多寫
+- **推文同步**：推文以頁面上的順序編樓層，中間有推文被刪時後面全部往前移一層。快照不比 `posts.crawled_at` 舊時才同步（推文數也列入變化判斷，只多了箭頭時 `crawled_at` 同樣前進）：同一樓層內容不同就更新，超過新快照最大樓層的刪除；比較舊的快照不碰推文（否則晚到、推文較少的舊快照會刪掉新推文）。一般重爬只是新推文接在後面，舊樓層不變，不會多寫
 - **撤銷刪除**：已標記刪除的文章收到比 `crawled_at` 新的正常快照時，`is_deleted` 改回 false 並寫入新內容，避免 PTT／Cloudflare 暫時性的錯誤 404 讓文章被永久誤判為刪除。Scheduler 照舊不重爬已刪除的文章；被誤判的文章若還在列表上，推文數一變（或爬蟲重啟、快取清空）列表任務就會重抓內頁而復原。真的被刪的文章在列表上沒有連結，不會被重抓
 - **錯誤處理**：
   - DB 連線錯誤（`OperationalError`）→ 整批重試
@@ -290,11 +299,12 @@ LIMIT 500;                                               -- 其餘留到下一�
 
 ```sql
 INSERT INTO posts (post_id, board, author, title, content, url,
-                   push_count, boo_count, created_at, crawled_at)
+                   push_count, boo_count, comment_count, created_at, crawled_at)
 VALUES (...)
 ON CONFLICT (post_id) DO UPDATE SET
   push_count = EXCLUDED.push_count,
   boo_count  = EXCLUDED.boo_count,
+  comment_count = EXCLUDED.comment_count,
   title      = EXCLUDED.title,
   content    = EXCLUDED.content,
   crawled_at = EXCLUDED.crawled_at,
@@ -303,6 +313,7 @@ WHERE posts.crawled_at < EXCLUDED.crawled_at                  -- 舊快照不覆
   AND (posts.is_deleted
     OR posts.push_count IS DISTINCT FROM EXCLUDED.push_count
     OR posts.boo_count  IS DISTINCT FROM EXCLUDED.boo_count
+    OR posts.comment_count IS DISTINCT FROM EXCLUDED.comment_count  -- 只多了箭頭
     OR posts.title      IS DISTINCT FROM EXCLUDED.title       -- 作者可能改標題
     OR posts.content    IS DISTINCT FROM EXCLUDED.content);   -- 沒變化就不寫
 
@@ -344,6 +355,7 @@ CREATE TABLE posts (
   url           TEXT NOT NULL,
   push_count    INT  NOT NULL DEFAULT 0,        -- 由推文計算
   boo_count     INT  NOT NULL DEFAULT 0,
+  comment_count INT  NOT NULL DEFAULT 0,        -- 推＋噓＋箭頭
   created_at    TIMESTAMPTZ NOT NULL,
   crawled_at    TIMESTAMPTZ NOT NULL,
   is_deleted    BOOLEAN NOT NULL DEFAULT FALSE
@@ -363,7 +375,7 @@ CREATE TABLE boards (
   board            TEXT PRIMARY KEY,
   enabled          BOOLEAN NOT NULL DEFAULT TRUE,
   interval_sec     INT NOT NULL CHECK (interval_sec >= 30),
-  recrawl_min_push INT NOT NULL DEFAULT 0 CHECK (recrawl_min_push >= 0),  -- 4.2 重爬門檻
+  recrawl_min_push INT NOT NULL DEFAULT 0 CHECK (recrawl_min_push >= 0),  -- 4.2 重爬門檻（推文總數）
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()                     -- ORM 更新時刷新
 );
 
@@ -384,6 +396,7 @@ CREATE INDEX ON crawl_state (next_crawl_at);
 | `posts`、`comments` | Ingest consumer | ✅ |
 | `boards` | FastAPI | ❌ |
 | `crawl_state` | Scheduler | ❌ |
+| `subscriptions`、`chat_settings`、`muted_posts` | Telegram bot | ❌ |
 
 每張表只有一個寫入者。爬蟲不能同時寫 PG 和 Kafka（雙寫）。寫入者與是否被監聽也記在各表的 PG table comment。
 
@@ -531,14 +544,27 @@ Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED
 ### 8.2 情緒推論
 
 - 消費 `cdc.public.posts`，載入模型預測，寫入 `predictions`
-- 訊息帶 `model_version`
+- 訊息帶 `model_version`；啟動時載入一個指定的模型版本（`models/<model_version>/`），換模型就重啟服務
+- **避免重複推論**：大部分 CDC 事件只是推噓數更新。以模型輸入文字（標題＋截斷後的內文，與訓練相同）的 hash 判斷，與本地快取的 hash 相同就不推論
+  - 快取裡沒有這篇時：新文章（`op=c`）推論；更新（`op=u`）與 snapshot（`op=r`）只記下 hash、不推論。重啟後快取是空的，若對更新也推論，每篇文章的第一次推噓數變化都會重複推論一次
+  - 重啟時從 ClickHouse `predictions` 載入同一個模型版本每篇最新的 `text_hash`，重啟後編輯的文章照常重新推論（開發規格 7.19）；只有重啟前幾秒、還沒寫進 ClickHouse 的推論載不到
+  - 服務上線前已存在的文章沒有推論結果，需要時另外補跑
+  - Connect 重啟重送的 `op=c` 事件，hash 相同也不會重複推論
+- 刪除的文章（`is_deleted`）不推論
+- 模型檔不進 image：compose 以唯讀方式掛載 `models/`，模型版本由環境變數指定
+- **呈現**：Telegram（警示、熱門、看板概況，9.2）與 Dashboard（9.1）讀 ClickHouse `predictions` 每篇最新一筆；信心不足顯示「不確定」（15.8）
 
 ### 8.3 熱度偵測
 
 - 輸入：`cdc.public.comments`、`cdc.public.posts`；`comments` 的事件除了新增（`c`）也有改寫（`u`）、刪除（`d`），計算新增推文數時只算 `c`
 - 依文章 / 看板做滑動視窗統計（每 1 分鐘、視窗 10 分鐘），之後擴充到實體、主題（見 15.2）
-- 與歷史基準比較（z-score / EWMA），超過門檻寫入 `alerts`
-- Quix Streams：純 Python、狀態存 RocksDB 並備份到 changelog topic
+- 與歷史基準比較（z-score / EWMA），超過門檻寫入 `alerts`；每分鐘結算時判斷，警示的推文數反映結算時的熱度，不是剛越過門檻的值
+- 文章與「該看板活躍文章共用的基準」比較，基準每分鐘更新一次，冷卻中的文章不納入；文章另設較高的最低推文數（80，看板 30），因為大多數文章的推文很少，z-score 對文章幾乎沒有篩選力（開發規格 7.20）
+- Quix Streams：純 Python、狀態存 RocksDB 並備份到 changelog topic；以 exactly-once 處理，重啟後不重送已發過的警示
+- 以看板為 key 分組，文章與看板兩種單位在同一份 state 計算（文章要和看板的基準比較）
+- 時間基準用觀測時間（推文進 PG 的時間），寬限 2 分鐘：推文要等爬蟲抓到才看得到，進 PG 時已晚約 8 分鐘，用推文時間會把大部分推文當成遲到丟掉（開發規格 7.20）
+- 推文時間比觀測時間早超過 30 分鐘的不計入（補抓、舊爆文）；比當下早超過 1 小時的舊事件只更新基準、不觸發
+- 細節見開發規格 7.20；回放與人工暴增工具 `streaming/replay.py`
 
 ### 8.4 Shadow 比較
 
@@ -551,14 +577,28 @@ Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED
 
 ### 9.1 Dashboard
 
-Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情緒分布、實體排行。
+Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、情緒分布與趨勢、爭議度、近 24 小時警示、熱門文章排行。長時間的趨勢看 Dashboard；即時通知與快速查詢在 Telegram。
 
 ### 9.2 Telegram bot
 
-- 推送：消費 `alerts`
-- 指令：`/subscribe 台積電`、`/boards`、`/hot`
-- 使用 long polling，不需要對外開放 HTTP
-- 每日摘要：APScheduler cron trigger，每天 08:00 用 LLM 摘要前一天的熱門話題
+主要介面。MVP（階段 5）只有文字指令；階段 6 改成按鈕選單（15.7），文字指令保留。
+
+- **推送**：消費 `alerts`，依訂閱（看板）推送。每則警示附：
+  - 熱度：視窗內推文數，與平常（基準）的倍數
+  - 推、噓、箭頭數與爭議度（噓 ÷（推＋噓））
+  - 文章情緒：模型推論的標籤與信心；信心不足顯示「不確定」，還沒推論的顯示「尚無」（15.8）
+  - 按鈕：開啟原文（URL 按鈕）、看板概況、這篇不再通知、訂閱設定
+  - 看板警示另附推文最多的前 3 篇，各帶推噓與情緒
+- **主選單**（`/start`、`/menu`）：按鈕切換時編輯同一則訊息，不洗版
+  - 🔥 現在熱門：最近 60 分鐘推文最多的文章（預設只看訂閱的看板），附推噓、爭議度、情緒與原文按鈕
+  - 📋 我的訂閱：列出所有啟用的看板，✅／⬜ 點一下切換
+  - 📈 看板概況：選看板後顯示近 24 小時的文章數、推文量、情緒比例（負面／中立／正面）、爭議度最高的文章、今天的警示數
+  - ⚙️ 通知設定：文章警示、看板警示分別開關；「不再通知」的文章清單（可恢復）
+- 使用 long polling，不需要對外開放 HTTP；以 `httpx2` 直接呼叫 Bot API（含 inline keyboard、callback query），不加 SDK
+- 只回應允許清單內的 chat（`TELEGRAM_ALLOWED_CHAT_IDS`），按鈕回呼同樣檢查
+- 之後：`/subscribe 台積電`（實體，15.2 進階 1）；Mini App（14.3，上雲、有 HTTPS 之後）
+- 細節見開發規格 7.21（MVP 文字指令）、7.23（按鈕選單與情緒呈現）
+- 每日摘要：APScheduler cron trigger，每天 08:00 用 LLM 摘要前一天的熱門話題（S5-08，非 MVP）
 
 ---
 
@@ -590,8 +630,10 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 │   │   ├── experiments/     # [一次性] push_ratio（推噓比弱標註實驗）
 │   │   ├── training/        # [一次性] export / train / evaluate
 │   │   └── inference/main.py  # [常駐]
-│   ├── streaming/heat.py    # [常駐] Quix Streams
-│   └── bot/main.py          # [常駐] Telegram bot
+│   ├── streaming/
+│   │   ├── heat.py          # [常駐] Quix Streams
+│   │   └── replay.py        # [一次性] 錄製、回放、人工暴增
+│   └── bot/                 # [常駐] Telegram bot：main（long polling、推送）、views（訊息與按鈕）、callbacks、stats（ClickHouse 查詢）
 ├── infra/
 │   ├── docker-compose.yaml
 │   ├── debezium/
@@ -606,7 +648,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 | 類型 | 程式 | 執行方式 |
 |---|---|---|
 | 常駐 | api、scheduler、crawler、ingest、cdc/watchdog、labeling/stream、inference、heat、bot | docker-compose service |
-| 一次性 | labeling/backfill、manual、cross_check、testset、experiments/*、training/* | 手動執行或 Colab |
+| 一次性 | labeling/backfill、manual、cross_check、testset、experiments/*、training/*、inference/backfill_hash、streaming/replay | 手動執行或 Colab |
 | 本機 | labeling/human_app | 人工標註時執行，只綁 127.0.0.1 |
 
 不使用系統 cron，定時行為都在常駐程式內用 APScheduler 處理。
@@ -620,7 +662,9 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 | `kafka_1`～`kafka_3`、`postgres` | （預設） | 本機開發時服務直接用 `uv run` 執行 |
 | `apicurio-db-init`、`apicurio`、`connect`、`clickhouse` | （預設） | 階段 2 起屬於資料流的一部分，`make up` 一併啟動；`apicurio-db-init` 是一次性服務 |
 | `label-stream` | `labeling` | 串流抽樣標註，會持續呼叫 LLM API，`make up-labeling` 才啟動 |
-| `kafka-ui` | （預設） | 開發期間預設啟動（http://localhost:8089，只綁本機），部署前移除（S8-06） |
+| `inference` | `inference` | 情緒推論（8.2），需要先訓練好模型；`make up-inference` 才啟動，以唯讀方式掛載 `models/` |
+| `heat`、`bot` | `alerting` | 熱度偵測（8.3）與 Telegram bot（9.2）；bot 需要 `TELEGRAM_BOT_TOKEN`，`make up-alerting` 才啟動；heat 的 RocksDB 掛 volume `heat_state` |
+| `kafka-ui` | （預設） | 開發期間預設啟動（http://localhost:8089，只綁本機），部署前移除（S9-06） |
 | `init` | `app` | 一次性：Alembic、建立 topic、ClickHouse migration、註冊 connector（皆冪等）；唯一負責建置 `radar-app` image 的服務 |
 | `api` | `app` | 只綁 `127.0.0.1:8000` |
 | `scheduler` | `app` | 只能 1 個；多開時其餘的待命 |
@@ -661,7 +705,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 ### 11.3 減輕負擔
 
 - JVM 服務設定 heap 上限
-- Kafka UI 部署時移除（S8-06）
+- Kafka UI 部署時移除（S9-06）
 - 標註用雲端 API，不同時跑 Ollama
 
 ---
@@ -686,6 +730,7 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 - [ ] 刪除標記不可逆、不比較 `crawled_at` → 暫時性的 404 或晚到的舊 404 讓文章被永久誤判為刪除
 - [ ] 一次 INSERT 太多推文 → 超過 PG 65535 個參數上限
 - [ ] 推文只新增不同步 → 中間的推文被刪後樓層位移，`comments` 與頁面、推噓數對不上
+- [ ] 變化判斷只看推噓數 → 只多了箭頭時 `crawled_at` 不前進，晚到的舊快照刪掉較新的推文
 - [ ] 會被刪除的表沒設 `REPLICA IDENTITY FULL` → Debezium 刪除事件只帶主鍵，下游的非 Nullable 欄位解析失敗
 - [ ] Debezium 沒開 heartbeat → WAL 塞滿硬碟
 - [ ] Connect task `FAILED` 沒人重啟、只看 consumer lag → CDC 停了好幾個小時都沒發現，WAL 持續累積
@@ -721,9 +766,12 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 | 3 | LLM 標註 + TF-IDF baseline | 第一版模型與評估分數 |
 | 4 | 推論 consumer | 新文章自動帶情緒分數 |
 | 5 | 熱度偵測 + Telegram bot | 話題暴增時收到通知（**MVP**） |
-| 6 | Dashboard | 視覺化 |
-| 7 | BERT + shadow 比較 | 模型比較報告 |
-| 8 | Terraform 上雲 | 24 小時運作 |
+| 6 | Telegram 互動與情緒呈現 | 按鈕操作；警示帶推噓、爭議度與文章情緒 |
+| 7 | Dashboard | 視覺化 |
+| 8 | BERT + shadow 比較 | 模型比較報告 |
+| 9 | Terraform 上雲 | 24 小時運作 |
+
+之後的階段（實體與主題熱度、即時資料來源、推文層級情緒、Mini App 等）見開發規格「後續階段」。
 
 ---
 
@@ -742,6 +790,20 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 - FastAPI 修改設定時寫入 compacted topic `config.boards`，Scheduler 改為消費該 topic
 - 優點：設定立即生效，可練習 log compaction
 - 代價：需處理雙寫（Outbox pattern 或 Debezium 監聽 `boards`）
+
+### 14.3 Telegram Mini App
+
+- 在 Telegram 裡開網頁介面：圖表、可篩選的清單、看板情緒趨勢
+- 前置：對外的 HTTPS 網址（上雲後，開發規格階段 9）；後端要驗證 Telegram 傳來的 `initData` 簽章
+- 與 Dashboard 有重疊：Mini App 給使用者在手機上看，Grafana 給維運與分析
+
+### 14.4 推文層級的情緒（群眾反應）
+
+- 現在的模型判斷「文章本身的情緒」（作者的立場）；輿情更關心讀者的反應
+- 推噓只代表同不同意（15.6），不是情緒；要知道讀者在支持、反對還是嘲諷，需要對推文內容分類
+- 做法：LLM 抽樣標註推文 → 訓練推文層級的模型 → 彙總成「這篇底下的輿論偏向」，呈現在 Telegram 與 Dashboard
+- 代價：另一筆標註費用；推文短、反諷多，難度比文章高
+- 時程未定，等階段 6 上線看實際需求再決定（開發規格「後續階段」）
 
 ---
 
@@ -793,9 +855,24 @@ Grafana（接 ClickHouse）或 Streamlit：各看板熱度曲線、話題與情�
 - 下游本來就從 `cdc.public.comments` 拿到逐筆推文，不需要在 raw 層拆
 - 單則訊息過大時的對策：zstd 壓縮、調高 `max.message.bytes`；仍不夠再讓爬蟲只送新樓層（任務帶 `last_floor`）
 
-### 15.6 推噓比作為弱標註：列為第 3 階段的驗證實驗
+### 15.6 推噓比作為弱標註：已驗證，不採用（S3-05）
 
 - 疑慮：推噓代表「同不同意這篇文」，不等於「這篇文的情緒」（例如痛罵某公司的文章被大量推）
-- 驗證方式：拿 LLM 標註的資料，比較各情緒類別的推噓比分布
-- 相關性弱 → 不當標籤，改當獨立指標（共鳴度、爭議度）或模型特徵
-- 推文層級的 `推` / `噓` 對「該則推文對文章的態度」可能是較好的弱標註，一併驗證
+- 結果（`docs/reports/s3-05-push-ratio.md`）：Groq、Claude、人工三種標註來源，各情緒類別的推噓比中位數都在 0.87～0.91，相關係數接近 0 → **不當標籤**
+- **改當獨立指標**，直接呈現給使用者（9.2、9.1）：共鳴度（推文總數）、爭議度（噓 ÷（推＋噓））、箭頭比例
+- **不當模型特徵**：與情緒沒有相關；推噓數持續變動，當特徵會讓同一篇的預測跳動，每次推噓變化都要重新推論（與 8.2「推噓更新不重新推論」衝突），訓練與推論時的數值也不一致
+- 推文層級的 `推` / `噓` 對「該則推文對文章的態度」可能是較好的弱標註：需要推文層級的情緒標註才能驗證，併入 14.4
+
+### 15.7 Telegram 互動：按鈕選單，之後再做 Mini App（2026-10-17）
+
+- MVP 的文字指令要記看板名稱與參數（`/subscribe Gossiping`），不符合 Telegram bot 的使用習慣
+- 採 inline keyboard：long polling 就能用、不需要對外網址、不用另寫前端；按鈕切換時編輯同一則訊息
+- Mini App（14.3）的畫面更豐富，但需要 HTTPS 與另一套前端，等上雲後再做
+- 文字指令保留（相容、除錯用）
+
+### 15.8 情緒呈現的原則（2026-10-17）
+
+- 「情緒」目前指文章本身的情緒；群眾反應見 14.4。介面上寫「文章情緒」，避免使用者誤會成推文的風向
+- 單篇顯示時附信心，低於門檻顯示「不確定」：baseline macro-F1 0.504，positive 幾乎分不出來（`docs/reports/model-evaluation.md`）
+- 看板層級看比例與趨勢，比單篇判斷可靠
+- 換成 BERT（階段 8）後重新決定門檻

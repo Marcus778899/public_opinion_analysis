@@ -9,10 +9,13 @@ from radar.common.settings import (
     ClickHouseSettings,
     ConnectSettings,
     CrawlerSettings,
+    HeatSettings,
+    InferenceSettings,
     KafkaSettings,
     LabelingSettings,
     PostgresSettings,
     SchedulerSettings,
+    TelegramSettings,
 )
 
 PG_ENV = {
@@ -187,3 +190,78 @@ def test_cdc_watchdog_settings_blank_heartbeat_url_is_none(no_watchdog_env, monk
     monkeypatch.setenv("CDC_WATCHDOG_HEARTBEAT_URL", blank)
 
     assert CdcWatchdogSettings().heartbeat_url is None
+
+
+@pytest.fixture
+def no_inference_env(monkeypatch):
+    for key in [k for k in os.environ if k.startswith("INFERENCE_")]:
+        monkeypatch.delenv(key)
+
+
+def test_inference_settings_requires_model_dir(no_inference_env):
+    with pytest.raises(ValidationError):
+        InferenceSettings()
+
+
+def test_inference_settings_defaults(no_inference_env, monkeypatch):
+    monkeypatch.setenv("INFERENCE_MODEL_DIR", "models/tfidf-lr-x")
+
+    s = InferenceSettings()
+
+    assert str(s.model_dir) == "models/tfidf-lr-x"
+    assert (s.cache_size, s.batch_size) == (200_000, 100)
+
+
+def test_heat_settings_defaults_match_dev_spec(monkeypatch):
+    for key in [k for k in os.environ if k.startswith("HEAT_")]:
+        monkeypatch.delenv(key)
+
+    s = HeatSettings()
+
+    assert (s.input_topic, s.consumer_group) == ("cdc.public.comments", "heat")
+    assert (s.window_min, s.grace_min, s.max_delay_min, s.stale_after_min) == (10, 2, 30, 60)
+    assert (s.z_threshold, s.min_count, s.cooldown_min, s.warmup_min) == (3.0, 30, 30, 60)
+
+
+def test_telegram_settings_allowed_chat_ids_split_by_comma(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", " 123, -100456 ,, ")
+
+    assert TelegramSettings().allowed_chat_ids == [123, -100456]
+
+
+def test_telegram_settings_allowed_chat_ids_empty_means_unrestricted(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", "")
+
+    assert TelegramSettings().allowed_chat_ids == []
+
+
+def test_telegram_settings_missing_token_raises(monkeypatch):
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+
+    with pytest.raises(ValidationError, match="bot_token"):
+        TelegramSettings()
+
+
+def test_telegram_settings_token_hidden_in_repr(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:secret")
+
+    assert "secret" not in repr(TelegramSettings())
+
+
+def test_telegram_sentiment_and_mute_defaults(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+
+    settings = TelegramSettings()
+
+    assert (settings.sentiment_min_score, settings.mute_retention_h) == (0.5, 48)
+
+
+@pytest.mark.parametrize("value", ["-0.1", "1.5"])
+def test_telegram_sentiment_min_score_out_of_range_rejected(monkeypatch, value):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_SENTIMENT_MIN_SCORE", value)
+
+    with pytest.raises(ValidationError):
+        TelegramSettings()

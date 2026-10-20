@@ -55,6 +55,8 @@ class ClickHouseClient:
 
     def query_rows(self, sql: str, params: dict[str, str] | None = None) -> list[dict[str, Any]]:
         """以 JSONEachRow 回傳每列一個 dict（外部無型別資料，呼叫端自行驗證）。"""
+        # NOTE: 只接上輸出格式，值一律走 params（semgrep 誤判為 SQL injection）
+        # nosemgrep
         body = self.execute(f"{sql}\nFORMAT JSONEachRow", params)
         return [json.loads(line) for line in body.splitlines() if line.strip()]
 
@@ -120,6 +122,7 @@ def applied_versions(client: ClickHouseClient) -> set[int]:
         "(version UInt32, name String, applied_at DateTime DEFAULT now()) "
         "ENGINE = MergeTree ORDER BY version"
     )
+    # nosemgrep  # 表名是模組常數
     rows = client.execute(f"SELECT version FROM {MIGRATIONS_TABLE} FORMAT TabSeparated")
     return {int(v) for v in rows.split()}
 
@@ -136,6 +139,7 @@ def apply_pending(client: ClickHouseClient, migrations: list[Migration]) -> list
         for statement in m.statements:
             client.execute(statement)
         # name 已由檔名規則限制為 [a-z0-9_]，可直接放進字串常值
+        # nosemgrep
         client.execute(
             f"INSERT INTO {MIGRATIONS_TABLE} (version, name) VALUES ({m.version}, '{m.name}')"
         )

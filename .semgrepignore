@@ -1,0 +1,17 @@
+# NOTE: 有這個檔時 semgrep 不再套用內建的忽略清單，以下前段照抄內建清單
+:include .gitignore
+node_modules/
+build/
+dist/
+vendor/
+.env/
+.venv/
+.tox/
+*.min.js
+test/
+tests/
+.semgrep
+.semgrep_logs/
+
+# 已合併的 migration 不可修改（CLAUDE.md）；PUBLICATION 是模組常數，不是外部輸入（2026-10-20 確認誤判）
+infra/postgres/migrations/versions/a3c1f0d2b7e4_create_cdc_publication.py

@@ -1,7 +1,7 @@
 # 即時輿情雷達：開發流程規格
 
-> 狀態：v0.3，對應設計文件 [realtime-sentiment-radar-design.md](realtime-sentiment-radar-design.md)
-> 最後更新：2026-10-07
+> 狀態：v0.4，對應設計文件 [realtime-sentiment-radar-design.md](realtime-sentiment-radar-design.md)
+> 最後更新：2026-10-17（新增階段 6「Telegram 互動與情緒呈現」，原階段 6～8 順延為 7～9）
 
 設計文件回答「要做什麼、為什麼」；本文件回答「怎麼做、做到什麼程度算完成」。兩者衝突時，先修設計文件再改本文件。**文件必須與程式同步**：行為、格式、相依套件有變動時，同一個 PR 內一併更新。
 
@@ -35,8 +35,8 @@
 | Python | 3.12 | 所有自寫服務共用 |
 | 套件管理 | uv | `pyproject.toml` + `uv.lock` |
 | Lint / format | ruff | 已在 pre-commit |
-| 安全掃描 | bandit | 已在 pre-commit |
-| 測試 | pytest、pytest-asyncio、testcontainers | |
+| 安全掃描 | bandit；CI 另跑 gitleaks、osv-scanner、semgrep | bandit 在 pre-commit；誤判寫進 `.gitleaksignore` 等忽略檔並附理由 |
+| 測試 | pytest、pytest-asyncio、pytest-cov、testcontainers | 覆蓋率：PR 改到的程式碼 ≥ 80%（`scripts/coverage_gate.py`），不量的路徑列在 `.coverage-exempt` |
 | 設定 | pydantic-settings | 全部從環境變數讀，提供 `.env.example` |
 | Kafka client | confluent-kafka | |
 | Web API | FastAPI + uvicorn | 依賴以 `Annotated` 注入，測試以 `dependency_overrides` 換成 fake |
@@ -63,13 +63,13 @@
 ├── .env.example
 ├── infra/
 │   ├── postgres/migrations/ # Alembic（alembic.ini 放在根目錄）
-│   ├── kafka/topics.yaml    # topic 定義，由 scripts/create_topics.py 套用
+│   ├── kafka/topics.yaml    # topic 定義，由 tools/create_topics.py 套用
 │   ├── debezium/            # Connect image（含 Apicurio converter）、connector 設定
 │   └── clickhouse/          # config.d、users.d、migrations/（編號 SQL）
 ├── docs/labeling-guideline.md  # 情緒標註準則（LLM、Claude、人工共用）
 ├── docs/reports/            # 實驗與模型評估報告（model-evaluation.md 由人撰寫；s3-05-push-ratio.md），進 repo
 ├── .claude/skills/label-posts/ # Claude 手動標註的 skill
-├── scripts/
+├── tools/                   # 營運腳本（建 topic、ClickHouse migration、註冊 connector、seed）；scripts/ 是 agent 流程腳本
 ├── tests/
 │   ├── unit/
 │   ├── integration/
@@ -96,6 +96,9 @@
 | `make up-app` | 基礎設施加上 api、scheduler、crawler ×3、ingest；`init` 自動建表、建 topic、ClickHouse migration、註冊 connector |
 | `make e2e-up` / `make e2e` | 啟動端到端環境（假 PTT、e2e 專用 volume）/ 執行端到端測試 |
 | `make e2e-down` | 停止端到端環境並刪除其資料 volume |
+| `make setup` / `make ci-setup` | 本機／CI 安裝相依 |
+| `make check` | pre-commit 全部 hook + 單元測試（CI 每個 PR 都跑） |
+| `make coverage` | 單元 + 整合測試的覆蓋率，Cobertura XML 寫到 `coverage-reports/` |
 | `make lint` | ruff + bandit |
 | `make test` | 單元測試 |
 | `make test-int` | 整合測試（需要 Docker） |
@@ -103,10 +106,12 @@
 ### 1.4 分支與提交
 
 - `main`：可部署版本；`develop`：開發整合
-- 功能分支：`feat/s<階段>-<簡述>`，例如 `feat/s1-ptt-parser`，PR 合進 `develop`
-- 每個階段驗收通過後，`develop` 合進 `main` 並打 tag `stage-<n>`
+- 階段 7 起改用 agent 團隊流程（`scripts/` 的 `task.py`、`pr.py`、`release.py`；規則見 CLAUDE.md 與 `docs/decisions.md` D-001～D-006）：
+  - 功能分支：`<類型>/<task_id>`，例如 `feat/dashboard-board-trend`，PR 合進 `develop`；跟上 develop 用 `pr.py sync`（merge，不 rebase）
+  - 版本以 semver 發版：階段 1～6 由 `v0.6.0` 涵蓋（`stage-3`～`stage-6` 不補打），之後每階段一版（階段 7 = `v0.7.0`），見 D-003
+  - Commit：`<類型>(<task_id>): ...`
+- 階段 6 以前：功能分支 `feat/s<階段>-<簡述>`；Commit 如 `feat(crawler): ...`；`stage-<n>` tag 只打到 `stage-2`，之後見 D-003
 - 緊急修正從 `main` 開 `fix/*`，合回 `main` 後由 workflow 同步到 `develop`
-- Commit 使用 Conventional Commits：`feat(crawler): ...`、`fix(ingest): ...`
 
 ---
 
@@ -151,7 +156,7 @@
 
 | 場景 | 寫法 | 理由 |
 |---|---|---|
-| FastAPI 的 `boards` CRUD、bot 的 `subscriptions` | ORM（`Session`） | 單筆讀寫，ORM 最省事 |
+| FastAPI 的 `boards` CRUD、bot 的 `subscriptions`、`chat_settings`、`muted_posts` | ORM（`Session`） | 單筆讀寫，ORM 最省事 |
 | Ingest 批次 upsert | Core：`postgresql.insert().on_conflict_do_update(where=...)` | 一次寫 500 筆，ORM 逐筆 flush 太慢；帶條件 upsert 需要 Core 才寫得出來 |
 | Scheduler 查詢到期文章 | Core `select()` | 只讀，回傳 tuple 即可 |
 | Advisory lock、publication、`REPLICA IDENTITY` | `text()` 原生 SQL | 屬於 PG 專屬功能，ORM 不支援 |
@@ -236,9 +241,14 @@
 {
   "schema_version": 1, "post_id": "...", "model_version": "tfidf-lr-20261020",
   "predicted_at": "...", "polarity": "negative",
-  "scores": {"positive": 0.1, "negative": 0.7, "neutral": 0.2}
+  "scores": {"positive": 0.1, "negative": 0.7, "neutral": 0.2},
+  "text_hash": "<64 字元 hex>"
 }
 ```
+
+- pydantic model：`common/schemas.py` 的 `Prediction`；`scores` 的 key 恰好是三個 `polarity`，值的總和為 1（容許浮點誤差），`polarity` 為分數最高的類別
+- 同一篇文章、同一個模型版本可能有多筆（內文被編輯後重新推論），下游取 `predicted_at` 最新的一筆
+- `text_hash`：這次推論的模型輸入文字的 SHA-256（hex）；推論服務重啟時用來重建快取（7.19）。2026-10-16 新增，之前的訊息沒有這個欄位，ClickHouse 存成空字串
 
 ### 3.6 `alerts`
 
@@ -253,6 +263,12 @@
   "sample_post_ids": ["..."], "created_at": "..."
 }
 ```
+
+- pydantic model：`common/schemas.py` 的 `Alert`；寫入者只有 heat（7.20）
+- `alert_id`：以 `uuid5` 由 `unit_type`、`unit_key`、`window_end` 算出；同一個警示重送時 id 相同，下游可去重
+- MVP 只有 `post`（單篇文章的推文暴增）與 `board`（看板整體推文量暴增）
+- `value`：視窗內新增推文數，以分鐘結算時的值計（不是剛越過門檻的那一則，#50）；`baseline`、`zscore`：結算時、以該分鐘更新前的 EWMA 平均與 z-score
+- `sample_post_ids`：`post` 為該篇；`board` 為視窗內推文最多的前 3 篇
 
 ---
 
@@ -283,7 +299,7 @@
 |---|---|---|---|
 | 單元 | parser、upsert SQL 組裝、熱度計算、年齡分級 | pytest | 本地每次 commit；CI 於 PR 開到及合併到 `develop` / `main` 時 |
 | 整合 | 單一服務 + 真實 Kafka / PG / ClickHouse（單節點即可） | testcontainers | CI 於 PR 開到及合併到 `develop` / `main` 時；CI 以 `TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX=mirror.gcr.io/` 從 Google 的 Docker Hub 鏡像拉 image（runner 直連 Docker Hub 常撞到次數限制或逾時），並關閉 Ryuk（加前綴後會無限遞迴；runner 用完即丟） |
-| 端到端 | 整個 compose，用假 PTT 伺服器 | `make e2e-up && make e2e`（約 3～4 分鐘） | 每階段驗收 |
+| 端到端 | 整個 compose，用假 PTT 伺服器 | `make e2e-up && make e2e`（約 10 分鐘，見下方「端到端環境」） | 每階段驗收 |
 | 回放 | 把錄下來的 topic 資料重送，驗證熱度偵測 | 腳本 | 第 5 階段起 |
 
 - **PTT fixture**：每種頁面至少存一份 HTML（一般文、刪除文、爆文、含 IP 的推文、跨年推文、被編輯過的文章），parser 測試只讀 fixture
@@ -292,9 +308,12 @@
   - 爬蟲以 `CRAWLER_PTT_BASE_URL` 改打假伺服器（只換主機，資料中的網址仍是 `www.ptt.cc`），任何請求都不會打到真的 PTT
   - Scheduler 以 `SCHEDULER_TIME_SCALE=0.05` 縮短重爬間隔
   - Postgres、Kafka、ClickHouse 與自寫服務的 log（`/app/log`）都改掛 e2e 專用的 volume，不碰開發資料。`make e2e-down` 用 `down -v` 刪除這些 volume；log 原本與開發環境共用 `app_logs`，2026-10-10 因此刪掉開發環境 10/07～10/09 的 log（#29）。單元測試檢查開發環境中掛 `app_logs` 的服務在 e2e 都改掛 `e2e_app_logs`
-  - 開發環境與 e2e 共用容器名稱，`make e2e-up` 會取代開發環境的容器；跑 e2e 前要先停掉開發環境的長時間作業（例如驗收）
+  - 開發環境與 e2e 共用 compose 專案與容器名稱，不能同時運作。`make e2e-up` 先以 `down`（不加 `-v`）停掉開發環境，`make up`、`make up-app` 先以 `make e2e-down` 清掉 e2e 環境；跑 e2e 前要先停掉開發環境的長時間作業（例如驗收）
+    - 只靠 compose 自己判斷會出錯：設定在兩邊相同的服務（Apicurio、Kafka UI）不會被重建，沿用的舊 Apicurio 連線池指向已被取代的 Postgres，Debezium 註冊 schema 失敗、task 一啟動就 `FAILED`（#41）
+    - 判斷方式：`radar_fake_ptt` 容器存在 = e2e 環境
   - `.env` 與開發環境共用，但 e2e 會刻意製造故障：compose 覆寫檔把各服務的 `SLACK_*`、`CDC_WATCHDOG_HEARTBEAT_URL` 設成空字串，`tests/e2e/conftest.py` 也在測試程式內清掉，不送 Slack 與外部 heartbeat
   - 測試標記為 `e2e`，一般 `pytest` 與 CI 預設排除
+  - 耗時（2026-10-16，12 個測試約 10.5 分鐘）大多是刻意的等待，不是效能退化：#31 的兩個 Apicurio 停機測試約 3.7 分鐘（等 heartbeat 65 秒、停機 40 秒、等 watchdog 重啟 task）；停用看板的測試固定等 75 秒；其餘每個測試約 20～55 秒，主要在等列表輪詢（測試看板 `interval_sec` 30 秒）。原本的「3～4 分鐘」是 2026-10-08 只有 9 個測試時的數字
 - **端到端情境**：新看板被排程並寫入 PG、新推文在重爬後反映、刪除文被標記、停用看板後停止爬取、爬蟲停止期間的任務在重啟後接續處理；階段 2 起加上 CDC：新文章進 `posts_latest`、推文數變化進 `posts_history`、推文帶看板進 `comments`、內容沒變的重爬不產生 CDC 事件、Apicurio 停機後 CDC 自動恢復（`tests/e2e/test_cdc.py`）
 - **LLM**：單元與整合測試一律用 `MockTransport` 或 fake，不呼叫真的 LLM API；prompt 調整才實際呼叫，結果存在 `data/prompt-tuning/`
 
@@ -319,19 +338,49 @@
 | Consumer 重試期間維持成員資格（2.2） | ✅ 完成：pause/resume、commit 失去 assignment 不中止、爬蟲同一網址 5 次略過、串流標註依冷卻時間等待；整合測試重現並驗證（重試 10 秒 > `max.poll.interval.ms` 6 秒） | #11 |
 | S2-01 Spike：ClickHouse 讀 Apicurio Avro | ✅ 完成（結論見設計文件 6.2；以 Debezium 3.7 / Apicurio 3.3 / ClickHouse 26.8 驗證） | #8 |
 | S2-02～S2-06 CDC 與 ClickHouse | ✅ 程式完成；端到端測試（`tests/e2e/test_cdc.py`）2026-10-08 通過（首次執行時發現 image 缺 `infra/` 檔案等 3 個問題，見 7.9） | #8、#15 |
+| 文章警示門檻（#59） | ✅ 文章另設最低推文數 `HEAT_POST_MIN_COUNT=80`，看板維持 30（7.20） | — |
+| 晚到的舊快照刪掉較新的推文（#52） | ✅ `posts.comment_count`（推＋噓＋箭頭）列入變化判斷，重爬門檻改讀這欄（7.24）；整合測試重現「晚到的舊快照刪掉 10 則新箭頭」後修正 | — |
+| 階段 6 規劃：Telegram 按鈕選單與情緒呈現（7.23） | ✅ 文件完成（2026-10-17）；原階段 6～8 順延為 7～9 | — |
+| S6-01～S6-06 Telegram 互動與情緒呈現 | ✅ 完成；以真的 Telegram 走過 7.23 驗收清單（紀錄見階段 6「驗收紀錄」）；S6-05 取代 #53 | — |
+| 發文 1 小時內的重爬改為每 5 分鐘（7.22，#56） | ✅ 完成；單元、collector 整合測試通過。待部署 Scheduler | — |
+| 重爬門檻改看推文總數（7.2，#51） | ✅ 完成；整合測試重現「3 推 120 噓、2 推 30 箭頭的文章滿 1 小時後不再重爬」後修正；開發環境的 PG 上 `EXPLAIN ANALYZE` 新查詢 29 ms（走 `comments` 主鍵）。待部署 Scheduler | — |
 | 爬蟲略過重複的重爬任務（7.12） | ✅ 完成；2026-10-09 實測 `crawl.tasks` 積壓 10 分鐘內 3,355 → 1,709（部署前持續增加），期間略過約 1,500 個重複任務 | #21 |
 | Ingest 逐筆隔離毒訊息（7.13） | ✅ 完成；整合測試以含 `\x00` 的文章重現（原本整批失敗、服務中止），修正後只有該筆進 DLQ | #12 |
 | 刪除標記可撤銷（7.14） | ✅ 完成；整合測試重現原本的兩個問題（較舊的 404 晚到會標記刪除、刪除後較舊的 200 會蓋掉內容），修正後刪除可被較新的快照撤銷 | #13 |
 | 推文同步（7.15） | ✅ 完成；整合測試重現中間推文被刪後的樓層位移；端到端測試確認 PG 的推文刪除經 CDC 反映到 `comments_latest FINAL`（`REPLICA IDENTITY FULL`） | #14 |
 | e2e 改用專用的 log volume（#29） | ✅ 完成；`docker compose config` 確認 e2e 不再引用開發環境的 `app_logs`。實際 `e2e-up`／`e2e-down` 等階段 2 驗收結束後跑 | #29 |
+| 開發與 e2e 環境切換時先停掉另一邊（#41） | ✅ 完成；重現「開發環境運作中執行 `make e2e-up`」：修正後先 `make down` 再啟動，Apicurio 重建、connector RUNNING，e2e 12/12 通過；`make up-app` 會先 `make e2e-down`；`make down` 補上 `--profile inference` | #41 |
 | 抓取失敗的新文章不記進列表快取（7.17） | ✅ 完成；單元測試重現「失敗的新文章下一輪不再抓」後修正。尚未部署：等階段 2 驗收結束再重建爬蟲，並跑 e2e | #33 |
 | CDC 故障自動恢復（7.16） | ✅ 完成；e2e 重現兩種失敗（舊快取設定在刷新時失敗、沒有 watchdog 時 task 停在 `FAILED`），修正後通過。2026-10-15 開發環境重啟後，10/10 起積壓的 759 MB WAL 約 1 分鐘消化完，PG 與 ClickHouse 的 posts、comments 筆數一致 | #31 |
-| 階段 2 驗收（24 小時運作、WAL 延遲） | ⬜ 待重跑：2026-10-09 第一次執行，約 8 小時後 Debezium task 失敗而中斷（#31） | — |
+| 階段 2 驗收（24 小時運作、WAL 延遲） | ✅ 通過（第 2 次，2026-10-16），紀錄見階段 2「驗收紀錄」；第 1 次（2026-10-09）約 8 小時後 Debezium task 失敗而中斷（#31） | — |
 | S3-01 標註準則與 prompt | ✅ 完成（prompt-v4，`docs/labeling-guideline.md`；15 篇實測選定標註者）；2026-10-08 依交叉比對升 prompt-v5（規則 11～13）；2026-10-15 依人工測試集升 prompt-v6（規則 11 改寫、新增 14～16；已標的 v5 資料不重標） | #10 |
-| S3-02～S3-08 標註、測試集、實驗、訓練、串流標註 | ✅ 程式完成；人工標註頁已在瀏覽器實測。人工測試集 300 篇 2026-10-15 標完；S3-05 推噓比實驗完成，結論「不採用」（`docs/reports/s3-05-push-ratio.md`）；LLM 標註與訓練進行中 | #10 |
-| 階段 3 驗收（≥ 3,000 篇且各看板達標、評估報告含各看板 F1、推噓比結論） | ⬜ 待執行 | — |
+| S3-02～S3-08 標註、測試集、實驗、訓練、串流標註 | ✅ 程式完成；人工標註頁已在瀏覽器實測。人工測試集 300 篇 2026-10-15 標完；S3-05 推噓比實驗完成，結論「不採用」（`docs/reports/s3-05-push-ratio.md`）；Groq prompt-v6 標註 3,269 篇；S3-06 baseline `tfidf-lr-202610151237` 人工測試集 macro-F1 0.504，評估報告 `docs/reports/model-evaluation.md`（2026-10-16） | #10 |
+| 階段 3 驗收（≥ 3,000 篇且各看板達標、評估報告含各看板 F1、推噓比結論） | ⬜ 除 Stock 外皆達標：Stock 286／400 篇，等新文章累積後補標並重新訓練（逐項見評估報告「階段 3 驗收狀態」） | — |
+| S4-01～S4-03 推論 consumer | ✅ 程式完成；單元測試、整合測試（真實 Kafka：新文章、重啟後只改推噓數、重複事件、壞訊息進 DLQ）通過。2026-10-16 以 `tfidf-lr-202610151237` 部署（`make up-inference`） | — |
+| 階段 4 驗收（推論延遲、不重複推論） | ✅ 通過（2026-10-16），紀錄見階段 4「驗收紀錄」：p95 10.2 秒；重新推論 7 次都對應文字變動 | — |
+| 推論快取重啟後從 ClickHouse 載入（7.19） | ✅ 完成；單元測試重現「重啟後快取空、既有文章被編輯不推論」；整合測試（真的 ClickHouse、PG）驗證 migration 0004、載入與補舊 hash。2026-10-16 部署：補 5,509 篇，重啟後 4 分鐘內 3 篇既有文章被編輯，都重新推論 | #37 |
+| S5-01～S5-05 熱度偵測、錄製回放（7.20） | ✅ 程式完成；加入 `quixstreams`，`confluent-kafka` 降到 2.12.x。整合測試（真實 Kafka、exactly-once）：暴增各單位只發一則、改寫不算新增、只靠 changelog 恢復後不重發、壞訊息進 DLQ。2026-10-17 實測推文進 PG 晚約 8 分鐘，時間基準由 `commented_at` 改成觀測時間（S5-02）。開發環境已部署 heat，待第 5 階段驗收 | — |
+| 文章基準每分鐘更新一次、分鐘結算才發警示（7.20，#49、#50） | ✅ 完成；單元測試重現兩個問題（40 篇活躍文章時文章基準 1 分鐘就洗掉舊值、一分鐘湧入 200 則警示只寫 30），修正後通過；整合測試（真實 Kafka）暴增 40 則的警示 `value` 為 40、重啟後不重發。待部署（重置 heat）後重跑階段 5 的 3 天驗收 | — |
+| S5-06～S5-07 Telegram bot（7.21） | ✅ 完成；2026-10-16 在開發環境以真的 Telegram 實測指令與推送，修正 compose 漏掉 `app-env`。階段 5 驗收第 1 項（人工暴增約 10 秒收到通知）通過 | — |
 
-階段 1 拆成 5 個 PR；全部完成後依下方「驗收」逐項驗證，通過才把 `develop` 合進 `main` 並打 `stage-1` tag。之後各階段相同：驗收通過才打 `stage-<n>` tag。
+階段 1 拆成 5 個 PR；全部完成後依下方「驗收」逐項驗證，通過才把 `develop` 合進 `main` 並打 `stage-1` tag；階段 2 相同。階段 3 起的發版方式見 D-003。
+
+### 執行順序（2026-10-17 決定）
+
+| 順序 | 項目 | 說明 |
+|---|---|---|
+| 1 | #59 文章警示門檻 | 不修的話警示多到無法使用，也會干擾階段 6 的實機測試 |
+| 2 | #52 晚到的舊快照刪掉較新的推文 | 資料正確性 |
+| 3 | ✅ 調查 Stock、Boy-Girl、Tech_Job 每天文章數偏少（2026-10-17 近 24 小時各 34、3、2 篇） | **結論：PTT 上本來就少，沒有漏抓**（2026-10-17）。三個看板列表前 3 頁共 139 篇，PG 全部都有；PTT 上 Stock 約 30 小時 42 篇（每天約 34）、Boy-Girl 15 天 51 篇（約 3.4）、Tech_Job 21 天 46 篇（約 2.2）。10/13～10/14 數字更低是開發環境停機（10/13 02Z～10/15 06Z）。看板保留；Stock 標註照「累積到 400 篇」進行 |
+| 4 | 階段 6：Telegram 互動與情緒呈現 | 先合併文件，再依骨架、實作兩輪進行 |
+| 5 | 階段 7：Dashboard | |
+| 6 | 階段 8：BERT 與 shadow 比較 | |
+| — | Stock 補標、重新訓練，收尾階段 3 | 不佔順序：新文章累積到 400 篇就做 |
+| 7 | **階段 5 的 3 天驗收** | 盡量往後排，在階段 9 之前完成；時間由使用者決定。驗的是警示品質與長時間運作（不是負載測試），放在最後可以用 #59 修正後、帶情緒與推噓的最終版通知驗收 |
+| 8 | 階段 9：上雲 | 3 天驗收通過後才開始 |
+
+- 合進 `main` 與發版不等 Stock 補標與 3 天驗收：階段 1～6 以 `v0.6.0` 發版，之後每階段驗收後各發一版（見 D-003）；上表兩項仍照排序之後再做
+- 臨時插入的 bug 修正照常優先處理，不改變上表的相對順序
 
 ### 階段 0：專案骨架（S）
 
@@ -340,9 +389,9 @@
 | ID | 任務 |
 |---|---|
 | S0-01 | `pyproject.toml`、uv、ruff 設定；修正 pre-commit（見 8.2） |
-| S0-02 | docker-compose：Kafka（KRaft 3 節點，副本數 3、`min.insync.replicas=2`）、PostgreSQL、Kafka UI（profile `debug`；階段 2 起改為預設啟動，部署前移除，見 S8-06） |
+| S0-02 | docker-compose：Kafka（KRaft 3 節點，副本數 3、`min.insync.replicas=2`）、PostgreSQL、Kafka UI（profile `debug`；階段 2 起改為預設啟動，部署前移除，見 S9-06） |
 | S0-03 | `common/`：settings、logging、Kafka producer/consumer 包裝（含 DLQ、優雅關閉）、PG 連線池 |
-| S0-04 | `infra/kafka/topics.yaml` + `scripts/create_topics.py`（冪等） |
+| S0-04 | `infra/kafka/topics.yaml` + `tools/create_topics.py`（冪等） |
 | S0-05 | 共用 Dockerfile（一個 image，靠 `command` 區分服務） |
 | S0-06 | GitHub Actions：lint + 單元測試 + 整合測試 |
 
@@ -367,7 +416,7 @@
 
 **初始看板設定**
 
-| 看板 | `interval_sec` | `recrawl_min_push`（見 7.2） |
+| 看板 | `interval_sec` | `recrawl_min_push`（推文總數，見 7.2） |
 |---|---|---|
 | Gossiping | 60 | 10 |
 | Stock | 120 | 0 |
@@ -417,6 +466,19 @@
 - 重爬但內容沒變的文章不產生 CDC 事件（比對 topic offset）
 - 連續運作 24 小時，PG replication slot 的 WAL 延遲沒有持續增加
 
+**驗收紀錄**（第 2 次：2026-10-15 06:34:21Z～10-16 06:44:21Z，`fix/cdc-connector-recovery` @ `4e177cf`（#32）；每 10 分鐘的監控與檢查腳本在 `log/acceptance/stage2/`，這次的產物與容器 log 在 `run2-20261015/`）
+
+| 項目 | 結果 |
+|---|---|
+| `posts_latest FINAL` 與 PG 一致 | ✅ 結束時先讀 PG、60 秒後讀 ClickHouse：posts 6,543 / 6,545、comments 264,906 / 264,971（CH 多出的是這 60 秒的新資料）；145 筆監控樣本中 PG 與 CH 的 posts 差距最大 1 |
+| 熱門文章推文數曲線 | ✅ `Gossiping.M.1792058026.A.0AE`，以 LSN 去重後 49 個版本，推 0 → 444、噓 0 → 110（`run2-20261015/hot_post.svg`）；期間 `(post_id, lsn)` 重複 0 列 |
+| 內容沒變的重爬不產生 CDC 事件 | ✅ `raw.posts` 快照 61,291 筆、`cdc.public.posts` 事件 9,929 筆（16.2%）；推噓數、標題、刪除狀態都與前一版相同的事件 36 筆，全是 Re: 文，ingest 只在推噓數、標題、內文變動時更新，判斷為內文編輯 |
+| WAL 延遲沒有持續增加 | ✅ flush lag 最大 2.4 MB、結束時 1.45 MB，前後半中位數 0.24 / 0.74 MB；slot 全程 active、connector 全程 `RUNNING/RUNNING`，`cdc-watchdog` 期間沒有重啟 task 或告警 |
+| 其他 | DLQ 0 筆；ingest lag 最大 1、ClickHouse consumer lag 最大 501（2 個樣本，下一筆即恢復）；`crawl.tasks` lag 最大 218；PTT 520 ×43、525 ×50（約 0.15%）、逾時 22 次，無 429 / 403 |
+
+- 10-15 13:55:41Z～13:56:54Z 曾停掉爬蟲與 scheduler 約 1 分鐘，檢查 520/525 是否為限速：前 7.3 小時 36 次、平均分散、沒有 429/403，判斷是 PTT 端不穩而非限速（處理方式見 8.1）；重啟後自動接續
+- 第 1 次（2026-10-09 21:52Z 起，紀錄在 `run1-20261009/`）約 8 小時後 Debezium task 失敗而中斷（#31），修正見 7.16
+
 ### 階段 3：LLM 標註與 baseline（L）
 
 **目標**：第一版情緒模型與評估分數。
@@ -447,12 +509,22 @@
 | ID | 任務 |
 |---|---|
 | S4-01 | `ml/inference/main.py`：消費 `cdc.public.posts`，啟動時載入指定的 `model_version` |
-| S4-02 | 觸發條件：`op=c` 一律推論；`op=u` 只在內文 hash 與本地快取不同時推論（大部分更新只是推噓數） |
+| S4-02 | 觸發條件：模型輸入文字的 hash 與本地快取不同才推論；快取沒有這篇時，只有 `op=c` 推論（細節見 7.18、設計文件 8.2） |
 | S4-03 | 寫入 `predictions` |
 
 **驗收**
 - 新文章從進 PG 到 ClickHouse 出現推論結果，p95 < 1 分鐘
 - 推噓數更新不會觸發重複推論（比對 `predictions` 筆數與新文章數）
+
+**驗收紀錄**（2026-10-16 07:46:57Z～08:46:57Z，develop @ `8b81340`，模型 `tfidf-lr-202610151237`；每 5 秒記錄推論第一次出現在 ClickHouse 的時間，腳本與結果在 `log/acceptance/stage4/`）
+
+| 項目 | 結果 |
+|---|---|
+| 新文章進 PG 到 ClickHouse 出現推論，p95 < 1 分鐘 | ✅ 期間新文章 86 篇全部有推論：p50 7.4 秒、p95 10.2 秒、最大 11.9 秒（從 CDC 的 PG commit 時間算起，取樣間隔 5 秒；最後 1 篇在結束前 1 秒才推論完，監控來不及記錄，另外確認） |
+| 推噓數更新不會觸發重複推論 | ✅ 期間推噓數更新事件 440 筆，推論 92 筆 = 新文章 85 + 重新推論 7；7 次重新推論逐篇比對 `raw.posts` 快照，模型輸入文字（標題 + 內文）都有變動，多是發文後幾分鐘內編輯內文 |
+| 其他 | `inference` consumer lag 全程 0、log 沒有 ERROR；啟動時約 12 秒消化完 `cdc.public.posts` 的歷史事件 |
+
+- 第一次快照（`op=r`）的 1,189 篇不推論（S4-02 的設計），**決定不補**；這些是階段 1 爬的文章，在 ClickHouse 沒有情緒分數
 
 ### 階段 5：熱度偵測與 Telegram bot（L，**MVP**）
 
@@ -461,12 +533,12 @@
 | ID | 任務 |
 |---|---|
 | S5-01 | `streaming/heat.py`（Quix Streams）：依 `post_id` 與 `board` 統計推文數，視窗 10 分鐘、每 1 分鐘滑動 |
-| S5-02 | 時間基準用 `commented_at`（event time），寬限 5 分鐘；超過 1 小時的舊推文只更新基準、不觸發警示（避免 CDC 初始 snapshot 或首次爬到爆文時誤報） |
-| S5-03 | 基準：每個 key 用 EWMA 維護平均與變異數，存在 Quix state |
-| S5-04 | 觸發條件（可設定）：z-score ≥ 3 **且** 視窗內推文數 ≥ 30；同一 key 30 分鐘內不重複警示；新 key 需累積 1 小時才啟用 |
+| S5-02 | 時間基準用觀測時間（推文進 PG 的時間 `__source_ts_ms`），寬限 2 分鐘；推文時間比觀測時間早超過 30 分鐘的不計入，超過 1 小時的舊事件只更新基準、不觸發警示（避免 CDC 初始 snapshot、補抓或首次爬到爆文時誤報）。2026-10-17 由 `commented_at` 改成觀測時間，理由見 7.20 |
+| S5-03 | 基準：EWMA 維護平均與變異數，存在 Quix state，每分鐘更新一次；看板用自己的基準，文章用該看板活躍文章共用的基準（設計文件 15.2、7.20）。2026-10-17 修正文章基準每分鐘被每篇活躍文章各更新一次（#49） |
+| S5-04 | 觸發條件（可設定）：z-score ≥ 3 **且** 視窗內推文數 ≥ 30（文章 ≥ 80，#59）；同一 key 30 分鐘內不重複警示；新 key 需累積 1 小時才啟用。每分鐘結算時才判斷，警示的推文數是結算時的值（#50） |
 | S5-05 | 錄製與回放工具：把真實的 `cdc.public.comments` 存成檔案，可重送到測試 topic |
 | S5-06 | Migration：`subscriptions(chat_id, unit_type, unit_key)`，寫入者 bot，不被 Debezium 監聽 |
-| S5-07 | `bot/main.py`：long polling；消費 `alerts` 依訂閱推送；指令 `/start`、`/boards`、`/subscribe <board>`、`/unsubscribe`、`/hot` |
+| S5-07 | `bot/main.py`：long polling；消費 `alerts` 依訂閱推送；指令 `/start`、`/boards`、`/subscribe <board>`、`/unsubscribe`、`/hot`（MVP 文字指令；按鈕選單見階段 6） |
 | S5-08 | （非 MVP 必要）每日 08:00 LLM 摘要 |
 
 **驗收**
@@ -474,35 +546,80 @@
 - 連續運作 3 天：每個看板每天警示數 ≤ 10，人工檢查「值得看」的比例 ≥ 70%
 - 重啟 heat 服務後狀態可恢復，不會重新觸發已發過的警示
 
-### 階段 6：Dashboard（S）
+**驗收紀錄**（進行中）
+
+| 項目 | 結果 |
+|---|---|
+| 回放測試：人工暴增 2 分鐘內收到 Telegram 通知 | ✅ 2026-10-16 18:55Z：錄下最近 75 分鐘的 `cdc.public.comments`（4,120 筆），以 300 倍速回放到 `replay.cdc.comments`，由另一個 heat（consumer group `heat-replay`、獨立的 state）建立基準；對 HatePolitics 一篇文章注入 2 分鐘 60 則推文，**約 10 秒**收到文章與看板兩則通知（使用者確認收到）。紀錄在 `log/acceptance/stage5/` |
+| 連續運作 3 天、每看板每天 ≤ 10 則、值得看 ≥ 70% | ⬜ 待執行：排在階段 8 之後、階段 9 之前，時間由使用者決定（見第 6 章「執行順序」）；要開 caffeinate，避免停擺後的誤報（7.20）。第 1 次（2026-10-16 19:17Z）開始約 10 分鐘後，因外部程式審查發現 #49、#50 而中止 |
+| 重啟後不重發已發過的警示 | ✅ 整合測試已驗證（只靠 changelog 恢復）；2026-10-16 19:14Z 開發環境重啟 `radar_heat`，ClickHouse `alerts` 14 筆皆不重複、沒有重送，lag 歸 0。#49、#50 改了觸發時機，但不重發靠的是 exactly-once 與 changelog，沒有變動；整合測試修正後仍通過 |
+
+- 第一次注入 Stock 時 heat 3 秒就發出警示，但使用者沒有訂閱 Stock，bot 正確地沒有推送
+
+### 階段 6：Telegram 互動與情緒呈現（M）
+
+**目標**：在 Telegram 用按鈕操作；警示與查詢除了熱度，也看得到推噓、爭議度與文章情緒（設計文件 9.2、15.7、15.8）。
 
 | ID | 任務 |
 |---|---|
-| S6-01 | Grafana + ClickHouse datasource，以 provisioning 檔版本控管 |
-| S6-02 | 面板：各看板推文量曲線、情緒分布、近 24 小時警示列表、熱門文章排行 |
+| S6-01 | `bot/telegram.py` 擴充 Bot API：`sendMessage` 帶 `reply_markup`、`editMessageText`、`answerCallbackQuery`、`setMyCommands`；`getUpdates` 收 `callback_query`；訊息改用 HTML（外部文字 escape） |
+| S6-02 | Migration：`chat_settings(chat_id, post_alerts, board_alerts)`、`muted_posts(chat_id, post_id, muted_at)`，寫入者 bot，不被 Debezium 監聽 |
+| S6-03 | `bot/views.py`：每個畫面是「查詢結果 → 文字與按鈕」的純函式；`callback_data` 的格式與解析（7.23） |
+| S6-04 | 主選單與畫面：🔥 現在熱門、📋 我的訂閱（✅／⬜ 切換）、📈 看板概況、⚙️ 通知設定；切換時編輯同一則訊息 |
+| S6-05 | 警示加上推、噓、箭頭數、爭議度、文章情緒（ClickHouse）與按鈕（開啟原文、看板概況、這篇不再通知、訂閱設定）；依 `chat_settings`、`muted_posts` 過濾 |
+| S6-06 | `/start` 改顯示主選單，新增 `/menu`；`setMyCommands` 註冊指令清單；S5-07 的文字指令保留 |
+
+**驗收**
+- 訂閱、取消訂閱、現在熱門、看板概況、通知設定都能只用按鈕完成，不需要輸入看板名稱
+- 警示含推文數與平常的倍數、推／噓／箭頭、爭議度、文章情緒（信心不足顯示「不確定」、沒有推論顯示「尚無」）與「開啟原文」按鈕
+- 點按鈕後 2 秒內畫面更新
+- 「不再通知」的文章、關閉的警示類型不再推送
+- 以真的 Telegram 走過 7.23 的驗收清單，紀錄於本節
+
+**驗收紀錄**（2026-10-17 16:30Z～10-18 16:50Z，`feat/s6-telegram` 部署到開發環境：Alembic `b2f14c20e4ca`、只重建 bot）：**通過**
+
+| 項目 | 結果 |
+|---|---|
+| `/start` 主選單；四個畫面來回切換、編輯同一則訊息 | ✅ 使用者確認 |
+| 按鈕訂閱／取消（不輸入看板名稱） | ✅ 16:33Z 以按鈕訂閱 Stock、Tech_Job，PG `subscriptions` 對得上 |
+| 現在熱門切換「全部看板／只看訂閱」 | ✅ 使用者確認 |
+| 看板概況 | ✅ 使用者確認；部署前以開發環境資料預覽，今天的警示數以台北日期計算與 ClickHouse 對得上 |
+| 通知設定開關 | ✅ 使用者確認；16:39Z 建立 `chat_settings` |
+| `setMyCommands` 指令清單、舊的文字指令（`/boards`、`/hot`） | ✅ 使用者確認；啟動 log 沒有警告 |
+| 關閉文章警示後只收看板警示、「不再通知」的文章不再推 | ✅ 在開發環境 PG 以假 chat 寫入後查 `recipients` 再 rollback：關閉文章警示的 chat 只出現在看板警示的對象；不再通知的 chat 不收該篇的文章警示、仍收看板警示 |
+| 不在允許清單的 chat 按按鈕沒有反應 | 沒有第二個帳號，以單元測試 `test_handle_update_disallowed_callback_not_answered` 為準 |
+| 真的看板警示：各欄位與按鈕 | ✅ 10-18 14:22Z Stock 看板警示（63 則、基準 22.7 → 「2.8 倍」）：前 3 篇的推／噓／箭頭、爭議度與 ClickHouse 對得上；三篇最高分數 0.38～0.43 低於 0.5，顯示「不確定」正確；按鈕為各篇「開啟原文」、看板概況、訂閱設定（看板警示沒有「這篇不再通知」）。附註：Stock 的推論 38% 低於 0.5（全部看板 29%），與 Stock 標註最少一致 |
+| 真的文章警示：各欄位與「這篇不再通知」 | ✅ 10-18 16:47Z HatePolitics 文章警示（81 則、基準 4.97 → 「16 倍」；推 27／噓 0／→ 54、爭議 0%；最高分數 0.41 顯示「不確定」），使用者確認欄位與 4 個按鈕；按「這篇不再通知」出現提示，`muted_posts` 16:50:51Z 寫入；`recipients` 對這篇的文章警示回傳空、同看板其他文章與看板警示照常 |
+
+### 階段 7：Dashboard（S）
+
+| ID | 任務 |
+|---|---|
+| S7-01 | Grafana + ClickHouse datasource，以 provisioning 檔版本控管 |
+| S7-02 | 面板：各看板推文量曲線、情緒分布與趨勢、爭議度、近 24 小時警示列表、熱門文章排行 |
 
 **驗收**：`make up` 後打開 Grafana 不需手動設定即可看到所有面板。
 
-### 階段 7：BERT 與 shadow 比較（M）
+### 階段 8：BERT 與 shadow 比較（M）
 
 | ID | 任務 |
 |---|---|
-| S7-01 | Colab / Kaggle fine-tune 中文 BERT，匯出 CPU 可用的模型（可考慮 ONNX） |
-| S7-02 | 新 inference instance 用新 consumer group 與新 `model_version` 並行 |
-| S7-03 | ClickHouse 查詢比較兩版：與人工測試集的 macro-F1、兩版不一致的文章、推論延遲 |
+| S8-01 | Colab / Kaggle fine-tune 中文 BERT，匯出 CPU 可用的模型（可考慮 ONNX） |
+| S8-02 | 新 inference instance 用新 consumer group 與新 `model_version` 並行 |
+| S8-03 | ClickHouse 查詢比較兩版：與人工測試集的 macro-F1、兩版不一致的文章、推論延遲 |
 
-**驗收**：比較結果寫入手寫的評估報告 `docs/reports/model-evaluation.md`（與階段 3 的 baseline 同一份），決定是否切換預設模型。
+**驗收**：比較結果寫入手寫的評估報告 `docs/reports/model-evaluation.md`（與階段 3 的 baseline 同一份），決定是否切換預設模型；切換時重新決定 Telegram 顯示情緒的信心門檻（設計文件 15.8）。
 
-### 階段 8：上雲（M）
+### 階段 9：上雲（M）
 
 | ID | 任務 |
 |---|---|
-| S8-01 | 確認所有 image 有 arm64 版本（Oracle 免費 ARM） |
-| S8-02 | Terraform：VM、網路、磁碟；VM 上跑 docker-compose |
-| S8-03 | Secrets 不進 repo（`.env` 由部署流程注入） |
-| S8-04 | PG 每日備份到另一個磁碟或物件儲存 |
-| S8-05 | 磁碟使用量監控：Kafka log、PG WAL、ClickHouse |
-| S8-06 | 移除 Kafka UI（開發期間預設啟動，沒有身分驗證） |
+| S9-01 | 確認所有 image 有 arm64 版本（Oracle 免費 ARM） |
+| S9-02 | Terraform：VM、網路、磁碟；VM 上跑 docker-compose |
+| S9-03 | Secrets 不進 repo（`.env` 由部署流程注入） |
+| S9-04 | PG 每日備份到另一個磁碟或物件儲存 |
+| S9-05 | 磁碟使用量監控：Kafka log、PG WAL、ClickHouse |
+| S9-06 | 移除 Kafka UI（開發期間預設啟動，沒有身分驗證） |
 
 **驗收**：連續運作 7 天不需人工介入，磁碟使用量穩定。
 
@@ -510,9 +627,12 @@
 
 | 階段 | 內容 | 前置 |
 |---|---|---|
-| 9 | 實體熱度：CKIP NER + 自訂詞典，`unit_type=entity` | 階段 5 |
-| 10 | 主題熱度：離線 BERTopic + 線上指派，`unit_type=topic` | 階段 9、累積 1 個月以上資料 |
-| 11 | aspect-based 模型（利用階段 3 已標註的對象） | 階段 7 |
+| 10 | 實體熱度：CKIP NER + 自訂詞典，`unit_type=entity` | 階段 5 |
+| 11 | 主題熱度：離線 BERTopic + 線上指派，`unit_type=topic` | 階段 10、累積 1 個月以上資料 |
+| 12 | aspect-based 模型（利用階段 3 已標註的對象） | 階段 8 |
+| 13 | 即時資料來源：改從 PTT BBS（WebSocket）讀推文，突破網頁版約 10 分鐘的更新週期（7.22、#57）；先做 spike 確認站規、帳號與連線限制、實際延遲，再決定是否在階段 9 上雲前導入 | 階段 5 |
+| 14 | 推文層級情緒（群眾反應，設計文件 14.4）：LLM 抽樣標註推文、訓練推文層級的模型、彙總成文章底下的輿論偏向；先估標註成本，等階段 6 上線看需求再排時程 | 階段 6 |
+| 15 | Telegram Mini App（設計文件 14.3）：圖表、可篩選的清單、看板情緒趨勢 | 階段 9（對外 HTTPS） |
 
 ---
 
@@ -533,11 +653,15 @@
 
 ### 7.2 重爬請求量超出預算
 
-依設計文件 4.2 的年齡分級，每篇文章 24 小時內會被重爬約 78 次。Gossiping 一天若有 3,000 篇，光重爬就約 2.7 次/秒，容易被封鎖。
+依設計文件 4.2 的年齡分級，每篇文章 24 小時內會被重爬約 78 次（2026-10-17 起 1 小時內改為每 5 分鐘，約 60 次，見 7.22）。Gossiping 一天若有 3,000 篇，光重爬就約 2.7 次/秒，容易被封鎖。
 
 - `boards` 加欄位 `recrawl_min_push INT NOT NULL DEFAULT 0`
 - 文章滿 1 小時後，推文數低於門檻就停止重爬
 - Gossiping 先設 10，依實際請求量調整
+- **門檻改看推文總數**（fix，2026-10-17，#51）：原本只看推數，少數推、大量噓的逆風文，與用箭頭對罵上百樓的文章，滿 1 小時後就不再重爬，後續推文進不了 PG 與熱度偵測。改成推、噓、箭頭都算
+  - 原本由 Scheduler 查詢時對 `comments` 依主鍵數推文，避免在 `posts` 加欄位讓每則新箭頭都多一個 CDC 事件；#52 為了修推文誤刪仍加了 `posts.comment_count`，門檻改讀這欄（7.24）
+  - 欄位名稱 `recrawl_min_push` 沿用（改名要動 migration、API 與 seed），意義改為推文總數
+  - 請求量（2026-10-17 開發環境，發文 1～24 小時的文章）：Gossiping 684 篇中達門檻的由 122 篇增為 391 篇，HatePolitics 394 篇中由 92 篇增為 260 篇；每篇 1～24 小時約重爬 48 次，合計每天約多 2.1 萬次（約 0.25 次／秒）。超出預算時把門檻調到 20（兩看板合計約多 150 篇）
 
 ### 7.3 Ingest 同一批次內有重複的 `post_id`
 
@@ -574,8 +698,8 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 
 - **Apicurio 的 database**：PG 的 init script 只在空 volume 時執行，既有環境不會跑；改由一次性服務 `apicurio-db-init` 以 `CREATE DATABASE ... WHERE NOT EXISTS` 建立（冪等），Apicurio 等它完成才啟動
 - **Publication**：Alembic migration 建立 `radar_cdc`（只含 `posts`、`comments`），schema 變更都走 migration；Debezium 設 `publication.autocreate.mode=disabled`
-- **Connector 註冊**：`infra/debezium/radar-cdc.json` 以 `${VAR}` 引用環境變數，`scripts/register_connector.py` 替換後 `PUT /connectors/<name>/config`（冪等，設定有變就更新）
-- **ClickHouse schema**：`infra/clickhouse/migrations/NNNN_<name>.sql`，`scripts/migrate_clickhouse.py` 透過 HTTP 介面依序執行，已執行的版本記在 ClickHouse 的 `schema_migrations` 表
+- **Connector 註冊**：`infra/debezium/radar-cdc.json` 以 `${VAR}` 引用環境變數，`tools/register_connector.py` 替換後 `PUT /connectors/<name>/config`（冪等，設定有變就更新）
+- **ClickHouse schema**：`infra/clickhouse/migrations/NNNN_<name>.sql`，`tools/migrate_clickhouse.py` 透過 HTTP 介面依序執行，已執行的版本記在 ClickHouse 的 `schema_migrations` 表
 - **Image 內容**：`init` 在 container 內執行上述腳本，`Dockerfile` 必須 COPY `infra/clickhouse/migrations/` 與 `infra/debezium/radar-cdc.json`；migration 資料夾不存在或沒有檔案時直接報錯，不可當成「沒有待執行的 migration」默默略過
 - **等待 connector 啟動**：PUT 建立後狀態是非同步產生的，剛建立時查 `/status` 會先回 404，視為尚未就緒繼續輪詢，逾時才報錯
 - **執行順序**（`init` 服務）：Alembic → topic → ClickHouse migration → 註冊 connector。ClickHouse 先建好才開始產生 CDC 事件；Kafka engine 表從最早的 offset 讀，順序顛倒也不會掉資料
@@ -614,7 +738,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - **階段 3 新增看板**（透過 API，不改程式）：`HatePolitics`（`interval_sec` 120、`recrawl_min_push` 10）、`Boy-Girl`（男女版，300、0），增加輿情話題的多樣性；只進 LLM 標註與訓練資料
 - **人工標註頁**：`python -m radar.ml.labeling.human_app`，只綁 `127.0.0.1`，一篇一頁、鍵盤選情緒，可補對象
 - **訓練資料**：每篇取主要標註者的整篇情緒（`target IS NULL`）；兩個標註者整篇情緒不一致的文章不進訓練集，改列入 S3-03 的人工檢查 CSV
-- **評估報告**：`docs/reports/model-evaluation.md`（進 repo）**由人撰寫**，不由程式產生；所有模型版本的分數與分析集中在這一份，之後的模型（階段 7）也寫在這裡。**報告寫完，模型的評估才算完成**
+- **評估報告**：`docs/reports/model-evaluation.md`（進 repo）**由人撰寫**，不由程式產生；所有模型版本的分數與分析集中在這一份，之後的模型（階段 8）也寫在這裡。**報告寫完，模型的評估才算完成**
   - 數字來源：`evaluate` 輸出的 `models/<model_version>/evaluation.md`（不進 repo），含整體與各看板（Gossiping、Stock、Tech_Job）的 macro-F1、各類別 F1、整體混淆矩陣，以及 LLM 標註者 vs 人工（整體與各看板）的一致率與 kappa
   - 每個模型版本一節，至少寫：訓練資料（篇數、各類別數、標註者與 prompt 版本）、上述分數、錯誤分析（看幾篇判錯的文章，歸納原因）、結論與下一步
   - Tech_Job 只有 30 篇，F1 誤差大，只供參考
@@ -671,7 +795,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 推文以頁面順序編樓層、`ON CONFLICT DO NOTHING` 寫入；中間的推文被刪時後面全部往前移，PG 的舊樓層不會更新，最後幾則可能永遠寫不進去，`comments` 與 `posts.push_count` 對不上。
 
 - **同步而非重寫**：同一樓層內容不同才更新，超過新快照最大樓層的刪除。一般重爬只有新推文接在後面，不多寫、不多產生 CDC 事件；只有位移的那幾層會改寫
-- **只同步不舊的快照**：`upsert_posts` 之後，`posts.crawled_at <= 快照的 crawled_at` 的文章才同步（新文章、有變化而寫入的、沒變化的都算）；比較舊的快照不碰推文。刪除快照照舊不碰推文
+- **只同步不舊的快照**：`upsert_posts` 之後，`posts.crawled_at <= 快照的 crawled_at` 的文章才同步（新文章、有變化而寫入的、沒變化的都算）；比較舊的快照不碰推文。刪除快照照舊不碰推文；2026-10-17 起推文數也列入變化判斷，只多了箭頭的快照也會讓 `crawled_at` 前進（7.24）
 - **不改用 hash 識別**（issue 方案 B）：PTT 推文時間只到分鐘，同一人同一分鐘的相同推文會碰撞；且仍需處理刪除
 - **統計**：`WriteStats.comments_inserted` 改為 `comments_written`（新增＋更新）與 `comments_deleted`
 - **PG**：Alembic migration 對 `comments` 設 `REPLICA IDENTITY FULL`。代價是 `comments` 的更新、刪除在 WAL 多存整列舊值；這兩種事件只在樓層位移時發生，量很少
@@ -726,7 +850,157 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - **log 等級**：單次抓取失敗（列表頁、內頁）改記 WARNING；連續 20 次抓取失敗（不分網址）記一次 ERROR、之後第一次成功記 INFO。日常 0.4% 的 52x 幾乎不可能連續 20 次，連續失敗代表 PTT 或 Cloudflare 長時間無法連線，需要人處理
 - 門檻（3 輪、1,000 篇、20 次）是 `CrawlHandler` 的建構參數，與既有的 `max_list_pages`、`max_transient_attempts` 一致，不另開環境變數
 
+### 7.18 推論 consumer 的實作選擇（S4-01～S4-03）
+
+- **模組**：`ml/inference/main.py`，`python -m radar.ml.inference.main`；consumer group `inference`，沿用 `BatchConsumer` 與 Avro 解碼（同 S3-08）
+- **模型**：`INFERENCE_MODEL_DIR` 指向 `models/<model_version>/`，用 `train.load_model` 載入；輸入文字用 `dataset.post_text(title, content, card.max_chars)`，與訓練、評估相同
+- **是否推論**（`should_predict`，純函式）：hash 為模型輸入文字的 SHA-256；快取有這篇 → hash 不同才推論；快取沒有 → 只有 `op=c` 推論，`op=u`、`op=r` 只記下 hash。刪除的文章、`__deleted` 的事件跳過，也不記 hash
+- **快取**：程序內 LRU（`INFERENCE_CACHE_SIZE`，預設 200,000 篇；目前約 6,000 篇、每天增加數百篇）；啟動時從 ClickHouse 載入（7.19，#37）
+- **批次推論**：一批事件中要推論的文字一次送進 `predict_proba`；同一批內同一篇有多筆事件時只推論最後一筆，其中有任何一筆是 `op=c` 就當成新文章（新文章後面緊接著推噓數更新時，最後一筆是 `op=u`）
+- **commit 與冪等**：推論結果 flush 到 Kafka 後才 commit；重送的訊息因 hash 相同而跳過。快取在 flush 成功後才更新，整批重試時不會誤判為已推論
+- **錯誤**：模型檔不存在或無法載入 → 啟動失敗（`CRITICAL`）；推論時的例外視為程式錯誤，讓服務中止，不送 DLQ（資料本身沒有問題）；解碼失敗由 `BatchConsumer` 送 DLQ
+- **部署**：compose 服務 `inference`，獨立 profile（`make up-inference`），唯讀掛載 `../models:/app/models`；沒有模型前不啟動
+- **服務上線前的文章**：不在這個服務內處理；需要時另外寫一次性的補跑工具（不在階段 4 範圍）
+
 ---
+
+### 7.19 推論快取重啟後從 ClickHouse 載入（fix，2026-10-16，#37）
+
+原本快取只在記憶體，重啟後清空；快取沒有的文章被編輯（`op=u`）時只記下 hash、不推論，編輯後的版本就不會被推論。階段 4 驗收期間 1 小時內有 7 次編輯（多在發文後幾分鐘內），推論服務一天因部署重啟數次，決定修正。
+
+- **訊息**：`Prediction` 新增 `text_hash`（3.5），值與快取用的 hash 相同
+- **ClickHouse**：migration `0004` 在 `predictions` 新增 `text_hash String DEFAULT ''`。Kafka engine 表不能加欄位，`predictions_queue` 與 `predictions_mv` 刪掉重建；consumer group 不變，offset 存在 Kafka，不掉資料也不重複。Kafka engine 不支援欄位 `DEFAULT`，queue 的 `text_hash` 不寫預設值，舊訊息缺這個欄位時 JSONEachRow 填型別預設值（空字串）
+- **啟動載入**（`load_cache`）：查 `predictions` 中**同一個 `model_version`**、`text_hash` 不是空字串的列，每篇取 `predicted_at` 最新的一筆，依 `predicted_at` 由舊到新放進快取（LRU 保留最新的）；`should_predict` 不變
+  - 換模型版本時不載入舊版本的 hash，新模型的快取是空的（與修正前相同）
+  - 啟動時 ClickHouse 連不上 → 服務停止、由 docker 重啟（同 schema registry），不在快取是空的狀態下開始消費
+  - 推論服務改為依賴 ClickHouse；compose 已有 `CLICKHOUSE_URL`，帳號密碼沿用 `.env` 的 `CLICKHOUSE_USER`、`CLICKHOUSE_PASSWORD`
+- **已知空窗**：重啟前幾秒送出、ClickHouse 還沒寫入的推論載不到，這幾篇回到修正前的行為
+- **補舊資料**（一次性，`python -m radar.ml.inference.backfill_hash`）：`text_hash` 為空的推論，每篇只補 `predicted_at` 最新的一筆，用 PG `posts` 目前的標題與內文算 hash（`post_text` 與模型的 `max_chars`，與推論相同）
+  - 用 PG 目前的文字：推論之後若有編輯被漏掉（就是 #37 的情況），補上的 hash 會是編輯後的版本，這篇仍停留在舊的預測；無法從現有資料分辨，接受這個誤差
+  - 寫入方式是 ClickHouse 的 `ALTER TABLE ... UPDATE`（mutation），不經 Kafka：重送訊息會在 `predictions` 多出重複的列，影響以列數比對的查詢（例如階段 4 驗收）
+  - 只更新 `text_hash = ''` 的列，可重跑；PG 已沒有這篇或已刪除的跳過；`--dry-run` 只統計要補的篇數
+  - 部署順序：停推論服務 → `make up-app`（自動跑 `0004`）→ 補舊資料 → `make up-inference`
+  - 2026-10-16 實際部署：補 5,509 篇（PG 已刪除的 41 篇跳過），約 4 秒；推論服務啟動時載入 5,509 篇
+
+### 7.20 熱度偵測的實作選擇（S5-01～S5-05）
+
+- **模組**：`streaming/heat.py`，`python -m radar.streaming.heat`；Quix Streams `Application`，consumer group `heat`，`processing_guarantee="exactly-once"`：輸出的警示、state 的 changelog 與 offset 在同一個 transaction，重啟後不會重送已發過的警示（階段 5 驗收）
+- **相依套件**：`quixstreams` 3.28 要求 `confluent-kafka<2.13`，全專案降到 2.12.x（原本 2.15 只是當時的最新版；用到的 API 2.12 都有，降版後單元、整合測試全過）
+- **輸入**：`cdc.public.comments`（`HEAT_INPUT_TOPIC` 可改成回放 topic）。Avro 用自訂的 Quix `Deserializer` 包 `make_avro_decoder(CdcComment)`；解析失敗的送 `dlq` 並略過（`on_consumer_error`）
+  - 只計 `op=c`；`u`（樓層位移的改寫）、`d`、`r`（snapshot）略過，避免同一則推文被算兩次（設計文件 8.3）
+- **分組**：`group_by(board)`，每個看板一份 state，文章與看板兩種單位都在同一份 state 裡算（文章要和看板的基準比較，見下方）。Quix 會建立 repartition 與 changelog 兩種內部 topic（以 Admin API 建立，broker 關閉自動建立不影響），不列在 `topics.yaml`
+  - 以看板當 key 會讓 Gossiping 的 partition 較忙；推文量每秒個位數，不是瓶頸（設計文件 11.2）
+- **時間**：用觀測時間（推文進 PG 的時間 `__source_ts_ms`），不用推文時間 `commented_at`；以分鐘為單位。沒有 `__source_ts_ms` 時改用 `commented_at`
+  - 理由（2026-10-17 實測）：推文要等列表輪詢或重爬才會被抓到，進 PG 時已比推文時間晚 p50 約 8 分鐘、p90 約 14 分鐘，5 分鐘內進來的只有約 22%。以推文時間加 5 分鐘寬限會丟掉約 78% 的推文；拉長寬限又要等更久才能判斷。偵測的是「我們看到的推文增加速度」，分批到達的波動基準也會學到
+  - 太舊的推文不計入：推文時間比觀測時間早超過 30 分鐘（`HEAT_MAX_DELAY_MIN`）的推文不計數、也不進基準（開發機休眠後補抓、第一次爬到的舊爆文），否則補抓時會像暴增
+  - watermark：該看板看過最大的觀測分鐘；比 watermark 早超過寬限（2 分鐘）的事件丟棄。觀測時間在同一個 partition 內幾乎遞增，寬限只處理不同 partition 之間的順序差異
+  - 舊事件：結算的分鐘比處理當下早超過 1 小時的只更新基準，不觸發警示（新的 consumer group 從頭讀歷史、服務停機後補消費）
+- **視窗**：10 分鐘、每 1 分鐘滑動；watermark 前進、一個分鐘結束（結算）時，才用「到該分鐘為止的 10 分鐘」評估該看板與所有活躍文章（2026-10-17 修正，#50）
+  - 原本每則推文進來就評估：推文是一則一則到的，一定在剛越過門檻（第 30 則）時觸發並進入冷卻，警示的推文數永遠停在門檻附近，分不出普通熱文與爆文
+  - 延遲：分鐘要等該看板下一分鐘的推文進來才結算。Gossiping、HatePolitics 有推文的分鐘間隔 p90 1～2 分鐘，Stock p90 4 分鐘（2026-10-17 近 6 小時）；暴增中的文章發文 1 小時內每 5 分鐘重爬（7.22），冷門看板的暴增約在下一次重爬時結算
+  - 結算後才到、仍在寬限內的推文照樣計數，但不再評估已結算的分鐘
+- **基準**（EWMA 平均與變異數，`HEAT_EWMA_ALPHA`）：每結算一分鐘，先評估觸發（z-score 用更新前的基準），再用該分鐘的 10 分鐘視窗值更新一次；中間沒有推文的分鐘補 0（最多補 `HEAT_MAX_GAP_MIN` 分鐘）
+  - 看板單位：自己的視窗值
+  - 文章單位：與該看板的「文章基準」比較（設計文件 15.2，2026-10-17 決定）。不用每篇自己的基準：文章通常在發文後 1 小時內爆，S5-04 的「累積 1 小時才啟用」會讓它永遠來不及
+  - 文章基準每分鐘只更新一次（2026-10-17 修正，#49）：以該分鐘所有活躍文章（視窗內有推文）視窗值的平均與平方平均更新 EWMA 的一階、二階動差，變異數 = 二階 − 平均²，同時含文章之間的分散與隨時間的變動。原本每篇活躍文章各更新一次，40 篇活躍文章時每分鐘衰減 (1 − 0.02)^40 ≈ 0.45，記憶不到 1 分鐘，與看板基準（半衰期約 34 分鐘）不一致
+  - 冷卻中的文章（含這一分鐘剛觸發的）不納入文章基準，避免爆文墊高基準、讓同時段其他文章更難觸發；沒有活躍文章的分鐘不更新文章基準
+  - 只有一篇活躍文章時，更新方式與單一值的 EWMA 相同
+- **觸發**（可設定，分鐘結算時判斷）：z-score ≥ 3（`HEAT_Z_THRESHOLD`）且視窗內推文數達最低值：看板 30（`HEAT_MIN_COUNT`）、文章 80（`HEAT_POST_MIN_COUNT`）；同一單位 30 分鐘內不重複（`HEAT_COOLDOWN_MIN`）；看板的基準累積滿 60 分鐘才啟用（`HEAT_WARMUP_MIN`）；標準差下限 1，避免變異數接近 0 時 z-score 爆大
+- **文章的最低推文數另設為 80**（fix，2026-10-17，#59）：文章基準來自該看板所有活躍文章，大多數只有個位數，平均約 4、標準差小，視窗值 30 的 z-score 就有 6～7，z ≥ 3 形同沒作用、只剩推文數 ≥ 30 一關；PTT 網頁版約 10 分鐘才更新（7.22），熱門文章每批一次進來 30～60 則，剛好每批越過門檻
+  - 實測：#49、#50 部署後約 1 小時 40 分鐘，Gossiping 11 則、HatePolitics 9 則文章警示，推估每天 158、129 則（驗收要求每看板每天 ≤ 10）
+  - 離線回放（`cdc.public.comments` 的 op=c 事件、2026-10-16 19:00Z～10-17 08:50Z 共 13.8 小時，比較結果見 #59）：文章門檻 80 時推估每天 Gossiping 6.9、HatePolitics 5.2、Stock 1.7 則，選出的 8 篇都是當天的熱門話題；分位數門檻（p99.5 等）在活躍文章少的看板完全不觸發、且對分位數很敏感，增量門檻（2 分鐘增量）在 40 與 60 之間落差大，都不採用
+  - 看板維持 30：看板警示的數量正常（各約每天 1～2 則）
+  - 樣本只有 13.8 小時，3 天驗收時再確認
+- **state 大小**：每個看板只留 watermark 前 10 + 5 分鐘內的分鐘計數，與這段時間有推文的文章；冷卻紀錄過期就刪
+- **部署**：compose 服務 `heat`，profile `alerting`（與 bot 一起，`make up-alerting`）；RocksDB 目錄掛 volume `heat_state`，沒有 volume 時從 changelog 恢復
+  - #49、#50 的修正沒有改 state 格式（基準仍是平均、變異數、次數），舊 state 可直接讀；但舊的文章基準已被墊高，部署時重置 heat（刪 volume、consumer group 與內部 topic）從歷史重建
+- **已知限制：系統停擺後的誤報**（2026-10-17 實測，決定先不處理）：停擺期間沒有推文進來，基準被補 0 而降低；恢復後爬蟲補抓，停擺前 30 分鐘內的推文一起進來，看起來像暴增。開發機休眠 7 小時後醒來，4 個單位各發了一則誤報（看板 Stock 的基準降到 0.01）
+  - 不處理的理由：主要原因是開發機休眠，第 9 階段上雲後不會發生；部署、重啟的停擺只有幾分鐘。第 5 階段的 3 天驗收開 caffeinate，若誤報明顯再加停擺偵測（觀測中斷超過一段時間就不補 0、恢復後暫停觸發）
+- **新的 consumer group 從頭讀**：歷史推文都比當下早超過 1 小時，只建立基準、不觸發，上線即可用歷史資料完成暖機
+- **測試**：整合測試用真的 Kafka（transaction log 副本數設 1，exactly-once 才能跑）與 confluent-kafka 的 `mock://` schema registry；Quix 會註冊 signal handler，`app.run` 只能在 main thread 執行
+- **錄製與回放**（S5-05，`python -m radar.streaming.replay`，一次性工具）：
+  - `record`：依時間範圍把 topic 的原始訊息（key、value 的 bytes，base64）存成 JSONL（`data/replay/`，不進 repo）
+  - `replay`：把檔案依原本的間隔（可加速）重送到 `replay.cdc.comments`；Avro bytes 原封不動，schema ID 在同一個 Apicurio 仍有效
+  - `surge`：人工製造暴增：對指定文章在 N 分鐘內送 M 則 `op=c` 推文事件到 `replay.cdc.comments`，用 Apicurio 上 `cdc.public.comments-value` 的最新 schema 序列化；`commented_at` 與 `__source_ts_ms` 都分散在到當下為止的 N 分鐘
+  - 回放與驗收時另開一個 heat：`HEAT_INPUT_TOPIC=replay.cdc.comments`、consumer group `heat-replay`，state 與正式的分開
+  - `replay.cdc.comments` 列在 `topics.yaml`，保留 24 小時
+
+### 7.21 Telegram bot 的實作選擇（S5-06～S5-07）
+
+- **模組**：`bot/main.py`，`python -m radar.bot.main`；兩個 thread：Telegram long polling 處理指令；`BatchConsumer`（group `bot`）消費 `alerts` 推送
+- **Telegram API**：用 `httpx2` 直接呼叫 Bot API（`getUpdates`、`sendMessage`），不加 SDK（同 7.11 的 LLM 呼叫）；`TELEGRAM_BOT_TOKEN`
+  - 429 依 `retry_after` 等待後重試；5xx、連線錯誤為暫時性錯誤，退避重試；400 記 WARNING 略過；403（使用者封鎖 bot）刪掉該 chat 的訂閱；推送、指令回覆、按鈕回應三條路徑都一樣處理，處理完該 update 照常確認（不會讓 bot 結束或重啟後重送）
+- **允許的 chat**：`TELEGRAM_ALLOWED_CHAT_IDS`（逗號分隔）；空字串為不限制。其他 chat 的指令不回應
+- **指令**：
+  - `/start`：說明
+  - `/boards`：PG `boards` 中啟用的看板（只讀，寫入者仍是 API）
+  - `/subscribe <board>`：看板必須存在且啟用；重複訂閱不報錯
+  - `/unsubscribe [board]`：不帶參數時取消全部
+  - `/hot`：ClickHouse 最近 60 分鐘新增推文最多的 5 篇（`comments_latest FINAL` + `posts_latest FINAL` 的標題）
+- **推送**：訂閱以看板為單位，`alert.board` 相同就推送，`post`、`board` 兩種警示都推；訊息帶看板、標題（ClickHouse `posts_latest`）、推文數、基準、z-score、PTT 連結
+  - 冪等：同一個 `alert_id` 只推一次（記憶體 LRU）；整批重試時，已送到的 (alert, chat) 不重送；推送成功後才 commit，重啟時未 commit 的會再推一次
+  - 指令迴圈 thread 中止時讓 consumer 停止，main thread 再把例外拋出（`@log.catch` 記 CRITICAL、docker 重啟）；alerts consumer 在 main thread，才收得到 SIGTERM
+  - 例外訊息不帶 token：連線錯誤只留例外類別名稱（Bot API 的網址含 token）
+  - 壞的 `alerts` 訊息送 `dlq`
+- **`subscriptions` 表**（S5-06）：`(chat_id BIGINT, unit_type TEXT, unit_key TEXT, created_at)`，主鍵三欄；`unit_type` 以 CHECK 限制為 `board`（之後加 `post`、`entity` 再放寬）；寫入者 bot，不在 publication 裡（設計文件 5.4）；單筆 CRUD 用 ORM（2.4）
+- **部署**：compose 服務 `bot`，profile `alerting`；沒有 `TELEGRAM_BOT_TOKEN` 時啟動失敗
+  - 自寫服務都要帶 `app-env`（compose 內的 Kafka、PG、ClickHouse 位址）；bot 第一次部署時漏了，連到 localhost，單元測試現在檢查每個 `radar-app` 服務
+  - 推送成功記 INFO（`alert … sent to N chats`），用來量推送延遲
+
+### 7.22 PTT 網頁版約 10 分鐘才更新（investigate，2026-10-17，#56）
+
+推文每約 10 分鐘才成批進 PG，逐段查證後，原因在 PTT 網頁版，不在 Scheduler 或爬蟲：
+
+- Scheduler 對發文 1 小時內的文章約每 2～2.5 分鐘派發一次，爬蟲也約每 2 分鐘抓一次（`raw.posts`）
+- `raw.posts` 近 3 小時、發文 1 小時內的 341 篇：88% 的抓取與前一次推文數相同；內容變化的間隔 p10 9.0、p50 10.3、p90 19.0 分鐘
+- 回應為 `cf-cache-status: DYNAMIC`（Cloudflare 沒快取）、`cache-control: max-age=900s, public`，快取在 PTT 網頁版自己那一層
+- **決定（A）**：接受約 10 分鐘的下限，發文 1 小時內的重爬由 2 分鐘改為 5 分鐘，每篇請求量少約 60%；代價是頁面更新後平均多等約 1.5 分鐘才抓到。省下的額度消化 #51 增加的重爬
+- **不繞過快取**（query string、header）：效果未證實，且會把負載轉到 PTT 原始伺服器
+- 要分鐘級以下的即時性需改用 PTT BBS（「後續階段」13、#57）；之後可再考慮依 `posts.crawled_at`（上次內容變化）預估頁面更新時間再抓，延遲與請求量都更低，但要先確認快取週期穩定
+
+### 7.23 Telegram 按鈕選單與情緒呈現（S6-01～S6-06，規劃，2026-10-17）
+
+- **不加 SDK**：沿用 `httpx2` 的 `TelegramClient`，加上 inline keyboard 需要的方法。範本只參考模式、不引入套件：python-telegram-bot 的 `inlinekeyboard2.py`（按鈕回呼時編輯原訊息，像在操作選單）、aiogram 的 `CallbackData`（帶前綴、有型別的回呼資料）
+- **畫面與處理分開**：`bot/views.py` 的每個畫面是純函式（輸入查詢結果，輸出文字與按鈕），單元測試直接比對輸出；`bot/main.py` 只負責分派與呼叫 API
+- **`callback_data`**（Bot API 上限 64 bytes）：`<版本>:<動作>:<參數>`，例如 `1:sub:Gossiping`、`1:mute:HatePolitics.M.1792217249.A.400`、`1:nav:hot`；版本不符或解析失敗時提示「選單已過期」並重送主選單。post_id 最長約 40 bytes，在上限內
+- **更新類型**：`getUpdates` 帶 `allowed_updates=["message","callback_query"]`；每個 callback query 都要回 `answerCallbackQuery`（否則按鈕一直轉圈），並用它顯示「已訂閱」之類的短提示
+- **允許清單**：按鈕回呼以 `callback_query.message.chat.id` 檢查，不在清單的不回應
+- **編輯訊息**：選單切換用 `editMessageText`；內容沒變時 Bot API 回 400 `message is not modified`，視為成功
+- **HTML**：`parse_mode=HTML`，標題等外部文字一律 escape（`<`、`>`、`&`）
+- **警示內容**（S6-05）：
+  - 倍數 = `value` ÷ max(`baseline`, 1)
+  - 推、噓、箭頭：`comments_latest FINAL` 依 `type` 計數（ClickHouse 沒有 `comment_count`，7.24）
+  - 爭議度 = 噓 ÷（推＋噓）；推＋噓 < 10 時不顯示
+  - 文章情緒：`predictions` 該篇最新一筆；最高分數低於 `TELEGRAM_SENTIMENT_MIN_SCORE`（預設 0.5）顯示「不確定」。原訂 0.6，但 2026-10-18 開發環境 7,244 篇的最高分數中位數 0.57、57% 低於 0.6（低於 0.5 為 29%），超過一半會顯示「不確定」；TF-IDF baseline 先用 0.5，階段 8 換模型後再調；沒有推論（推論服務上線前的文章、snapshot）顯示「尚無」
+  - ClickHouse 查詢失敗時照樣推送基本警示（不帶推噓與情緒）並記 WARNING，不讓查詢擋住通知
+- **新表**（S6-02）：`chat_settings(chat_id PK, post_alerts BOOL DEFAULT true, board_alerts BOOL DEFAULT true, updated_at)`；`muted_posts(chat_id, post_id, muted_at)`，主鍵前兩欄，超過 2 天的由 bot 定期刪除（文章 24 小時後就不再重爬）。寫入者 bot、不在 publication 裡（設計文件 5.4），單筆 CRUD 用 ORM（2.4）
+- **看板概況**：近 24 小時的文章數、新增推文數、有推論的文章中負面／中立／正面的比例（附「n 篇有推論」）、爭議度最高的 3 篇（推＋噓 ≥ 10）、今天的警示數
+- **現在熱門**：最近 60 分鐘新增推文最多的 5 篇；預設只看訂閱的看板，可切換「全部看板」
+- **驗收清單**（真的 Telegram）：主選單與各畫面來回切換；切換訂閱後推送跟著改變；警示的各欄位與按鈕；「不再通知」後同一篇不再推；關閉文章警示後只收看板警示；不在允許清單的 chat 按按鈕沒有反應；舊的文字指令仍可用
+- **模組**（骨架，2026-10-18）：
+  - `bot/telegram.py`：`Button`、`Keyboard`、`Update`（`message` 或 `callback`）；所有訊息 `parse_mode=HTML`
+  - `bot/views.py`：`Action`、`Callback`、`Screen`、`ChatPrefs` 與各畫面；`post_url` 由 `notify.py` 移來
+  - `bot/stats.py`：`Queries` protocol 與 `ClickHouseQueries`（`post_stats`、`hot`、`overview`）；原本 `commands.HOT_QUERY`、`notify.fetch_titles` 併入
+  - `bot/callbacks.py`：`handle_callback` 回傳 `CallbackResult(screen, toast)`，不呼叫 Telegram；`main.handle_update` 負責 answer 與 edit
+  - `bot/repository.py`：新增 `PreferenceRepository`（設定、不再通知、`recipients`、`forget`）；`SubscriptionRepository.chats_for_board` 由 `recipients` 取代後刪除
+- **動作**：`menu`、`hot`（參數 `all` 為全部看板）、`subs`、`sub:<看板>`（切換）、`boards`、`ov:<看板>`、`set`、`tog:post|board`、`mute:<post_id>`、`unmute:<post_id>`；參數一律驗證（看板必須啟用、post_id 格式正確），不符時只回提示
+- **推送對象**：`recipients(alert)` 一個查詢——訂閱該看板、沒關掉這種警示、文章警示另排除「不再通知」的文章；看板警示沒有「這篇不再通知」按鈕（一則列 3 篇，按鈕對不到單一文章）
+- **「這篇不再通知」**：只回提示、不改警示訊息；`TELEGRAM_MUTE_RETENTION_H`（預設 48）後由 bot 每小時清一次
+- **現在熱門**：沒有訂閱時改看全部看板；`/hot` 文字指令看全部看板
+- **今天的警示數**：以台北時間的日期計算
+- **403**：除了訂閱，也刪掉該 chat 的 `chat_settings`、`muted_posts`
+- **`setMyCommands`**：啟動時呼叫一次，失敗只記 WARNING，不擋啟動
+- **之後**：Mini App（「後續階段」15）
+
+### 7.24 只多了箭頭時 `crawled_at` 不前進（fix，2026-10-17，#52）
+
+`posts` 只在推數、噓數、標題、內文有變時更新，`crawled_at` 跟著前進；推文同步又以 `posts.crawled_at <= 快照時間` 判斷能不能動推文（7.15）。只多了箭頭的快照不更新 `posts`，晚到的較舊快照仍會通過判斷，把較新寫入的箭頭當成「超出最大樓層」刪掉。
+
+- **`posts` 新增 `comment_count`**（推＋噓＋箭頭，即快照的推文數），列入變化判斷；只多了箭頭時也會寫入、`crawled_at` 前進，較舊的快照就不碰推文
+- **不採用的做法**：另建一張不在 CDC publication 裡的表記錄推文同步時間——CDC 完全不變，但多一張表、多一個寫入點，`GET /status` 的 `last_changed_at` 仍會低估只有箭頭活動的看板
+- **代價**：只多了箭頭的重爬也會多一筆 `cdc.public.posts` 事件。inference 以 `text_hash` 判斷，內文沒變不重算（7.19）；label-stream 只看新文章；ClickHouse 的 posts 表不加這欄，Avro 多出的欄位直接忽略
+- **舊資料補值**：migration 依 `comments` 筆數補值，只更新筆數 > 0 的文章；每列產生一筆 CDC 事件（數千筆），`posts_history` 會多出一批推噓數沒變的列。不補值的話，舊文章要等下一次重爬才會更新，這段期間仍有誤刪的風險
+- **重爬門檻改讀 `comment_count`**：原本的 `comments` 子查詢（7.2，#51）是為了不在 `posts` 加欄位；欄位既然加了，Scheduler 直接讀它，省掉每次查詢的子查詢。補值後兩者相同
 
 ## 8. 風險清單
 
@@ -743,7 +1017,9 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | LLM 免費額度不足或政策改變 | 標註進度變慢或成本上升 | 實測 `gemini-3.5-flash` 免費只有 20 次/天、`gemini-3.1-pro` 為 0；`Labeler` 介面可換服務商（Groq、OpenRouter、Gemini）或改付費 Batch API；backfill 可中斷續跑 |
 | 單機記憶體不足（設計估 6～7GB） | 服務被 OOM kill | JVM heap 上限；階段 2 完成時實測記憶體 |
 | PTT 回 HTTP 520（Cloudflare） | 該篇內頁本輪略過 | 24 小時驗收：520 ×23、525 ×14、521 ×4，佔請求 < 0.1%；**決定維持不重試**（重試會增加觸發 #11 的機會）。已在 PG 的文章由重爬補抓；新文章不記進列表快取，下一輪列表輪詢再抓（7.17）；單次記 WARNING，連續 20 次失敗才記 ERROR |
-| 開發機休眠 | 長時間驗收中斷、數據缺一段 | 驗收期間 `caffeinate -dims` 並接電源、不闔上螢幕（闔上仍會強制睡眠）；`cdc-watchdog` 的外部 heartbeat 停止時會寄 email（7.16）；上雲後（階段 8）不再依賴開發機 |
+| 使用者把文章情緒誤讀成推文的風向 | 錯誤解讀輿情 | 介面寫「文章情緒」並附信心，低於門檻顯示「不確定」；推噓、爭議度分開呈現（設計文件 15.8）；推文層級情緒列入「後續階段」14 |
+| Telegram 選單的回呼資料超過 64 bytes 或格式改版 | 按鈕失效 | `callback_data` 帶版本號，解析失敗時重送主選單；單元測試檢查最長的 post_id 在上限內（7.23） |
+| 開發機休眠 | 長時間驗收中斷、數據缺一段 | 驗收期間 `caffeinate -dims` 並接電源、不闔上螢幕（闔上仍會強制睡眠）；`cdc-watchdog` 的外部 heartbeat 停止時會寄 email（7.16）；上雲後（階段 9）不再依賴開發機 |
 | 標註的系統性偏差 | 模型學到錯誤標準，資料越多越確定 | 固定主要標註者、改 prompt 修偏差、兩個不同家族的標註者交叉比對、人工測試集裁決（7.11） |
 | Python 端讀不了 CDC 的 Avro | S3-08 串流標註、階段 4 推論卡住 | 採用 `confluent-kafka[avro]`（fastavro + 官方 schema registry client，打 Apicurio 的 ccompat API）；已用 mock schema registry 與 S2-01 實測的欄位驗證解碼，待以實際 CDC 訊息確認 |
 

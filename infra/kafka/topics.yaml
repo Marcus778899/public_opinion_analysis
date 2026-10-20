@@ -33,6 +33,10 @@ topics:
   - name: alerts
     partitions: 1
     retention_hours: 168
+  # 熱度偵測的回放與人工暴增（開發規格 7.20）
+  - name: replay.cdc.comments
+    partitions: 3
+    retention_hours: 24
   - name: dlq
     partitions: 1
     retention_hours: 720

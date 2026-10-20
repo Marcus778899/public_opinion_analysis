@@ -6,7 +6,7 @@
 
 from collections.abc import Callable
 from datetime import UTC, datetime
-from importlib.resources import files
+from importlib.resources import files  # nosemgrep  # Python 3.7 相容性規則，不適用 3.12
 from pathlib import Path
 
 import uvicorn
