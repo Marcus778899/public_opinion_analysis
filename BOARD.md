@@ -14,6 +14,8 @@
 | 2026-10-20 | D-003 | semver；階段 1～6 以 v0.6.0 合進 main，不等階段 3、5 驗收；stage-3～6 tag 不補打 |
 | 2026-10-20 | D-009 | .env.example 的選填設定寫成註解，check_env 不再當必填 |
 | 2026-10-20 | D-011 | 維持放行 docker compose *，接受 M-3 風險 |
+| 2026-10-20 | D-008 | 修上游範本：check_env 戳記取代讀 .env；修好前甲方代開單 |
+| 2026-10-20 | D-010 | bot 允許清單沒設就啟動失敗，開放所有人須 TELEGRAM_ALLOW_ALL=true（v0.7.0） |
 
 ## 任務狀態
 
@@ -22,11 +24,10 @@
 | v060-security | security | blocked | 0 | docs/security/v0.6.0.md FAIL fac0421：high 1（H-1 → bot-forbidden-crash）、medium 3（M-1 D-010、M-2 #68、M-3 D-011）、low 3（#69～#71） |
 | v060-uat | uat | review | 0 | docs/uat/v0.6.0.md：blocker 0、major 0、minor 4（F-1、F-2 README 已補；#65～#67 backlog）；甲方驗收清單 24 項待勾 |
 | spec-release-order | architect | blocked | 0 |  |
-| bot-forbidden-crash | backend | in-progress | 0 | 驗收測試 3a50cce 已鎖定（13 failed／1 passed） |
+| bot-forbidden-crash | backend | blocked | 0 | 實作 9af39cb，bot 測試 177 全過；pr.py open 卡 D-012 |
 
 ## 卡住／待甲方決定
 
-- D-008：task.py new 在 sandbox 讀不到 .env 而當掉，所有派工單（spec-release-order、階段 7）卡住
 - v0.6.0 資安 FAIL（H-1）：修正中（bot-forbidden-crash #73），合併後重審
 - D-012：worktree 的 .venv 符號連結沒被 .gitignore 忽略，pr.py open 拒絕（所有單）
 

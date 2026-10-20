@@ -13,18 +13,6 @@
 - 提出：architect（todo-design）
 -->
 
-### D-008 `task.py new` 在 sandbox 裡無法開單
-- 背景：`task.py new` 會呼叫 `check_env.missing_settings()` 檢查 `.env`，但 sandbox 禁止讀 `**/.env`（連 `exists()` 都不行），直接 `PermissionError` 當掉；`check_env.py` 本身也一樣。所有派工單都卡住（含 `spec-release-order`、階段 7）。流程腳本是甲方的檔案，manager 不能改
-- 選項：A. 暫時由甲方在自己的終端機開單：`! python3 scripts/task.py new <id> < <派工單檔>`（我先把派工單寫好，每張單都要甲方跑一次）／B. 修範本（agent-engineering 上游）：`check_env.py` 由甲方在 sandbox 外跑一次後寫一個「設定齊全」的戳記（例：`.env.example` 雜湊），`task.py` 讀不到 `.env` 時改查戳記，修好後 `update.sh` 同步／C. sandbox 開放讀 `.env`（違反「不可讀 .env」，不建議）
-- 建議：B 為長期解，修好前先用 A
-- 提出：manager（spec-release-order）
-
-### D-010 bot 允許清單沒設時要不要改成拒絕（fail closed）
-- 背景：資安 M-1。`TELEGRAM_ALLOWED_CHAT_IDS` 留空＝任何人都能用 bot（訂閱、收警示、觸發 ClickHouse 查詢），與設計文件 9.2「只回應允許清單內的 chat」不一致。看不到別人的資料，但可被濫用與觸發 H-1。你的 `.env` 已填，現況不受影響
-- 選項：A. 沒設就啟動失敗；要開放所有人必須明確設 `TELEGRAM_ALLOW_ALL=true`／B. 維持留空不限制，只在文件寫清楚（README 已補）
-- 建議：A，權限預設值應該 fail closed；不擋 v0.6.0，排進下一版
-- 提出：security（v0.6.0 審查 M-1）
-
 ### D-012 worktree 的 `.venv` 連結被當成未提交修改，`pr.py open` 拒絕
 - 背景：`task.py new` 會在 worktree 建 `.venv` 符號連結（共用主目錄環境），但 `.gitignore` 寫的是 `.venv/`（只比對目錄），符號連結不會被忽略 → `git status` 出現 `?? .venv` → 每張單的 `pr.py open` 都會拒絕。範本 `init_project.py` 的 GITIGNORE 也是 `.venv/`，是上游問題
 - 選項：A. 甲方在主目錄執行 `echo .venv >> .git/info/exclude`（只影響本機、所有 worktree 立即生效，不必 sync）／B. 甲方把 `.gitignore` 的 `.venv/` 改成 `.venv` 直接 commit 到 develop（既有兩張單要 sync 才拿得到）
@@ -78,4 +66,14 @@
 ### D-011 agent 的 `docker compose *` 權限可繞過「不可讀 .env」
 - 決定：B. 維持放行 `docker compose *`，接受風險（資安 v0.6.0 M-3）
 - 理由：甲方優先讓本機測試順暢；`.env` 只在本機，agent 規則仍禁止讀取
+- 日期：2026-10-20
+
+### D-008 `task.py new` 在 sandbox 裡無法開單
+- 決定：B. 修上游範本：甲方在 sandbox 外跑 `check_env.py` 時寫「設定齊全」戳記（`.env.example` 雜湊，不含值），`task.py` 讀不到 `.env` 時改查戳記；修好前用 A（甲方以 `!` 代開單）。同一次範本修正一併處理 D-012 與 worktree 內 pytest 碰 `.env` 失敗
+- 日期：2026-10-20
+
+### D-010 bot 允許清單沒設時要不要改成拒絕（fail closed）
+- 決定：A. `TELEGRAM_ALLOWED_CHAT_IDS` 沒設就啟動失敗；要開放所有人必須明確設 `TELEGRAM_ALLOW_ALL=true`
+- 理由：權限預設值應 fail closed，避免上雲或重建 `.env` 時漏設而默默對外開放（資安 v0.6.0 M-1）
+- 影響：設計文件 9.2、開發規格 7.21、`.env.example`；不擋 v0.6.0，排進 v0.7.0（派工單 `bot-allowlist-required`）
 - 日期：2026-10-20
