@@ -25,12 +25,6 @@
 - 建議：A，權限預設值應該 fail closed；不擋 v0.6.0，排進下一版
 - 提出：security（v0.6.0 審查 M-1）
 
-### D-011 agent 的 `docker compose *` 權限可繞過「不可讀 .env」
-- 背景：資安 M-3。`.claude/settings.json` 放行 `docker compose *` 且在 sandbox 外，用 `docker compose run … env` 就能讀到 `.env` 的值與 sandbox 外的檔案。這是流程設定檔，只有甲方能改
-- 選項：A. 甲方把放行範圍縮小到需要的子指令（`up`、`ps`、`logs`、`down`、`exec`…），`run`／`cp` 等改成要詢問／B. 維持現狀，接受風險
-- 建議：A；同時可順手處理 L-3（`http.server` 免詢問，#71）
-- 提出：security（v0.6.0 審查 M-3）
-
 ### D-012 worktree 的 `.venv` 連結被當成未提交修改，`pr.py open` 拒絕
 - 背景：`task.py new` 會在 worktree 建 `.venv` 符號連結（共用主目錄環境），但 `.gitignore` 寫的是 `.venv/`（只比對目錄），符號連結不會被忽略 → `git status` 出現 `?? .venv` → 每張單的 `pr.py open` 都會拒絕。範本 `init_project.py` 的 GITIGNORE 也是 `.venv/`，是上游問題
 - 選項：A. 甲方在主目錄執行 `echo .venv >> .git/info/exclude`（只影響本機、所有 worktree 立即生效，不必 sync）／B. 甲方把 `.gitignore` 的 `.venv/` 改成 `.venv` 直接 commit 到 develop（既有兩張單要 sync 才拿得到）
@@ -79,4 +73,9 @@
 
 ### D-009 `.env.example` 把選填設定當成必填，`task.py new` 拒絕開單
 - 決定：A. 選填設定在 `.env.example` 寫成註解（`GEMINI_API_KEY`、`OPENROUTER_API_KEY`、`API_CORS_ORIGINS`），甲方直接 commit 到 develop（eb6f81a，一次性例外）；之後新增選填設定一律寫成註解
+- 日期：2026-10-20
+
+### D-011 agent 的 `docker compose *` 權限可繞過「不可讀 .env」
+- 決定：B. 維持放行 `docker compose *`，接受風險（資安 v0.6.0 M-3）
+- 理由：甲方優先讓本機測試順暢；`.env` 只在本機，agent 規則仍禁止讀取
 - 日期：2026-10-20
