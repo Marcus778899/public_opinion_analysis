@@ -1,6 +1,6 @@
 import pytest
 
-from radar.bot.commands import HELP, Command, HotPost, fetch_hot, format_hot, handle, parse_command
+from radar.bot.commands import COMMANDS, HELP, Command, handle, parse_command, text_reply
 
 CHAT = 42
 
@@ -27,10 +27,32 @@ class FakeRepo:
         return len(drop)
 
 
-def run(text: str, repo: FakeRepo | None = None, hot=lambda: []) -> str:
+class FakeQueries:
+    def __init__(self, hot=()) -> None:
+        self.hot_posts = list(hot)
+        self.hot_boards: list[list[str] | None] = []
+
+    def hot(self, boards):
+        self.hot_boards.append(boards)
+        return self.hot_posts
+
+
+def run(text: str, repo: FakeRepo | None = None) -> str | None:
     command = parse_command(text)
     assert command is not None
-    return handle(command, CHAT, repo or FakeRepo(), hot)  # type: ignore[arg-type]
+    return text_reply(command, CHAT, repo or FakeRepo())  # type: ignore[arg-type]
+
+
+def screen(text: str, repo: FakeRepo | None = None, queries: FakeQueries | None = None):
+    command = parse_command(text)
+    assert command is not None
+    return handle(
+        command,
+        CHAT,
+        repo or FakeRepo(),  # type: ignore[arg-type]
+        queries or FakeQueries(),  # type: ignore[arg-type]
+        min_score=0.6,
+    )
 
 
 # --- parse_command ---
@@ -53,15 +75,52 @@ def test_parse_command_not_a_command_returns_none(text):
     assert parse_command(text) is None
 
 
-# --- handle ---
+# --- handle（S6-06） ---
 
 
-def test_start_returns_help():
-    assert run("/start") == HELP
+def test_start_shows_main_menu_with_buttons():
+    assert screen("/start").keyboard
 
 
-def test_unknown_command_returns_help():
-    assert run("/foo") == HELP
+def test_menu_shows_main_menu():
+    assert screen("/menu") == screen("/start")
+
+
+def test_unknown_command_returns_escaped_help():
+    reply = screen("/foo")
+
+    assert reply.text.startswith("PTT 輿情雷達")
+    assert "&lt;看板&gt;" in reply.text
+    assert reply.keyboard == []
+
+
+def test_hot_command_queries_all_boards():
+    queries = FakeQueries()
+
+    screen("/hot", queries=queries)
+
+    assert queries.hot_boards == [None]
+
+
+def test_text_command_reply_is_escaped():
+    reply = screen("/subscribe <b>", FakeRepo(enabled=["<b>"]))
+
+    assert "&lt;b&gt;" in reply.text
+
+
+def test_commands_list_names_match_handled_commands():
+    assert {name for name, _ in COMMANDS} == {"menu", "hot", "boards", "subscribe", "unsubscribe"}
+
+
+# --- text_reply ---
+
+
+def test_unknown_command_text_reply_is_none():
+    assert run("/foo") is None
+
+
+def test_help_is_plain_text():
+    assert "<看板>" in HELP
 
 
 def test_boards_lists_enabled_boards_and_marks_subscribed():
@@ -129,37 +188,11 @@ def test_unsubscribe_without_args_when_nothing_subscribed():
     assert run("/unsubscribe") == "你目前沒有訂閱"
 
 
-def test_hot_formats_posts():
-    posts = [HotPost("Stock.M.1.A.111", "[標的] 台積電", 50)]
+def test_hot_command_query_error_says_failed():
+    class DownQueries(FakeQueries):
+        def hot(self, boards):
+            from radar.common.clickhouse import ClickHouseError
 
-    assert run("/hot", hot=lambda: posts) == "最近 1 小時推文最多：\n1. [標的] 台積電（50 則）"
+            raise ClickHouseError("down")
 
-
-# --- format_hot / fetch_hot ---
-
-
-def test_format_hot_empty_says_no_comments():
-    assert format_hot([]) == "最近沒有推文"
-
-
-def test_format_hot_missing_title_uses_post_id():
-    assert "Stock.M.1.A.111（3 則）" in format_hot([HotPost("Stock.M.1.A.111", None, 3)])
-
-
-class FakeClickHouse:
-    def __init__(self, rows) -> None:
-        self.rows = rows
-        self.params = None
-
-    def query_rows(self, sql, params=None):
-        self.params = params
-        return self.rows
-
-
-def test_fetch_hot_passes_params_and_maps_rows():
-    ch = FakeClickHouse([{"post_id": "Stock.M.1.A.111", "title": "", "comments": "9"}])
-
-    posts = fetch_hot(ch, 60, 5)  # type: ignore[arg-type]
-
-    assert ch.params == {"window_min": "60", "limit": "5"}
-    assert posts == [HotPost("Stock.M.1.A.111", None, 9)]
+    assert screen("/hot", queries=DownQueries()).text == "查詢失敗，請稍後再試"
