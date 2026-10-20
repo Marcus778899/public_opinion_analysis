@@ -57,7 +57,8 @@ description: 後端實作與設計規範（不限語言：Java、Python、Go、N
 
 本機的 Bash 在 sandbox 裡，docker 不能直接用；設定讓 `docker compose …` 這個指令在 sandbox 外跑（甲方允許的例外）。所以：
 
-- 需要 DB 等服務的測試，放在 compose 的 `test` 服務裡跑：`docker compose -f .worktrees/<id>/compose.yaml run --rm test`
+- 需要 DB 等服務的測試，放在 compose 的 `test` 服務裡跑：`docker compose --env-file .env -f .worktrees/<id>/compose.yaml run --rm test`（在主目錄下指令）
+- 設定從主目錄的 `.env` 讀：worktree 裡沒有 `.env`（sandbox 擋住所有 `.env`，不連進 worktree），所以一定要 `--env-file .env`；compose 檔用 `${KEY:?說明}` 取值、不用 `env_file: .env`，忘了 `--env-file` 會直接失敗，而不是默默帶空值跑
 - 直接下 `docker compose` 指令：包在 `make`、script 裡，或跟 `cd`、`&&`、重導向寫在同一個指令裡，都會留在 sandbox 而失敗
 - 用 `-f .worktrees/<id>/compose.yaml`：專案名稱跟著 worktree 目錄，每張單有自己的 DB 容器，平行開發不互撞；測試用的 DB 不要對外開 port
 - `make check` 只放不需要容器的檢查（lint、單元測試）；需要容器的整合測試另外一個指令，寫進派工單的驗證指令。CI 兩個都跑

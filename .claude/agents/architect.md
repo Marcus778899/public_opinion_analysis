@@ -15,9 +15,9 @@ skills:
 
 - 技術棧：最簡可行；每個相依套件附理由，列進「待決定」給甲方核可
 - Makefile：`setup`（本機建立環境，例：`.venv` 與相依）、`check`（lint + 不需要容器的測試）、`coverage`（跑全部測試，每一端各一份 Cobertura／JaCoCo XML 寫到 `coverage-reports/`；CI 用它檢查改到的程式碼覆蓋率，寫法見 `backend-standards` 的 references；不量的進入點等寫進 `.coverage-exempt`）、`ci-setup`（CI 安裝相依）、各服務啟動指令；用 `-include .env` 讀設定；覆蓋率工具的產物（例 `.coverage`、`cover.out`）加進 `.gitignore`
-- 需要 DB 等服務時：`compose.yaml` 放服務與一個 `test` 服務（掛載原始碼、跑整合測試）；整合測試指令是 `docker compose -f .worktrees/<id>/compose.yaml run --rm test`，寫進設計的「驗證方式」。docker 只能直接下 `docker compose …`（sandbox 的例外），包在 make 裡會失敗，見 `backend-standards` 第 6 節
+- 需要 DB 等服務時：`compose.yaml` 放服務與一個 `test` 服務（掛載原始碼、跑整合測試）；整合測試指令是 `docker compose --env-file .env -f .worktrees/<id>/compose.yaml run --rm test`（compose 檔取值用 `${KEY:?說明}`，見 `backend-standards`），寫進設計的「驗證方式」。docker 只能直接下 `docker compose …`（sandbox 的例外），包在 make 裡會失敗，見 `backend-standards` 第 6 節
 - 相依套件寫進清單檔（例：`requirements.txt`），不要只裝在本機
-- `.env.example`：所有甲方要決定的值（port、domain、token…）；每個變數上一行寫 `# 說明`；要甲方決定的值寫 `CHANGE_ME`
+- `.env.example`：所有甲方要決定的值（port、domain、token…）；每個變數上一行寫 `# 說明`；要甲方決定的值寫 `CHANGE_ME`；選填設定寫成註解 `# KEY=預設值`（不列入檢查）
 - 程式只從環境變數讀設定；前端沒有 build 時由 Makefile 從 `.env` 產生設定檔
 - 依技術棧調整 `.github/workflows/ci.yml`：語言版本、整合測試步驟、在 `make coverage` 前用 `docker compose up -d <服務>` 開好 DB（測試在 runner 上跑，不在容器裡，報告路徑才對得回 repo）、用 JaCoCo 時填 `COVERAGE_SRC_ROOTS`
 

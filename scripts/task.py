@@ -42,8 +42,10 @@ REQUIRED_FIELDS = ("類型", "負責", "目標", "背景", "設計依據", "相�
 PLACEHOLDERS = ("path/to/file.py", "path/to/acceptance/", "條件一", "一句話", "<task_id>", "feat / fix", "backend / frontend / architect / designer")
 MAX_CARD_LINES = 40
 MAX_BACKGROUND_LINES = 5
-# worktree 需要、但不進 git 的東西，用 symlink 共用主目錄的
-SHARED_PATHS = (".venv", "node_modules", ".env")
+# worktree 需要、但不進 git 的東西，用 symlink 共用主目錄的；寫進 .git/info/exclude，
+# 因為 .gitignore 的 `.venv/` 只比對目錄、不比對 symlink，下游專案的 .gitignore 又不歸範本管。
+# 不共用 .env：sandbox 擋住所有 `**/.env`，連結本身也 stat 不到、刪不掉；compose 用 --env-file .env 讀主目錄的
+SHARED_PATHS = (".venv", "node_modules")
 # 派工前必須已提交：worker 的 worktree 從 develop 開出，只看得到已提交的決策
 DISPATCH_DOCS = ("BOARD.md", "docs/decisions.md")
 FIELD_RE = re.compile(r"^- \*\*(.+?)\*\*[：:]?\s*(.*)$")
@@ -145,12 +147,22 @@ def check_card(task_id: str, body: str) -> list[str]:
     return problems
 
 
+def exclude_shared_paths() -> None:
+    exclude = ROOT / run("git", "rev-parse", "--git-common-dir") / "info" / "exclude"
+    existing = exclude.read_text(encoding="utf-8").splitlines() if exclude.exists() else []
+    missing = [name for name in SHARED_PATHS if name not in existing]
+    if missing:
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        exclude.write_text("\n".join(existing + missing) + "\n", encoding="utf-8")
+
+
 def start_worktree(task_id: str, kind: str) -> tuple[str, str]:
     branch = f"{kind}/{task_id}"
     if branch_exists(branch):
         raise FlowError(f"分支 {branch} 已存在（之前的版本用過這個名字）；task_id 換個更具體的名字")
     path = WORKTREES_DIR / task_id
     run("git", "worktree", "add", "-b", branch, str(path), BASE_BRANCH)
+    exclude_shared_paths()
     for name in SHARED_PATHS:
         if (ROOT / name).exists() and not (path / name).exists():
             (path / name).symlink_to(ROOT / name)

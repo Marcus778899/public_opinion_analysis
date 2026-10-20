@@ -493,7 +493,8 @@ def merge(task_id: str) -> None:
     print(f"PR #{meta['pr']} 已合併到 {BASE_BRANCH}（遠端分支保留）")
     if leftovers:
         print(
-            "本機清理沒完成（不影響合併；Linux 上多半是容器留下 root 擁有的檔案，見 backend-standards 的 compose 說明），"
+            "本機清理沒完成（不影響合併；Linux 上多半是容器留下 root 擁有的檔案，見 backend-standards 的 compose 說明；"
+            "舊版 task.py 開的 worktree 裡有 .env 連結，sandbox 刪不掉），"
             "請甲方手動處理：\n  " + "\n  ".join(leftovers),
             file=sys.stderr,
         )

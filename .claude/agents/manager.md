@@ -31,7 +31,7 @@ model: opus
 2. 派工單 `project-init`（負責 architect，類型 docs）：技術棧、Makefile、`.env.example`、CI 安裝步驟
 3. 走第 1 節的 PR 流程；技術棧的待決定問完後用 `pr.py approve project-init`
 4. 合併後 `check_env.py setup`（在主目錄跑 `make setup` 並記下相依版本；worktree 共用主目錄的環境）
-5. `check_env.py` 有缺 → 把變數清單給甲方，等甲方填完 `.env`（填完前 `task.py new` 會拒絕開單）
+5. `check_env.py` 有缺 → 把變數清單給甲方，等甲方填完 `.env` 並在自己的終端機（sandbox 外）跑一次 `check_env.py`（sandbox 讀不到 `.env`，靠這次記下的戳記；之前 `task.py new` 會拒絕開單）
 6. 寫 README.md
 
 ## 1. 每個階段（= 一個版本 vX.Y.0）

@@ -22,7 +22,7 @@ COPIES = {
     TEMPLATES / "github" / "workflows" / "sync_branch.yml": ROOT / ".github" / "workflows" / "sync_branch.yml",
     TEMPLATES / "decisions.md": ROOT / "docs" / "decisions.md",
 }
-GITIGNORE = (".env", ".worktrees/", "tasks/", "reports/", ".hooklog/", ".venv/", "node_modules/", "__pycache__/", "coverage-reports/")
+GITIGNORE = (".env", ".worktrees/", "tasks/", "reports/", ".hooklog/", ".venv", "node_modules", "__pycache__/", "coverage-reports/")
 EXTRA_LABELS = {"uat": "d93f0b", "backlog": "c5def5", "decision": "fbca04"}
 
 
