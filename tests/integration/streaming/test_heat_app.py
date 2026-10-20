@@ -9,12 +9,11 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from confluent_kafka import Consumer, Producer
+from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
 from confluent_kafka.admin import AdminClient, NewTopic
 from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.avro import AvroSerializer
 from confluent_kafka.serialization import MessageField, SerializationContext
-from testcontainers.community.kafka import KafkaContainer
 
 from radar.common.kafka import names
 from radar.common.kafka.dlq import DlqPublisher
@@ -44,23 +43,19 @@ SCHEMA = json.dumps(
 
 
 @pytest.fixture(scope="module")
-def kafka():
-    # NOTE: exactly-once 需要 transaction；單節點要把 transaction log 的副本數降成 1
-    container = (
-        KafkaContainer()
-        .with_kraft()
-        .with_env("KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR", "1")
-        .with_env("KAFKA_TRANSACTION_STATE_LOG_MIN_ISR", "1")
+def kafka(kafka_settings):
+    # NOTE: alerts 已由 session 重置建好（ClickHouse 訂閱用）；dlq 由本模組建立
+    admin = AdminClient({"bootstrap.servers": kafka_settings.bootstrap_servers})
+    futures = admin.create_topics(
+        [NewTopic(t, num_partitions=1, replication_factor=1) for t in (names.ALERTS, names.DLQ)]
     )
-    with container:
-        settings = KafkaSettings(bootstrap_servers=container.get_bootstrap_server(), client_id="it")
-        admin = AdminClient({"bootstrap.servers": settings.bootstrap_servers})
-        futures = admin.create_topics(
-            [NewTopic(t, num_partitions=1, replication_factor=1) for t in (names.ALERTS, names.DLQ)]
-        )
-        for f in futures.values():
+    for f in futures.values():
+        try:
             f.result(30)
-        yield settings
+        except KafkaException as e:
+            if e.args[0].code() != KafkaError.TOPIC_ALREADY_EXISTS:
+                raise
+    return kafka_settings
 
 
 @pytest.fixture

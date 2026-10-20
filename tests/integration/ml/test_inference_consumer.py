@@ -1,4 +1,4 @@
-"""推論 consumer 對真實 Kafka（testcontainers）；CdcPost 以 JSON 送出，避開 schema registry。"""
+"""推論 consumer 對真實 Kafka（compose 服務）；CdcPost 以 JSON 送出，避開 schema registry。"""
 
 import json
 import threading

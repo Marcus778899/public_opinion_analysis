@@ -7,14 +7,8 @@ import json
 import time
 from pathlib import Path
 
-import httpx2
 import pytest
 from confluent_kafka import Producer
-from confluent_kafka.admin import AdminClient, NewTopic
-from pydantic import SecretStr
-from testcontainers.community.kafka import KafkaContainer
-from testcontainers.core.container import DockerContainer
-from testcontainers.core.network import Network
 
 from radar.common.clickhouse import (
     MIGRATIONS_TABLE,
@@ -22,82 +16,22 @@ from radar.common.clickhouse import (
     apply_pending,
     load_migrations,
 )
-from radar.common.settings import ClickHouseSettings
+from tests.helpers.clickhouse import drop_queue_tables
 
 REPO = Path(__file__).resolve().parents[3]
 CLICKHOUSE_DIR = REPO / "infra/clickhouse"
-CLICKHOUSE_IMAGE = "clickhouse/clickhouse-server:26.8"
-COMPOSE_BROKERS = "kafka_1:29092,kafka_2:29092,kafka_3:29092"
-JSON_TOPICS = ["labels", "predictions", "alerts"]
 
 
 @pytest.fixture(scope="module")
-def network():
-    with Network() as net:
-        yield net
+def kafka(kafka_settings):
+    # NOTE: JSON topic 已由 session 重置建好（ClickHouse 的 Kafka engine 表要先有 topic）
+    return kafka_settings
 
 
 @pytest.fixture(scope="module")
-def kafka(network):
-    # NOTE: KRaft 的 controller 位址取自 network alias，沒設會連不上自己
-    kafka_container = (
-        KafkaContainer().with_kraft().with_network(network).with_network_aliases("kafka")
-    )
-    with kafka_container as k:
-        admin = AdminClient({"bootstrap.servers": k.get_bootstrap_server()})
-        futures = admin.create_topics([NewTopic(t, num_partitions=1) for t in JSON_TOPICS])
-        for f in futures.values():
-            f.result(30)
-        yield k
-
-
-@pytest.fixture(scope="module")
-def clickhouse_settings(network, kafka, tmp_path_factory):
-    # NOTE: named collection 寫死 compose 的 broker；改成測試 Kafka 在 docker 網路內的位址
-    ip = kafka.get_wrapped_container().attrs["NetworkSettings"]["Networks"][network.name][
-        "IPAddress"
-    ]
-    xml = (CLICKHOUSE_DIR / "config.d/named_collections.xml").read_text()
-    assert COMPOSE_BROKERS in xml
-    named = tmp_path_factory.mktemp("ch") / "named_collections.xml"
-    named.write_text(xml.replace(COMPOSE_BROKERS, f"{ip}:9092"))
-
-    container = (
-        DockerContainer(CLICKHOUSE_IMAGE)
-        .with_network(network)
-        .with_env("CLICKHOUSE_USER", "radar")
-        .with_env("CLICKHOUSE_PASSWORD", "it")
-        .with_env("CLICKHOUSE_DB", "radar")
-        .with_volume_mapping(str(named), "/etc/clickhouse-server/config.d/named_collections.xml")
-        .with_volume_mapping(
-            str(CLICKHOUSE_DIR / "users.d/radar.xml"), "/etc/clickhouse-server/users.d/radar.xml"
-        )
-        .with_exposed_ports(8123)
-    )
-    with container:
-        url = f"http://{container.get_container_host_ip()}:{container.get_exposed_port(8123)}"
-        _wait_for_ping(url)
-        yield ClickHouseSettings(url=url, db="radar", user="radar", password=SecretStr("it"))
-
-
-def _wait_for_ping(url: str, timeout_s: float = 60.0) -> None:
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        try:
-            if httpx2.get(f"{url}/ping").status_code == 200:
-                return
-        except httpx2.TransportError:
-            pass
-        time.sleep(1)
-    raise TimeoutError("clickhouse not ready")
-
-
-@pytest.fixture(scope="module")
-def ch(clickhouse_settings):
-    client = ClickHouseClient(clickhouse_settings)
-    apply_pending(client, load_migrations(CLICKHOUSE_DIR / "migrations"))
-    yield client
-    client.close()
+def ch(clickhouse):
+    apply_pending(clickhouse, load_migrations(CLICKHOUSE_DIR / "migrations"))
+    return clickhouse
 
 
 def _query(ch: ClickHouseClient, sql: str) -> list[list[str]]:
@@ -193,6 +127,7 @@ def test_migration_0003_copies_existing_comments(clickhouse_settings):
         )
 
         apply_pending(client, migrations)
+        drop_queue_tables(client, "copy_test")
 
         rows = _query(client, "SELECT floor, lsn, is_deleted FROM comments_latest FINAL")
         assert rows == [["1", "42", "0"]]
@@ -203,7 +138,7 @@ def test_migration_0003_copies_existing_comments(clickhouse_settings):
 
 
 def test_json_topic_rows_land_in_target_tables(kafka, ch):
-    producer = Producer({"bootstrap.servers": kafka.get_bootstrap_server()})
+    producer = Producer({"bootstrap.servers": kafka.bootstrap_servers})
     messages = {
         "labels": {
             "schema_version": 1,
@@ -266,7 +201,7 @@ def test_json_topic_rows_land_in_target_tables(kafka, ch):
 
 
 def test_predictions_text_hash_lands_in_table(kafka, ch):
-    producer = Producer({"bootstrap.servers": kafka.get_bootstrap_server()})
+    producer = Producer({"bootstrap.servers": kafka.bootstrap_servers})
     body = {
         "schema_version": 1,
         "post_id": "Stock.M.2.A.2",
@@ -300,11 +235,12 @@ def test_migration_0004_keeps_existing_predictions_with_empty_hash(clickhouse_se
         )
 
         apply_pending(client, migrations)
+        views = _query(client, "SELECT name FROM system.tables WHERE database = 'hash_test'")
+        drop_queue_tables(client, "hash_test")
 
         assert _query(client, "SELECT post_id, text_hash FROM predictions") == [
             ["Stock.M.9.A.4", ""]
         ]
-        views = _query(client, "SELECT name FROM system.tables WHERE database = 'hash_test'")
         assert {"predictions_queue", "predictions_mv"} <= {r[0] for r in views}
     finally:
         admin.execute("DROP DATABASE IF EXISTS hash_test")
