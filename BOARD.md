@@ -23,7 +23,7 @@
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
 | v060-security | security | done | 0 | docs/security/v0.6.0.md PASS bd11330（H-1 已修；M ×3、L ×4 皆已處置：D-010、D-011、#68～#71、#79） |
-| v060-uat | uat | review | 0 | docs/uat/v0.6.0.md：blocker 0、major 0、minor 4（#65～#67）；甲方驗收清單 24 項待勾 |
+| v060-uat | uat | done | 0 | docs/uat/v0.6.0.md 甲方驗收：PASS（23 項全勾）；警示重放紀錄；minor #65～#67、#80～#82 |
 | spec-release-order | architect | done | 0 | PR #74 |
 | bot-forbidden-crash | backend | done | 0 | PR #75 |
 | ci-gitleaks-ignore | backend | done | 0 | PR #77 |
