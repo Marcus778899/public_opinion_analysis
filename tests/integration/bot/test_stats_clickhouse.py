@@ -6,7 +6,6 @@ import pytest
 
 from radar.bot.stats import ClickHouseQueries, PostSentiment
 from radar.common.clickhouse import ClickHouseClient
-from tests.helpers.clickhouse import clickhouse_client
 
 PID = "Stock.M.1792000000.A.ABC"
 PID2 = "Stock.M.1792000001.A.DEF"
@@ -15,9 +14,8 @@ NOW = datetime(2026, 10, 18, 3, 0, tzinfo=UTC)
 
 
 @pytest.fixture(scope="module")
-def ch():
-    with clickhouse_client() as client:
-        yield client
+def ch(clickhouse):
+    return clickhouse
 
 
 @pytest.fixture

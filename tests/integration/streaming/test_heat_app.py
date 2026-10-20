@@ -6,6 +6,7 @@ schema registry 用 confluent-kafka 的 mock://，Avro schema 與 Debezium 攤�
 import json
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -20,6 +21,13 @@ from radar.common.kafka.dlq import DlqPublisher
 from radar.common.kafka.producer import JsonProducer
 from radar.common.settings import HeatSettings, KafkaSettings
 from radar.streaming.heat import build_app
+
+# NOTE: 輸入 topic、group、state 都帶 uuid；alerts、dlq 是固定名稱但斷言只看自己的看板／來源 topic，
+# 所以不需要 xdist_group，各測試可以平行
+# 閒置多久沒新訊息就停 heat；讀結果時收到預期筆數後再多等的秒數
+IDLE_S = 5
+SETTLE_S = 1.5
+NO_RESULT_WAIT_S = 4
 
 SCHEMA = json.dumps(
     {
@@ -100,6 +108,11 @@ def produce(kafka: KafkaSettings, registry, topic: str, events: list[dict]) -> N
     producer.flush(30)
 
 
+def board_name(prefix: str) -> str:
+    """alerts topic 跨次測試保留，看板名稱帶 uuid，才不會讀到上次的警示。"""
+    return f"{prefix}{uuid.uuid4().hex[:6]}"
+
+
 def comment(post_id: str, floor: int, at: datetime, op: str = "c") -> dict:
     return {
         "post_id": post_id,
@@ -126,7 +139,14 @@ def baseline_and_surge(board: str, now: datetime) -> list[dict]:
     return events
 
 
-def read_all(kafka: KafkaSettings, topic: str) -> list[bytes]:
+def read_matching(
+    kafka: KafkaSettings,
+    topic: str,
+    matches: Callable[[bytes], bool],
+    expected: int,
+    max_s: float = 20,
+) -> list[bytes]:
+    """收到 expected 筆符合的訊息後再多等 SETTLE_S（抓多送的）；expected 為 0 時等固定秒數。"""
     consumer = Consumer(
         {
             "bootstrap.servers": kafka.bootstrap_servers,
@@ -138,70 +158,84 @@ def read_all(kafka: KafkaSettings, topic: str) -> list[bytes]:
     )
     consumer.subscribe([topic])
     values: list[bytes] = []
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        msg = consumer.poll(1)
-        if msg is not None and not msg.error():
+    start = time.monotonic()
+    reached_at = start if expected == 0 else None
+    while time.monotonic() - start < max_s:
+        msg = consumer.poll(0.5)
+        if msg is not None and not msg.error() and matches(msg.value()):
             values.append(msg.value())
+            if len(values) >= expected and reached_at is None:
+                reached_at = time.monotonic()
+        wait = NO_RESULT_WAIT_S if expected == 0 else SETTLE_S
+        if reached_at is not None and time.monotonic() - reached_at >= wait:
+            break
     consumer.close()
     return values
 
 
-def alerts_for(kafka: KafkaSettings, board: str) -> list[dict]:
-    alerts = [json.loads(v) for v in read_all(kafka, names.ALERTS)]
-    return [a for a in alerts if a["board"] == board]
+def alerts_for(kafka: KafkaSettings, board: str, expected: int) -> list[dict]:
+    def is_board(value: bytes) -> bool:
+        return json.loads(value)["board"] == board
+
+    return [json.loads(v) for v in read_matching(kafka, names.ALERTS, is_board, expected)]
 
 
 def test_surge_produces_one_alert_per_unit(kafka, registry, run, tmp_path):
     now = datetime.now(UTC)
-    produce(kafka, registry, run.topic, baseline_and_surge("HeatA", now))
+    board = board_name("HeatA")
+    produce(kafka, registry, run.topic, baseline_and_surge(board, now))
 
-    run(tmp_path / "state", 25)
+    run(tmp_path / "state", IDLE_S)
 
-    alerts = alerts_for(kafka, "HeatA")
+    alerts = alerts_for(kafka, board, 2)
     assert sorted(a["unit_type"] for a in alerts) == ["board", "post"]
     post = next(a for a in alerts if a["unit_type"] == "post")
-    assert post["unit_key"] == "HeatA.M.1792000001.A.BBB"
+    assert post["unit_key"] == f"{board}.M.1792000001.A.BBB"
     assert post["value"] == 40  # 結算時的值，不是剛越過門檻的 30
 
 
 def test_updates_and_deletes_produce_no_alert(kafka, registry, run, tmp_path):
     now = datetime.now(UTC)
-    events = baseline_and_surge("HeatB", now)
+    board = board_name("HeatB")
+    events = baseline_and_surge(board, now)
     for event in events[28:]:
         event["__op"] = "u"  # 樓層位移的改寫，不算新增推文
     produce(kafka, registry, run.topic, events)
 
-    run(tmp_path / "state", 20)
+    run(tmp_path / "state", IDLE_S)
 
-    assert alerts_for(kafka, "HeatB") == []
+    assert alerts_for(kafka, board, 0) == []
 
 
 def test_restart_restores_state_and_does_not_realert(kafka, registry, run, tmp_path):
     now = datetime.now(UTC)
-    produce(kafka, registry, run.topic, baseline_and_surge("HeatC", now))
-    run(tmp_path / "first", 25)
-    assert len(alerts_for(kafka, "HeatC")) == 2
+    board = board_name("HeatC")
+    produce(kafka, registry, run.topic, baseline_and_surge(board, now))
+    run(tmp_path / "first", IDLE_S)
+    assert len(alerts_for(kafka, board, 2)) == 2
 
-    hot = "HeatC.M.1792000001.A.BBB"
+    hot = f"{board}.M.1792000001.A.BBB"
     more = [comment(hot, 500 + i, now + timedelta(minutes=1, seconds=i)) for i in range(40)]
     more.append(comment(hot, 600, now + timedelta(minutes=3)))
     produce(kafka, registry, run.topic, more)
     # 新的 state 目錄：state 只能從 changelog topic 恢復；冷卻期間不應再發
-    run(tmp_path / "second", 25)
+    run(tmp_path / "second", IDLE_S)
 
-    assert len(alerts_for(kafka, "HeatC")) == 2
+    assert len(alerts_for(kafka, board, 2)) == 2
 
 
 def test_undecodable_message_lands_in_dlq_and_processing_continues(kafka, registry, run, tmp_path):
     now = datetime.now(UTC)
+    board = board_name("HeatD")
     producer = Producer({"bootstrap.servers": kafka.bootstrap_servers})
     producer.produce(run.topic, key=b"x", value=b"not avro")
     producer.flush(30)
-    produce(kafka, registry, run.topic, baseline_and_surge("HeatD", now))
+    produce(kafka, registry, run.topic, baseline_and_surge(board, now))
 
-    run(tmp_path / "state", 25)
+    run(tmp_path / "state", IDLE_S)
 
-    dlq = [json.loads(v) for v in read_all(kafka, names.DLQ)]
-    assert any(r["source_topic"] == run.topic for r in dlq)
-    assert len(alerts_for(kafka, "HeatD")) == 2
+    def from_topic(value: bytes) -> bool:
+        return json.loads(value)["source_topic"] == run.topic
+
+    assert read_matching(kafka, names.DLQ, from_topic, 1)
+    assert len(alerts_for(kafka, board, 2)) == 2

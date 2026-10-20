@@ -7,7 +7,8 @@ services:
     image: apache/kafka:${KAFKA_VERSION:?KAFKA_VERSION 未設定，請加 --env-file .env}
     hostname: kafka_1
     environment:
-      CLUSTER_ID: 'xDC5zrWuSheLy0eGha9XeQ'
+      # NOTE: 刻意不同於 .env.example 的開發環境；tests/integration/conftest.py 重置前比對
+      CLUSTER_ID: 'hw222Z37TDqnGKEUUPeTpA'
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: 'broker,controller'
       KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka_1:9093'
@@ -100,7 +101,7 @@ services:
       clickhouse:
         condition: service_healthy
     entrypoint: ["sh", "-c", "uv sync --frozen && exec uv run --no-sync \"$$@\"", "sh"]
-    command: pytest tests/integration
+    command: pytest tests/integration -n auto --dist loadgroup --durations=15
 
 volumes:
   test_venv:

@@ -16,7 +16,10 @@ from radar.common.clickhouse import (
     apply_pending,
     load_migrations,
 )
-from tests.helpers.clickhouse import drop_queue_tables
+from tests.helpers.clickhouse import drop_queue_tables, without_kafka
+
+# NOTE: 用共用的 radar database 與固定名稱的 topic（Kafka engine 表），整個模組固定在同一個 worker
+pytestmark = pytest.mark.xdist_group("shared_radar_db")
 
 REPO = Path(__file__).resolve().parents[3]
 CLICKHOUSE_DIR = REPO / "infra/clickhouse"
@@ -29,9 +32,9 @@ def kafka(kafka_settings):
 
 
 @pytest.fixture(scope="module")
-def ch(clickhouse):
-    apply_pending(clickhouse, load_migrations(CLICKHOUSE_DIR / "migrations"))
-    return clickhouse
+def ch(shared_clickhouse):
+    apply_pending(shared_clickhouse, load_migrations(CLICKHOUSE_DIR / "migrations"))
+    return shared_clickhouse
 
 
 def _query(ch: ClickHouseClient, sql: str) -> list[list[str]]:
@@ -113,30 +116,6 @@ def test_comments_latest_final_keeps_highest_lsn_and_drops_deleted(ch):
     assert rows == [["1", "new"]]
 
 
-def test_migration_0003_copies_existing_comments(clickhouse_settings):
-    # 獨立的 database：先套到 0002、寫入舊的 comments，再套 0003
-    admin = ClickHouseClient(clickhouse_settings)
-    admin.execute("CREATE DATABASE IF NOT EXISTS copy_test")
-    client = ClickHouseClient(clickhouse_settings.model_copy(update={"db": "copy_test"}))
-    migrations = load_migrations(CLICKHOUSE_DIR / "migrations")
-    try:
-        apply_pending(client, [m for m in migrations if m.version < 3])
-        client.execute(
-            f"INSERT INTO comments ({COMMENT_COLS}) VALUES "
-            "('Stock.M.9.A.3', 'Stock', 1, 'push', '2026-10-07 00:00:00', 42)"
-        )
-
-        apply_pending(client, migrations)
-        drop_queue_tables(client, "copy_test")
-
-        rows = _query(client, "SELECT floor, lsn, is_deleted FROM comments_latest FINAL")
-        assert rows == [["1", "42", "0"]]
-    finally:
-        admin.execute("DROP DATABASE IF EXISTS copy_test")
-        client.close()
-        admin.close()
-
-
 def test_json_topic_rows_land_in_target_tables(kafka, ch):
     producer = Producer({"bootstrap.servers": kafka.bootstrap_servers})
     messages = {
@@ -185,7 +164,8 @@ def test_json_topic_rows_land_in_target_tables(kafka, ch):
 
     _wait_rows(ch, "labels", 2)
     _wait_rows(ch, "predictions", 1)
-    _wait_rows(ch, "alerts", 1)
+    # NOTE: heat 測試也會寫 alerts topic，所以只看這則訊息的 unit_key
+    _wait_rows(ch, "alerts WHERE unit_key = 'Stock.M.1.A.1'", 1)
 
     assert sorted(_query(ch, "SELECT ifNull(target, '<whole>'), polarity FROM labels")) == [
         ["<whole>", "negative"],
@@ -195,9 +175,8 @@ def test_json_topic_rows_land_in_target_tables(kafka, ch):
     assert _query(ch, "SELECT predicted_at, scores['negative'], text_hash FROM predictions") == [
         ["2026-10-07 06:00:00.123456", "0.7", ""]
     ]
-    assert _query(ch, "SELECT unit_key, window_end, zscore FROM alerts") == [
-        ["Stock.M.1.A.1", "2026-10-07 06:00:00.000000", "7.4"]
-    ]
+    sql = "SELECT unit_key, window_end, zscore FROM alerts WHERE unit_key = 'Stock.M.1.A.1'"
+    assert _query(ch, sql) == [["Stock.M.1.A.1", "2026-10-07 06:00:00.000000", "7.4"]]
 
 
 def test_predictions_text_hash_lands_in_table(kafka, ch):
@@ -219,6 +198,31 @@ def test_predictions_text_hash_lands_in_table(kafka, ch):
     while not (rows := _query(ch, sql)) and time.monotonic() < deadline:
         time.sleep(1)
     assert rows == [["a" * 64]]
+
+
+# NOTE: 以下兩個測試另建 database；0004 的 queue 表與 radar 同 consumer group，會搶走 partition，
+# 刪掉後 broker 要等一陣子才重新分配，所以排在會等 Kafka 資料的測試之後；0003 不建 Kafka 表
+def test_migration_0003_copies_existing_comments(clickhouse_settings):
+    # 獨立的 database：先套到 0002、寫入舊的 comments，再套 0003
+    admin = ClickHouseClient(clickhouse_settings)
+    admin.execute("CREATE DATABASE IF NOT EXISTS copy_test")
+    client = ClickHouseClient(clickhouse_settings.model_copy(update={"db": "copy_test"}))
+    migrations = load_migrations(CLICKHOUSE_DIR / "migrations")
+    try:
+        apply_pending(client, without_kafka([m for m in migrations if m.version < 3]))
+        client.execute(
+            f"INSERT INTO comments ({COMMENT_COLS}) VALUES "
+            "('Stock.M.9.A.3', 'Stock', 1, 'push', '2026-10-07 00:00:00', 42)"
+        )
+
+        apply_pending(client, without_kafka(migrations))
+
+        rows = _query(client, "SELECT floor, lsn, is_deleted FROM comments_latest FINAL")
+        assert rows == [["1", "42", "0"]]
+    finally:
+        admin.execute("DROP DATABASE IF EXISTS copy_test")
+        client.close()
+        admin.close()
 
 
 def test_migration_0004_keeps_existing_predictions_with_empty_hash(clickhouse_settings):
