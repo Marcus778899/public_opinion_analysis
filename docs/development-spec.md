@@ -1024,7 +1024,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 - PR 開到 develop 時整合測試跑兩次：Integration Test job 6 分 39 秒、Check job 的 `make coverage` 6 分 40 秒（run 39374102085）
 - 只改文件的 PR 也跑全套（run 39374841915，`docs/spec-release-order`）
 
-**做法**（全部屬可逆、在範圍內的技術細節，即「自行決定」）
+**做法**（做法 15 依 D-015；其餘屬可逆、在範圍內的技術細節，即「自行決定」）
 
 | # | 決策 | 理由 |
 |---|---|---|
@@ -1033,15 +1033,27 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | 3 | `test` 服務：uv 官方 Python 3.12 映像；worktree **唯讀**掛進容器；venv（`UV_PROJECT_ENVIRONMENT`）與 uv 快取放 named volume；先 `uv sync --frozen` 再執行 command，預設 `pytest tests/integration` | 唯讀：容器改不到主機檔案、不留 root 擁有的檔（所以不設 `HOST_UID`）；不覆蓋主機的 `.venv`（macOS 與 Linux 的 wheel 不同） |
 | 4 | 不掛 docker socket（不採「容器裡照跑 testcontainers」） | socket 等於主機 root；testcontainers 的 volume 路徑也要對應主機路徑 |
 | 5 | 三個服務單節點、資料放 tmpfs；版本用 `.env` 的 `KAFKA_VERSION`、`POSTGRES_VERSION`、`CLICKHOUSE_VERSION`（`${KEY:?}`） | 與正式環境同版（testcontainers 現用自己的預設 Kafka 映像）；`down` 即清空 |
-| 6 | Kafka：KRaft；network alias `kafka_1`～`kafka_3`，容器內 listener `:29092` 廣播 `kafka_1:29092`；transaction log 副本 1、`group.initial.rebalance.delay.ms=0`、heap 上限 512 MB；另一個 listener 給 CI 主機（#10） | `infra/clickhouse/config.d/named_collections.xml` 的 broker 清單不用改就連得到；heat 的 exactly-once 與其他測試共用一個 Kafka；每次加入 group 省 3 秒 |
+| 6 | Kafka：KRaft；network alias `kafka_1`～`kafka_3`，容器內 listener `:29092` 廣播 `kafka_1:29092`；transaction log 副本 1、`group.initial.rebalance.delay.ms=0`、heap 上限 512 MB；另一個 listener 給 CI 主機（做法 10） | `infra/clickhouse/config.d/named_collections.xml` 的 broker 清單不用改就連得到；heat 的 exactly-once 與其他測試共用一個 Kafka；每次加入 group 省 3 秒 |
 | 7 | PG：`wal_level=logical`、`POSTGRES_HOST_AUTH_METHOD=trust`、DB 名稱 `radar_it`；ClickHouse 唯讀掛 `infra/clickhouse` 的 `config.d`、`users.d` | `cdc/test_slot.py` 與其他 PG 測試共用一個容器；DB 名稱是重置前的防呆依據（威脅表） |
-| 8 | session 開始時重置：PG 確認 DB 名稱是 `radar_it` 後 `DROP SCHEMA public CASCADE`、刪 publication 與未使用的 replication slot；ClickHouse 重建 `radar` DB 並套 migration；Kafka 刪除非內部 topic。各模組共用這組服務，模組開始時清自己用的表 | `run --rm test` 結束後依賴服務仍在（下次省啟動時間），靠重置避免上次的資料影響計數；容器 9 個降為 3 個 |
+| 8 | session 開始時重置：PG 確認 DB 名稱是 `radar_it` 後 `DROP SCHEMA public CASCADE`、刪 publication 與未使用的 replication slot；ClickHouse 重建 `radar` DB 並套 migration；Kafka 刪除非內部 topic。各模組共用這組服務，模組開始時清自己用的表；平行執行時的分工見做法 15 | `run --rm test` 結束後依賴服務仍在（下次省啟動時間），靠重置避免上次的資料影響計數；容器 9 個降為 3 個 |
 | 9 | ClickHouse 同一個 consumer group 的 Kafka engine 表只能有一組（只在 `radar` DB）；需要「從空 DB 套 migration」的測試另建 DB 時，套完要刪掉其 `*_queue` 表 | 同 group 的兩組表會分走 partition，`test_clickhouse_migrations` 等不到資料 |
 | 10 | CI：`compose.ci.yaml` 覆寫檔把三個服務的 port 綁在 `127.0.0.1:${IT_*_HOST_PORT}`；Integration Test job 依序 `docker compose … pull`、`up -d --wait kafka postgres clickhouse`，再在 runner 上 `make coverage`（`IT_*` 指向 localhost）；runner 的 docker daemon 設 `registry-mirrors` 為 `mirror.gcr.io` | 依 backend-standards 第 6 節，CI 在 runner 跑測試，報告路徑才對得回 repo；拉映像獨立成一步，耗時看得到；取代 `TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX` 與關閉 Ryuk |
 | 11 | 每次事件只跑一次整合測試：`make coverage` 與覆蓋率閘門搬進 Integration Test job（閘門仍只在 PR→develop），Check job 只剩 `make check`；job 名稱不變 | 現在 PR 跑兩次（量測） |
 | 12 | 只改文件時跳過：Integration Test job 第一步以 `git diff --name-only`（PR 比 base、push 比 `github.event.before`；比不到就當有改程式）判斷，變更全在 `docs/`、`tasks/`、`reports/` 或根目錄 `*.md` 時，後續步驟以 `if:` 跳過，job 仍回報成功 | 不用 `paths-ignore`：workflow 不跑時 check 不出現，合併流程等不到全綠；不需第三方 action |
 | 13 | 去掉固定等待：heat 的 `app.run` 閒置 timeout 降到能過的最小值、`read_all` 改為「收到預期筆數，或閒置數秒」即停；`test_producer_partition` 每個 partition 收到 1 筆即停；「不該有警示」的斷言保留最短的等待 | 固定等待佔 59% |
-| 14 | 不做映像快取（`actions/cache` 存 docker image）；不加 pytest-xdist | 拉映像已含在首次啟動的 10～18 秒內，save／load 約 1 GB 映像未必較快，#10 的獨立步驟量到再議；xdist 是新相依（待決定），容器合併、去掉等待後收益小 |
+| 14 | 不做映像快取（`actions/cache` 存 docker image） | 量測表中第一個用 ClickHouse 的檔案 18 秒，之後同映像的檔案約 6 秒，推估拉映像約 12 秒（未單獨量）；映像大小未量。做法 10 把 pull 拆成獨立步驟，有實測再議 |
+| 15 | 用 pytest-xdist 平行跑整合測試（D-015），`-n auto --dist loadgroup`，寫在 `make coverage` 與 `test` 服務的預設 command；隔離方式見下表 | 甲方核可（D-015）；`--dist loadgroup` 讓共用固定資源的測試排在同一個 worker 依序跑 |
+
+**平行執行的隔離**（做法 15；`worker` 是 xdist 的 worker id，沒有平行時為 `main`）
+
+| 資源 | 做法 |
+|---|---|
+| 全域重置（做法 8 的 Kafka topic、ClickHouse `radar` DB） | 只在主程序做一次：`pytest_sessionstart` 中判斷沒有 `workerinput` 才執行；worker 不做全域刪除，否則會刪掉其他 worker 正在用的 topic |
+| PG | 每個 worker 一個 DB `radar_it_<worker>`：worker 的 session fixture 先 `DROP DATABASE IF EXISTS … WITH (FORCE)` 再建立，並跑 alembic；防呆改為 DB 名稱須以 `radar_it` 開頭 |
+| PG replication slot（整個 cluster 共用） | slot 名稱加 `_<worker>` 後綴（`cdc/test_slot.py` 的固定名稱 `watchdog_test` 要改） |
+| ClickHouse | 只查表、不靠 Kafka engine 的模組用 worker 自己的 DB `radar_<worker>`：套 migration 後刪掉 `*_queue` 表（做法 9）；依賴 Kafka engine 接入的測試用 `radar` DB |
+| Kafka 固定名稱的 topic（`alerts`、`dlq`、`labels`、`predictions`）與 ClickHouse Kafka engine | 用到的測試標 `@pytest.mark.xdist_group("shared_topics")`，排在同一個 worker 依序跑：目前是 `cdc/test_clickhouse_migrations.py`、`streaming/test_heat_app.py`、`ml/test_inference_consumer.py`（寫 `dlq`）；其他測試的 topic 一律帶 uuid |
+| consumer group、看板名稱等斷言用的 key | 帶 uuid，不靠「topic 是空的」 |
 
 **用法**（在主目錄下，直接下 `docker compose`，不包在 make 或 script 裡）
 
@@ -1066,19 +1078,20 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | `.env` 內的 token | 容器讀到機密 | `--env-file` 只用來代換版本變數，容器只拿到 compose 明寫的環境變數；worktree 裡沒有 `.env` |
 | CI 的測試服務 | runner 上其他程序連線 | port 只綁 `127.0.0.1`；runner 用完即丟 |
 
-**派工順序**（依序；兩張都動 `tests/integration/`，不可平行）
+**派工順序**（依序；兩張都動 `tests/integration/`、`compose.yaml`、`pyproject.toml`，不可平行）
 
 | 順序 | task_id | 負責 | 負責檔案 | 驗收測試目錄 |
 |---|---|---|---|---|
 | 1 | `test-infra-compose` | backend | `compose.yaml`、`compose.ci.yaml`、`tests/integration/**`（fixture、重置；順序 2 的兩檔只改 fixture）、`tests/helpers/clickhouse.py`、`pyproject.toml`、`uv.lock`、`.env.example`、`Makefile`（`test-int`）、`.github/workflows/ci.yml`、`docs/development-spec.md`（1.1、1.3、5 章改成新做法，本節標完成） | `tests/unit/acceptance/test_infra/`（qa：靜態檢查 compose 與 CI 檔是否符合做法 1、3～5、10～12；`make check` 會跑到）；另以上方「跑全部整合測試」驗證 135 個全過 |
-| 2 | `test-infra-fast-waits` | backend | `tests/integration/streaming/test_heat_app.py`、`tests/integration/common/test_producer_partition.py`、`docs/development-spec.md`（本節補實測） | 無；驗收條件：改程式的 PR 的 Integration Test job ≤ 3 分鐘、只改文件的 PR ≤ 1 分鐘，附 run 連結與 `--durations=15` 輸出 |
+| 2 | `test-infra-fast-waits` | backend | `tests/integration/**`（去掉固定等待：`streaming/test_heat_app.py`、`common/test_producer_partition.py`；平行隔離：fixture、slot 名稱、`xdist_group` 標記）、`tests/integration/conftest.py`、`tests/helpers/clickhouse.py`、`pyproject.toml`、`uv.lock`（加 pytest-xdist，D-015）、`Makefile`（`coverage` 加 `-n auto --dist loadgroup`）、`compose.yaml`（`test` 的預設 command）、`docs/development-spec.md`（本節補實測） | 無。驗收條件：①`run --rm test` 連跑兩次都全過，以 `pytest tests/integration -n 0` 再跑一次也全過；②改程式的 PR 的 Integration Test job ≤ 3 分鐘，只改文件的 PR ≤ 1 分鐘；③附 run 連結與 `--durations=15` 輸出；④開發環境（專案 `radar`）的資料不受影響 |
 
 **風險**
 
 | 風險 | 對策 |
 |---|---|
 | 單一 broker 加 alias 時，ClickHouse 的 librdkafka 以 metadata 回傳的位址連線 | 廣播位址用 alias `kafka_1:29092`（容器內可解析）；`test-infra-compose` 以 `test_clickhouse_migrations` 驗證 |
-| 共用服務後模組間互相影響（固定名稱的 `alerts`、`dlq` topic） | 斷言只看自己產生的資料（現有寫法已以看板名稱過濾）；qa 連跑兩次 `run --rm test` 確認 |
+| 共用服務後模組間互相影響（固定名稱的 `alerts`、`dlq` topic） | 斷言只看自己產生的資料（現有寫法已以看板名稱過濾）；平行時見「平行執行的隔離」；qa 連跑兩次 `run --rm test` 確認 |
+| 有人漏標 `xdist_group`，平行時偶發失敗 | 新測試用到固定名稱的 topic 就要標；qa 驗收時以 `-n 0` 與 `-n auto` 各跑一次，比對結果 |
 | 多個 worktree 各留一套服務吃記憶體 | 用法表的 `down -v`，worker 交單前執行 |
 | `users.d` 若改用 `from_env`（dashboard 設計），測試的 ClickHouse 要補對應環境變數 | `test-infra-compose` 與 dashboard 實作單，後合併的一方補 |
 
