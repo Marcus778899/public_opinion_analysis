@@ -31,13 +31,13 @@
 | dashboard-design | architect | done | 0 | PR #86 |
 | test-infra-design | architect | done | 0 | PR #87 |
 | gitleaks-archive-ignore | backend | done | 0 | PR #89 |
-| test-infra-compose | backend | review | 1 |  |
+| test-infra-compose | backend | done | 1 | PR #95 |
 | bot-allowlist-required | backend | done | 0 | PR #93 |
 | dashboard-test-align | architect | done | 0 | PR #94 |
 
 ## 卡住／待甲方決定
 
-- 暫停中（甲方額度）：PR #95 已 sync、qa／review 通過，等 CI 綠後 pr.py merge test-infra-compose；之後請甲方改 CLAUDE.md、開 test-infra-fast-waits（含 cluster_id 防呆建議）
+- 待甲方：手動刪除 .worktrees/test-infra-compose 與分支 chore/test-infra-compose（sandbox 刪不掉）；改 CLAUDE.md 後再開 test-infra-fast-waits（含 cluster_id 防呆建議）
 
 ## 注意事項（踩過的坑）
 
