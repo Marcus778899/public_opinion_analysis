@@ -5,13 +5,6 @@
 
 ## 待決定
 
-### D-016 qa 跑不了 docker compose，整合測試無法獨立驗證
-- 背景：test-infra-compose 兩輪 qa 都照 D-011 的寫法單獨下 `docker compose …`，仍被擋（`docker.sock: operation not permitted`、`stat .env: operation not permitted`）；同樣指令 backend 可以跑。qa 只能用 worker 回報與 CI 判斷整合測試
-- 選項：A. 甲方查 qa 的權限設定，讓 qa 也能跑 `docker compose *`（與 backend 一致，修本機或上游範本）／B. 維持現狀：整合測試以 CI 為準，qa 只驗單元與靜態部分
-- 建議：A；qa 的價值在獨立驗證，CI 驗不到「離線啟動」（7.25）與「開發環境不受影響」
-- 提出：manager（test-infra-compose）
-
-<!-- 範本：
 ### D-001 一句話問題
 - 背景：為什麼要決定（1–2 行）
 - 選項：A. … ／ B. …
@@ -97,4 +90,9 @@
 - 決定：B. 加 pytest-xdist（dev 相依）；不用付費 runner
 - 理由：甲方不要額外付費；免費的平行化可以加
 - 影響：開發規格 7.26（做法第 15 項）、`test-infra-fast-waits`
+- 日期：2026-10-20
+
+### D-016 qa 跑不了 docker compose，整合測試無法獨立驗證
+- 決定：A. qa 也可以跑 `docker compose *`（甲方已處理權限）
+- 理由：qa 要能獨立驗證 CI 驗不到的項目（離線啟動、開發環境不受影響）
 - 日期：2026-10-20

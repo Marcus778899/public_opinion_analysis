@@ -22,6 +22,7 @@
 | 2026-10-20 | D-013 | worktree 用 sparse-checkout 排除 .claude/、.mcp.json、.vscode/（上游範本已修） |
 | 2026-10-20 | D-014 | 階段 7 全用 Grafana；自建 web 前端延到階段 9 |
 | 2026-10-20 | D-015 | CI 加速加 pytest-xdist，不用付費 runner |
+| 2026-10-20 | D-016 | qa 也可以跑 docker compose |
 
 ## 任務狀態
 
@@ -36,7 +37,7 @@
 
 ## 卡住／待甲方決定
 
-- D-016：qa 跑不了 docker compose，整合測試無法獨立驗證；待甲方選 A 或 B
+- 暫停中（甲方額度）：PR #95 已 sync、qa／review 通過，等 CI 綠後 pr.py merge test-infra-compose；之後請甲方改 CLAUDE.md、開 test-infra-fast-waits（含 cluster_id 防呆建議）
 
 ## 注意事項（踩過的坑）
 
