@@ -73,7 +73,7 @@ check:  ## lint + 不需要容器的測試（CI 每個 PR 都跑）
 	pre-commit run --all-files
 	uv run pytest tests/unit
 
-coverage:  ## 單元 + 整合測試的覆蓋率，Cobertura XML 寫到 coverage-reports/（CI 檢查改到的程式碼 ≥ 80%）
+coverage:  ## 單元 + 整合測試的覆蓋率（只在 CI 用，compose 的服務由 CI 先開好；IT_* 見 ci.yml），Cobertura XML 寫到 coverage-reports/
 	uv run pytest tests/unit tests/integration --cov=src/radar --cov-report=xml:coverage-reports/python.xml -q
 
 lint:
@@ -84,8 +84,8 @@ lint:
 test:
 	uv run pytest tests/unit
 
-test-int:
-	uv run pytest tests/integration
+test-int:  ## 整合測試（compose 的 test 服務；在主目錄跑，sandbox 內的 agent 改直接下 docker compose，見開發規格 7.26）
+	docker compose -f compose.yaml --env-file .env run --rm test
 
 e2e-up: stop-dev  ## 整套服務 + 假 PTT 伺服器，使用 e2e 專用的 volume（不碰開發資料、不連真的 PTT）；會先停掉開發環境（不刪 volume）
 	$(COMPOSE_E2E) --profile app up -d --build --wait

@@ -25,7 +25,6 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
     "ruff>=0.16.10",
-    "testcontainers[kafka,postgres]>=4.15.0",
 ]
 
 [build-system]

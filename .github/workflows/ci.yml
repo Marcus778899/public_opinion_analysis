@@ -21,8 +21,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # 覆蓋率檢查要跟 develop 比 diff
       # 專案初始化（INIT）合併前還沒有 Makefile，後續步驟全部跳過
       - name: Detect Makefile
         id: detect
@@ -47,48 +45,84 @@ jobs:
       - name: Check
         if: steps.detect.outputs.found == 'true'
         run: make check
-      # 改到的程式碼覆蓋率（scripts/coverage_gate.py，門檻 80%）：只在開到 develop 的 PR 檢查；發版 PR 是已逐張檢查過的累積
-      # make coverage 把 Cobertura／JaCoCo XML 寫到 coverage-reports/（寫法見 .claude/skills/backend-standards/references/）
-      # 需要 DB 時在這步之前加 docker compose up -d <服務>：測試在 runner 上跑，在容器裡跑報告路徑會對不回 repo
-      - name: Set up Python for coverage gate  # 不要刪：coverage_gate.py 與 diff-cover 需要，跟專案語言無關
-        if: steps.detect.outputs.found == 'true' && github.event_name == 'pull_request' && github.base_ref == 'develop'
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      # make coverage 含整合測試（testcontainers 用 runner 內建的 Docker）
-      - name: Coverage of changed lines (diff-cover)
-        if: steps.detect.outputs.found == 'true' && github.event_name == 'pull_request' && github.base_ref == 'develop'
-        env:
-          DIFF_COVER_VERSION: "10.6.0"
-          COVERAGE_SRC_ROOTS: ""
-          TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX: mirror.gcr.io/
-          TESTCONTAINERS_RYUK_DISABLED: "true"
-        run: |
-          make coverage
-          pip install -q "diff-cover==${DIFF_COVER_VERSION}"
-          python3 scripts/coverage_gate.py "origin/${GITHUB_BASE_REF}"
 
-  # push 到 develop／main 也要跑整合測試；PR 的 Check job 會在 make coverage 裡再跑一次
+  # 整合測試用 compose 的 kafka／postgres／clickhouse（開發規格 7.26）；測試在 runner 上跑，報告路徑才對得回 repo
+  # 每個事件只跑一次，覆蓋率閘門只在開到 develop 的 PR；只改文件時其餘步驟以 if 跳過（job 仍回報成功）
   integration:
     name: Integration Test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 判斷改了哪些檔案、覆蓋率要跟 develop 比 diff
+      # NOTE: 不在 on: 以路徑過濾：workflow 不跑時 check 不會出現，合併流程等不到全綠
+      - name: Detect code changes
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then base="$PR_BASE"; else base="$PUSH_BEFORE"; fi
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "比不到基準 commit，當作有改程式"; echo "code=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          files=$(git diff --name-only "$base" HEAD)
+          if [ -z "$files" ]; then echo "code=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          # 變更全在 docs/、tasks/、reports/ 或根目錄 *.md 就跳過
+          if echo "$files" | grep -qvE '^(docs/|tasks/|reports/)|^[^/]+\.md$'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "只改文件，略過整合測試"; echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+      # NOTE: runner 連 Docker Hub 常撞到 rate limit 或逾時，改走 Google 鏡像
+      - name: Use Docker Hub mirror
+        if: steps.changes.outputs.code == 'true'
+        run: |
+          echo '{"registry-mirrors": ["https://mirror.gcr.io"]}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+      - name: Prepare env
+        if: steps.changes.outputs.code == 'true'
+        run: cp .env.example .env
+      - name: Pull images
+        if: steps.changes.outputs.code == 'true'
+        run: docker compose --env-file .env -f compose.yaml -f compose.ci.yaml pull kafka postgres clickhouse
+      - name: Start services
+        if: steps.changes.outputs.code == 'true'
+        run: docker compose --env-file .env -f compose.yaml -f compose.ci.yaml up -d --wait kafka postgres clickhouse
       - name: Install uv
+        if: steps.changes.outputs.code == 'true'
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
           python-version: "3.12"
       - name: Sync dependencies
+        if: steps.changes.outputs.code == 'true'
         run: uv sync --dev
-      - name: Run integration tests
-        run: uv run pytest tests/integration
+      - name: Unit and integration tests with coverage
+        if: steps.changes.outputs.code == 'true'
+        run: |
+          port() { grep "^$1=" .env | cut -d= -f2; }
+          export IT_KAFKA_BOOTSTRAP="127.0.0.1:$(port IT_KAFKA_HOST_PORT)"
+          export IT_POSTGRES_HOST=127.0.0.1
+          export IT_POSTGRES_PORT="$(port IT_POSTGRES_HOST_PORT)"
+          export IT_CLICKHOUSE_URL="http://127.0.0.1:$(port IT_CLICKHOUSE_HOST_PORT)"
+          make coverage
+      # 改到的程式碼覆蓋率（scripts/coverage_gate.py，門檻 80%）：發版 PR 是已逐張檢查過的累積，不檢查
+      - name: Set up Python for coverage gate  # 不要刪：coverage_gate.py 與 diff-cover 需要，跟專案語言無關
+        if: steps.changes.outputs.code == 'true' && github.event_name == 'pull_request' && github.base_ref == 'develop'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Coverage of changed lines (diff-cover)
+        if: steps.changes.outputs.code == 'true' && github.event_name == 'pull_request' && github.base_ref == 'develop'
         env:
-          # NOTE: runner 連 Docker Hub 常撞到 rate limit 或逾時（2026-10-10，登入也逾時），改走 Google 鏡像
-          TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX: mirror.gcr.io/
-          # NOTE: 加前綴後 Ryuk 會無限遞迴建立自己（testcontainers 4.15）；runner 用完即丟，不需清理
-          TESTCONTAINERS_RYUK_DISABLED: "true"
+          DIFF_COVER_VERSION: "10.6.0"
+          COVERAGE_SRC_ROOTS: ""
+        run: |
+          pip install -q "diff-cover==${DIFF_COVER_VERSION}"
+          python3 scripts/coverage_gate.py "origin/${GITHUB_BASE_REF}"
 
   # 資安稽核：每個 PR 都跑，pr.py merge 要求所有 check 綠。工具與語言無關，版本固定，升級改這裡
   # 要忽略某個發現，寫進 osv-scanner.toml／.gitleaksignore／.semgrepignore 並附理由；這些檔在 fast 通道是受保護路徑，發版前 security 也會逐條檢查

@@ -2,7 +2,6 @@
 
 import pytest
 from sqlalchemy import Engine, create_engine, text
-from testcontainers.community.postgres import PostgresContainer
 
 from radar.cdc.watchdog import read_slot
 
@@ -10,14 +9,13 @@ SLOT = "watchdog_test"
 
 
 @pytest.fixture(scope="module")
-def logical_pg():
-    container = PostgresContainer("postgres:17", driver="psycopg").with_command(
-        "postgres -c wal_level=logical"
-    )
-    with container as pg:
-        engine = create_engine(pg.get_connection_url())
-        yield engine
-        engine.dispose()
+def logical_pg(postgres_url):
+    # NOTE: compose 的 postgres 服務已設 wal_level=logical
+    engine = create_engine(postgres_url)
+    yield engine
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS t"))
+    engine.dispose()
 
 
 @pytest.fixture
