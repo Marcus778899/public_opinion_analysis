@@ -20,6 +20,8 @@
 | 2026-10-20 | D-010 | bot 允許清單沒設就啟動失敗，開放所有人須 TELEGRAM_ALLOW_ALL=true（v0.7.0） |
 | 2026-10-20 | D-012 | 本機 .git/info/exclude 加 .venv；上游範本 .gitignore 不加斜線 |
 | 2026-10-20 | D-013 | worktree 用 sparse-checkout 排除 .claude/、.mcp.json、.vscode/（上游範本已修） |
+| 2026-10-20 | D-014 | 階段 7 全用 Grafana；自建 web 前端延到階段 9 |
+| 2026-10-20 | D-015 | CI 加速加 pytest-xdist，不用付費 runner |
 
 ## 任務狀態
 
@@ -30,7 +32,7 @@
 
 ## 卡住／待甲方決定
 
-- D-014、D-015：階段 7 設計待甲方決定與核可（PR #86、#87）
+- （無）
 
 ## 注意事項（踩過的坑）
 
