@@ -149,11 +149,38 @@ def quote(value: str) -> str:
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
+_VAR = re.compile(r"\$\{(?P<a>board|min_score)(?::(?P<fmt>\w+))?\}|\$(?P<b>board|min_score)\b")
+
+
+def grafana_format(values: list[str], fmt: str) -> str:
+    """Grafana 前端的格式：sqlstring 把 ' 變 ''，singlequote 變 \'，都不處理反斜線。"""
+    if fmt == "sqlstring":
+        return ",".join("'" + v.replace("'", "''") + "'" for v in values)
+    if fmt == "singlequote":
+        return ",".join("'" + v.replace("'", "\\'") + "'" for v in values)
+    if fmt == "csv":
+        return ",".join(values)
+    pytest.fail(f"測試不支援的變數格式 :{fmt}", pytrace=False)
+
+
+def bare_references(sql: str) -> list[str]:
+    """沒有指定格式的 $board、${board}、$min_score 引用（原樣拼接，L-5）。"""
+    return [m[0] for m in _VAR.finditer(sql) if not m["fmt"]]
+
+
 def expand_vars(sql: str, boards: list[str], min_score: str = "0.5") -> str:
-    """多選 board 展開為 'a','b'（空清單展開為空字串）；min_score 為文字框原值。"""
-    sql = re.sub(r"\$\{?board\}?\b", lambda _: ",".join(quote(b) for b in boards), sql)
-    sql = re.sub(r"\$\{?min_score\}?\b", lambda _: min_score, sql)
-    return sql
+    """依引用的格式展開；沒指定格式時 board 為 'a','b'（反斜線也跳脫）、min_score 為原值。"""
+
+    def var(m: re.Match) -> str:
+        name = m["a"] or m["b"]
+        values = boards if name == "board" else [min_score]
+        if m["fmt"]:
+            return grafana_format(values, m["fmt"])
+        if name == "board":
+            return ",".join(quote(b) for b in values)
+        return min_score
+
+    return _VAR.sub(var, sql)
 
 
 def run_panel(dashboard: dict, title: str, boards: list[str], min_score: str = "0.5") -> list[dict]:

@@ -150,7 +150,11 @@ def _expand(sql: str, boards: list[str], min_score: str, interval_s: int = 3600)
         values = boards if name == "board" else [min_score]
         if fmt == "csv" or (fmt is None and name == "min_score"):
             return ",".join(values)
-        if fmt in (None, "singlequote", "sqlstring"):
+        if fmt == "sqlstring":  # Grafana：' 變成 ''
+            return ",".join("'" + v.replace("'", "''") + "'" for v in values)
+        if fmt == "singlequote":  # Grafana：' 變成 \\'
+            return ",".join("'" + v.replace("'", "\\'") + "'" for v in values)
+        if fmt is None:
             return ",".join(f"'{v}'" for v in values)
         pytest.fail(f"測試不支援的變數格式 :{fmt}", pytrace=False)
 
@@ -379,10 +383,18 @@ def test_board_variable_is_multi_select_from_posts_latest(dashboard: dict) -> No
     assert "settings" not in text
 
 
-def test_min_score_variable_is_textbox_defaulting_to_half(dashboard: dict) -> None:
+def test_min_score_variable_is_dropdown_with_four_options_defaulting_to_half(
+    dashboard: dict,
+) -> None:
     var = _variable(dashboard, "min_score")
-    assert var["type"] == "textbox"
-    assert str(var.get("query")) == "0.5" or str(var.get("current", {}).get("value")) == "0.5"
+    assert var["type"] == "custom"
+    values = [str(o["value"]) for o in var["options"]]
+    assert values == ["0.4", "0.5", "0.6", "0.7"]
+    assert str(var.get("current", {}).get("value")) == "0.5"
+    assert [str(o["value"]) for o in var["options"] if o.get("selected")] in ([], ["0.5"])
+    assert str(var.get("query")).replace(" ", "") == "0.4,0.5,0.6,0.7"
+    assert var.get("multi") in (None, False) and not var.get("includeAll")
+    assert str(var.get("description", "")).strip(), "min_score 要有說明文字"
 
 
 def test_dashboard_json_contains_no_javascript_links(dashboard: dict) -> None:
