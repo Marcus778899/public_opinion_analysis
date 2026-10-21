@@ -37,10 +37,11 @@
 | test-infra-fast-waits | backend | done | 0 | PR #97 |
 | dashboard-grafana-infra | backend | done | 1 | PR #100 |
 | certifi-security-bump | backend | done | 0 | PR #103 |
+| dashboard-views | backend | todo | 0 |  |
 
 ## 卡住／待甲方決定
 
-- 待甲方：在自己的終端機跑 python3 scripts/check_env.py（.env.example 加了 Grafana 變數）；之後開 dashboard-views
+- （無）
 
 ## 注意事項（踩過的坑）
 
