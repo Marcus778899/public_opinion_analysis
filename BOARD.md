@@ -2,12 +2,12 @@
 
 <!-- 只放目前這一階段；只有 manager 透過 scripts/board.py 修改；階段完成時整份封存到 tasks/<tag>.md -->
 
-> 上一階段：`tasks/v0.6.0.md`（派工單在 `tasks/v0.6.0/`）
+> 上一階段：`tasks/v0.7.0.md`（派工單在 `tasks/v0.7.0/`）
 
 ## 目標與範圍
 
-- 本輪：v0.7.0 階段 7：呈現方式（Grafana 面板，或 Grafana 只做監控＋web 前端，待 architect 評估與甲方決定）、compose test 服務＋CI 加速（#78）、bot 允許清單 fail closed（D-010）
-- 不做：Stock 重新標註、階段 5 的 3 天驗收（第 6 章之後再做）；其餘 backlog（#65～#71、#79～#82）
+- 本輪：（尚未設定）
+- 不做：（尚未設定）
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
@@ -29,21 +29,6 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
-| dashboard-design | architect | done | 0 | PR #86 |
-| test-infra-design | architect | done | 0 | PR #87 |
-| gitleaks-archive-ignore | backend | done | 0 | PR #89 |
-| test-infra-compose | backend | done | 1 | PR #95 |
-| bot-allowlist-required | backend | done | 0 | PR #93 |
-| dashboard-test-align | architect | done | 0 | PR #94 |
-| test-infra-fast-waits | backend | done | 0 | PR #97 |
-| dashboard-grafana-infra | backend | done | 1 | PR #100 |
-| certifi-security-bump | backend | done | 0 | PR #103 |
-| dashboard-views | backend | done | 0 | PR #105 |
-| dashboard-panels | backend | done | 0 | PR #107 |
-| dashboard-integration | backend | done | 1 | PR #109 |
-| e2e-grafana-volume | backend | done | 1 | PR #114 |
-| gitleaks-uat-ignore | backend | done | 1 | PR #116 |
-| dashboard-min-score-select | backend | done | 2 | PR #124 |
 
 ## 卡住／待甲方決定
 
