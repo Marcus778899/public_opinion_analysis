@@ -417,6 +417,8 @@ def test_every_board_and_min_score_reference_uses_percentencode(
     for sql in _sqls(_panel(dashboard, title)):
         bad = [r.text for r in references(sql) if r.fmt not in ALLOWED_FORMATS]
         assert not bad, f"面板「{title}」只准 {sorted(ALLOWED_FORMATS)}，實際：{bad}"
+        loose = [r.text for r in references(sql) if not r.in_string]
+        assert not loose, f"面板「{title}」引用必須在 SQL 單引號內，實際不在：{loose}"
 
 
 def test_min_score_options_and_default_are_fixed_numbers(dashboard: dict) -> None:

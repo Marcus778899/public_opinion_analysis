@@ -125,6 +125,31 @@ def ds_query(
     return rows
 
 
+def ds_query_text(target: dict, sql: str) -> str:
+    """frame 的欄名、labels 與所有值串成一段文字；寬表時序的看板名稱在 labels。"""
+    query = {k: v for k, v in target.items() if k != "rawSql"}
+    query.update(rawSql=sql, refId="A", datasource=DS, intervalMs=3_600_000, maxDataPoints=1000)
+    status, body = grafana(
+        "/api/ds/query",
+        {"queries": [query], "from": str(ms(T_FROM)), "to": str(ms(T_TO))},
+    )
+    result = body.get("results", {}).get("A")
+    assert status == 200 and result and not result.get("error"), body
+    parts: list[str] = []
+    for frame in result.get("frames", []):
+        for field, vals in zip(frame["schema"]["fields"], frame["data"]["values"], strict=True):
+            parts += [field["name"], json.dumps(field.get("labels") or {}, ensure_ascii=False)]
+            parts += [str(v) for v in vals]
+    return " ".join(parts)
+
+
+def panel_text(dashboard: dict, title: str, boards: list[str], min_score: str = "0.5") -> str:
+    return " ".join(
+        ds_query_text(t, expand_vars(t["rawSql"], boards, min_score))
+        for t in panel_targets(dashboard, title)
+    )
+
+
 def frames_numeric_sum(target: dict, sql: str) -> float:
     """所有 frame 裡數值欄（不含時間欄）的總和；時序與寬表都適用。"""
     query = {k: v for k, v in target.items() if k != "rawSql"}

@@ -1049,7 +1049,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 
 | 輸入 | 風險 | 對策 |
 |---|---|---|
-| 網址 `var-board`／`var-min_score` 帶單引號、反斜線或 SQL 片段（L-5） | 改寫查詢 | 全部引用用 `:percentencode`，編碼後只剩 `A-Za-z0-9-_.~%`，不可能結束 SQL 字串；解碼在 ClickHouse 內，結果只當值比對；靜態測試要求每個引用都是此格式 |
+| 網址 `var-board`／`var-min_score` 帶單引號、反斜線或 SQL 片段（L-5） | 改寫查詢 | 全部引用用 `:percentencode`，編碼後只剩 `A-Za-z0-9-_.~%`，不可能結束 SQL 字串；解碼在 ClickHouse 內，結果只當值比對；靜態測試要求每個引用都是此格式且在單引號內 |
 | 解碼後是非數字或不存在的看板 | 面板出錯或空 | `toFloat64OrDefault` 退回 0.5；看板比對不到就回空 |
 
 **部署與權限**

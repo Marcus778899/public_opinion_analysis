@@ -1,6 +1,6 @@
 """L-5：使用者可經網址改的 $board、$min_score 不得進入 SQL 結構（開發規格 7.25）。
 
-驗收用靜態檢查加正常值檢查，不送攻擊字串：引用不在 SQL 引號內、格式只用允許清單、
+驗收用靜態檢查加正常值檢查，不送攻擊字串：每個引用都是 percentencode 且在 SQL 單引號內、
 min_score 的選項是固定數字；再依格式的展開規則代入正常值，確認各面板結果正確。
 """
 
@@ -24,6 +24,7 @@ from tests.integration.dashboard._dash import (
     insert_posts,
     load_dashboard,
     panel_targets,
+    panel_text,
     pid,
     predict,
     references,
@@ -50,8 +51,11 @@ def test_every_board_and_min_score_reference_uses_percentencode(
     dashboard: dict, title: str
 ) -> None:
     for target in panel_targets(dashboard, title):
-        bad = [r.text for r in references(target["rawSql"]) if r.fmt not in ALLOWED_FORMATS]
+        refs = references(target["rawSql"])
+        bad = [r.text for r in refs if r.fmt not in ALLOWED_FORMATS]
         assert not bad, f"只准 {sorted(ALLOWED_FORMATS)}，實際：{bad}"
+        loose = [r.text for r in refs if not r.in_string]
+        assert not loose, f"引用必須在 SQL 單引號內，實際不在：{loose}"
 
 
 @pytest.mark.parametrize("title", BOARD_PANELS)
@@ -115,7 +119,9 @@ def test_chinese_board_name_with_underscore_returns_its_own_rows_only(
     other = _seed(f"八卦_測試x_{uuid.uuid4().hex}")  # 名稱相近，不可混入
     rows = run_panel(dashboard, title, [mine.board])
     assert rows
-    text = " ".join(str(v) for r in rows for v in r.values())
+    text = panel_text(dashboard, title, [mine.board])
+    if title == P_VOLUME:
+        assert mine.board in text, "寬表的看板名稱在欄位 labels，應能讀到自己的看板"
     assert other.board not in text
     if title != P_VOLUME:
         assert run_panel(dashboard, title, [f"八卦_沒有資料_{uuid.uuid4().hex}"]) == []
