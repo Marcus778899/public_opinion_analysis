@@ -6,7 +6,7 @@
 
 ## 目標與範圍
 
-- 本輪：backlog 清理（不發版，併 v0.8.0）：CI 穩定 #110 #111 #117 #126、同步範本 sync_branch.yml；小修 #112 #118 #125 #81 #98（#101 已在 PR #114 修好，關閉）
+- 本輪：backlog 清理（不發版，併 v0.8.0）：CI 穩定 #110 #111 #117 #126、同步範本 sync_branch.yml；小修 #112 #118 #125 #81 #98；甲方追加：consumer commit 暫時性錯誤重試（kafka-commit-retry）；#141 review 建議（it-helper-docs-align）
 - 不做：#119 #121 #122 #82 #80（牽涉決策或需調查）；不發 v0.7.1
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
@@ -36,6 +36,7 @@
 | grafana-dockerfile-arg | backend | done | 0 | PR #136 |
 | it-helper-mv-filter | backend | done | 0 | PR #141 |
 | e2e-volume-regression | backend | done | 0 | PR #140 |
+| dashboard-var-test-hardening | backend | qa-fail | 1 |  |
 
 ## 卡住／待甲方決定
 
