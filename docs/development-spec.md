@@ -361,7 +361,7 @@
 | 推論快取重啟後從 ClickHouse 載入（7.19） | ✅ 完成；單元測試重現「重啟後快取空、既有文章被編輯不推論」；整合測試（真的 ClickHouse、PG）驗證 migration 0004、載入與補舊 hash。2026-10-16 部署：補 5,509 篇，重啟後 4 分鐘內 3 篇既有文章被編輯，都重新推論 | #37 |
 | S5-01～S5-05 熱度偵測、錄製回放（7.20） | ✅ 程式完成；加入 `quixstreams`，`confluent-kafka` 降到 2.12.x。整合測試（真實 Kafka、exactly-once）：暴增各單位只發一則、改寫不算新增、只靠 changelog 恢復後不重發、壞訊息進 DLQ。2026-10-17 實測推文進 PG 晚約 8 分鐘，時間基準由 `commented_at` 改成觀測時間（S5-02）。開發環境已部署 heat，待第 5 階段驗收 | — |
 | 文章基準每分鐘更新一次、分鐘結算才發警示（7.20，#49、#50） | ✅ 完成；單元測試重現兩個問題（40 篇活躍文章時文章基準 1 分鐘就洗掉舊值、一分鐘湧入 200 則警示只寫 30），修正後通過；整合測試（真實 Kafka）暴增 40 則的警示 `value` 為 40、重啟後不重發。待部署（重置 heat）後重跑階段 5 的 3 天驗收 | — |
-| 階段 7 規劃：Dashboard 呈現方式（7.25） | ⬜ 文件完成（2026-10-20），待甲方選案 | — |
+| 階段 7 規劃：Dashboard 呈現方式（7.25） | ⬜ 文件完成（2026-10-20）；呈現方式已定案：全用 Grafana（D-014） | — |
 | 整合測試改用 compose `test` 服務、CI 加速（7.26，#78） | ✅ `test-infra-compose`、`test-infra-fast-waits` 完成（2026-10-20；本機 150 個全過、連跑兩次、`-n 0` 也過；CI Integration Test 1 分 56 秒） | — |
 | S5-06～S5-07 Telegram bot（7.21） | ✅ 完成；2026-10-16 在開發環境以真的 Telegram 實測指令與推送，修正 compose 漏掉 `app-env`。階段 5 驗收第 1 項（人工暴增約 10 秒收到通知）通過 | — |
 
@@ -602,7 +602,7 @@
 
 **驗收**：`make up` 後打開 Grafana 不需手動設定即可看到所有面板。
 
-呈現方式（全用 Grafana 面板，或 Grafana 只做監控＋自建 web 前端）待甲方決定；兩案比較、建議案的查詢來源、面板與派工順序見 7.25。
+呈現方式已定案：全用 Grafana 面板，自建 web 前端延到階段 9（D-014）；查詢來源、面板與派工順序見 7.25。
 
 ### 階段 8：BERT 與 shadow 比較（M）
 
@@ -1011,7 +1011,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 
 ### 7.25 Dashboard 的呈現方式（S7-01、S7-02，規劃，2026-10-20）
 
-**兩案比較**（選案待甲方決定；新增 Grafana 或前端技術棧都屬決策②）
+**兩案比較**（已定案：A，見 D-014；以下保留當紀錄）
 
 | 項目 | A：全用 Grafana 面板 | B：Grafana 只做監控＋自建 web 前端 |
 |---|---|---|
@@ -1144,15 +1144,15 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | # | 決策 | 理由 |
 |---|---|---|
 | 1 | 根目錄新增 `compose.yaml`，放測試用的 `kafka`、`postgres`、`clickhouse`、`grafana`、`test`；不設 `name:`、`container_name`、對外 port。`grafana`（含 internal network、`compose.ci.yaml` 的 port）已由 `dashboard-grafana-infra` 加入，做法見 7.25「測試環境」 | 專案名稱取自 compose 檔所在目錄，每個 worktree 一套；與開發／e2e（專案 `radar`、固定容器名稱）互不相干 |
-| 2 | 整合測試不再用 testcontainers：fixture 讀 `IT_KAFKA_BOOTSTRAP`、`IT_POSTGRES_HOST`、`IT_POSTGRES_PORT`、`IT_CLICKHOUSE_URL`，缺一個就 `pytest.exit` 並印出下方指令（不 skip）；移除 dev 相依 `testcontainers` | 只留一條路徑，CI 與 agent 跑的是同一套；skip 會讓 CI 假綠 |
+| 2 | 整合測試不再用 testcontainers：fixture 讀 `IT_KAFKA_BOOTSTRAP`、`IT_POSTGRES_HOST`、`IT_POSTGRES_PORT`、`IT_CLICKHOUSE_URL`、`IT_GRAFANA_URL`，缺一個就 `pytest.exit` 並印出下方指令（不 skip）；移除 dev 相依 `testcontainers` | 只留一條路徑，CI 與 agent 跑的是同一套；skip 會讓 CI 假綠 |
 | 3 | `test` 服務：uv 官方 Python 3.12 映像；worktree **唯讀**掛進容器；venv（`UV_PROJECT_ENVIRONMENT`）與 uv 快取放 named volume；先 `uv sync --frozen` 再執行 command，預設 `pytest tests/integration` | 唯讀：容器改不到主機檔案、不留 root 擁有的檔（所以不設 `HOST_UID`）；不覆蓋主機的 `.venv`（macOS 與 Linux 的 wheel 不同） |
 | 4 | 不掛 docker socket（不採「容器裡照跑 testcontainers」） | socket 等於主機 root；testcontainers 的 volume 路徑也要對應主機路徑 |
 | 5 | 三個服務單節點、資料放 tmpfs；版本用 `.env` 的 `KAFKA_VERSION`、`POSTGRES_VERSION`、`CLICKHOUSE_VERSION`（`${KEY:?}`） | 與正式環境同版（testcontainers 現用自己的預設 Kafka 映像）；`down` 即清空 |
 | 6 | Kafka：KRaft；network alias `kafka_1`～`kafka_3`，容器內 listener `:29092` 廣播 `kafka_1:29092`；transaction log 副本 1、`group.initial.rebalance.delay.ms=0`、heap 上限 512 MB；另一個 listener 給 CI 主機（做法 10） | `infra/clickhouse/config.d/named_collections.xml` 的 broker 清單不用改就連得到；heat 的 exactly-once 與其他測試共用一個 Kafka；每次加入 group 省 3 秒 |
-| 7 | PG：`wal_level=logical`、`POSTGRES_HOST_AUTH_METHOD=trust`、DB 名稱 `radar_it`；ClickHouse 唯讀掛 `infra/clickhouse` 的 `named_collections.xml`、`radar.xml` 兩個檔（實作：不掛整個目錄，會蓋掉 image 的 listen 設定與 entrypoint 要寫入的使用者檔；`users.d/grafana.xml` 的 `from_env` 因此不會被載入） | `cdc/test_slot.py` 與其他 PG 測試共用一個容器；DB 名稱是重置前的防呆依據（威脅表） |
+| 7 | PG：`wal_level=logical`、`POSTGRES_HOST_AUTH_METHOD=trust`、DB 名稱 `radar_it`；ClickHouse 唯讀掛 `infra/clickhouse` 的 `named_collections.xml`、`radar.xml`、`grafana.xml` 三個檔（實作：不掛整個目錄，會蓋掉 image 的 listen 設定與 entrypoint 要寫入的使用者檔；`grafana.xml` 的 `from_env` 用 compose 的測試固定值，見 7.25 測試環境） | `cdc/test_slot.py` 與其他 PG 測試共用一個容器；DB 名稱是重置前的防呆依據（威脅表） |
 | 8 | session 開始時重置：PG 確認 DB 名稱是 `radar_it` 後（Kafka 與 ClickHouse 重置前也確認目標主機在允許清單：`kafka`、`kafka_1`～`kafka_3`、`postgres`、`clickhouse`、`localhost`、`127.0.0.1`，ClickHouse 另限 database 為 `radar`；Kafka 另以 `AdminClient.list_topics().cluster_id` 比對測試 compose 的 `CLUSTER_ID`（`hw222Z37TDqnGKEUUPeTpA`，刻意不同於 `.env.example` 的開發值），不符就 `pytest.exit`／拒絕、不刪任何東西；比對在任何刪除之前）刪掉上次留下的 `radar_it_*` worker DB 與未使用的 replication slot；ClickHouse 重建 `radar` DB 並套 migration；Kafka 刪除非內部 topic（`radar` 已套完所有 migration 時保留 Kafka engine 表與 `labels`、`predictions`、`alerts`，見實作補充 ④）。各模組共用這組服務，模組開始時清自己用的表；平行執行時的分工見做法 15 | `run --rm test` 結束後依賴服務仍在（下次省啟動時間），靠重置避免上次的資料影響計數；容器 9 個降為 3 個 |
 | 9 | ClickHouse 同一個 consumer group 的 Kafka engine 表只能有一組（只在 `radar` DB）；需要「從空 DB 套 migration」的測試另建 DB 時，套完要刪掉其 `*_queue` 表 | 同 group 的兩組表會分走 partition，`test_clickhouse_migrations` 等不到資料 |
-| 10 | CI：`compose.ci.yaml` 覆寫檔把三個服務的 port 綁在 `127.0.0.1:${IT_*_HOST_PORT}`；Integration Test job 依序 `docker compose … pull`、`up -d --wait kafka postgres clickhouse`，再在 runner 上 `make coverage`（`IT_*` 指向 localhost）；runner 的 docker daemon 設 `registry-mirrors` 為 `mirror.gcr.io` | 依 backend-standards 第 6 節，CI 在 runner 跑測試，報告路徑才對得回 repo；拉映像獨立成一步，耗時看得到；取代 `TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX` 與關閉 Ryuk |
+| 10 | CI：`compose.ci.yaml` 覆寫檔把四個服務（含 grafana）的 port 綁在 `127.0.0.1:${IT_*_HOST_PORT}`；Integration Test job 依序 `docker compose … pull`、`up -d --wait kafka postgres clickhouse grafana`，再在 runner 上 `make coverage`（`IT_*` 指向 localhost）；runner 的 docker daemon 設 `registry-mirrors` 為 `mirror.gcr.io` | 依 backend-standards 第 6 節，CI 在 runner 跑測試，報告路徑才對得回 repo；拉映像獨立成一步，耗時看得到；取代 `TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX` 與關閉 Ryuk |
 | 11 | 每次事件只跑一次整合測試：`make coverage` 與覆蓋率閘門搬進 Integration Test job（閘門仍只在 PR→develop），Check job 只剩 `make check`；job 名稱不變 | 現在 PR 跑兩次（量測） |
 | 12 | 只改文件時跳過：Integration Test job 第一步以 `git diff --name-only`（PR 比 base、push 比 `github.event.before`；比不到就當有改程式）判斷，變更全在 `docs/`、`tasks/`、`reports/` 或根目錄 `*.md` 時，後續步驟以 `if:` 跳過，job 仍回報成功 | 不用 `paths-ignore`：workflow 不跑時 check 不出現，合併流程等不到全綠；不需第三方 action |
 | 13 | 去掉固定等待：heat 的 `app.run` 閒置 timeout 降到能過的最小值、`read_all` 改為「收到預期筆數，或閒置數秒」即停；`test_producer_partition` 每個 partition 收到 1 筆即停；「不該有警示」的斷言保留最短的等待 | 固定等待佔 59% |
@@ -1211,7 +1211,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | 共用服務後模組間互相影響（固定名稱的 `alerts`、`dlq` topic） | 斷言只看自己產生的資料（現有寫法已以看板名稱過濾）；平行時見「平行執行的隔離」；qa 連跑兩次 `run --rm test` 確認 |
 | 有人漏標 `xdist_group`，平行時偶發失敗 | 新測試用到固定名稱 topic 且斷言整張表／整個 topic 時才需要標（做法 15 隔離表）；qa 驗收時以 `-n 0` 與 `-n auto` 各跑一次，比對結果 |
 | 多個 worktree 各留一套服務吃記憶體 | 用法表的 `down -v`，worker 交單前執行 |
-| `infra/clickhouse/users.d/grafana.xml` 以 `from_env` 讀密碼（7.25） | 測試 compose 的 `clickhouse` 只單檔掛 `named_collections.xml`、`radar.xml`（做法 7），不會載入 `grafana.xml`，缺環境變數不會讓它啟動失敗；需要唯讀帳號的測試，由 `dashboard-grafana-infra` 在 `compose.yaml` 加掛該檔並給測試用的固定值（不讀 `.env`） |
+| `infra/clickhouse/users.d/grafana.xml` 以 `from_env` 讀密碼（7.25） | 已處理：測試 compose 的 `clickhouse` 掛 `grafana.xml` 並給測試用的固定值（做法 7、7.25 測試環境） |
 
 ## 8. 風險清單
 

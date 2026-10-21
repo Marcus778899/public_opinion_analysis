@@ -358,11 +358,11 @@ services:
       args:
         GRAFANA_VERSION: ${GRAFANA_VERSION:?GRAFANA_VERSION 未設定}
         GRAFANA_CLICKHOUSE_PLUGIN_VERSION: ${GRAFANA_CLICKHOUSE_PLUGIN_VERSION:?GRAFANA_CLICKHOUSE_PLUGIN_VERSION 未設定}
-    image: radar-grafana:${GRAFANA_VERSION}
+    image: radar-grafana:${GRAFANA_VERSION}-${GRAFANA_CLICKHOUSE_PLUGIN_VERSION}
     container_name: radar_grafana
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${GRAFANA_PORT}:3000"
+      - "127.0.0.1:${GRAFANA_PORT:?GRAFANA_PORT 未設定}:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD 未設定}
       GF_AUTH_ANONYMOUS_ENABLED: 'false'
