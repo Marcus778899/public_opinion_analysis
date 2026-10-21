@@ -5,37 +5,6 @@
 
 ## 待決定
 
-<!-- 階段 8（bert-design，PR #154；設計見開發規格 7.27；調查見 docs/research/bert-stage8.md） -->
-
-### D-020 推論服務的新套件
-- 背景：shadow 推論要在 CPU 跑 BERT
-- 選項：A. `onnxruntime`＋`tokenizers`（開發用 `onnx`）／B. `torch`＋`transformers` CPU 推論
-- 建議：A，image 小、載入時不執行模型附帶程式；onnxruntime 已確認有 Python 3.12 x86_64／aarch64 wheel
-- 提出：architect（bert-design）
-
-### D-021 預訓練模型
-- 背景：只有 ckiplab 明寫用繁中語料，但為 GPL-3.0；Apache-2.0 候選未說明繁中效果
-- 選項：A. ckiplab/bert-base-chinese（GPL-3.0）／B. hfl/chinese-macbert-base（Apache-2.0）／C. google-bert/bert-base-chinese（Apache-2.0）／D. A、B 各訓一版，用人工測試集決定
-- 建議：B；甲方接受 GPL 風險時改 D。繁中效果可用人工測試集量，授權風險量不出來
-- 風險：GPL 是否及於模型權重查不到判定，需法務意見（目前只在自己的機器與 VM 使用、不對外提供）
-- 提出：architect（bert-design）
-
-### D-022 notebook 端套件（只裝在 Colab，不進 `uv.lock`）
-- 選項：A. `torch`、`transformers`、`optimum[onnxruntime]`／B. 自寫 `torch.onnx.export`
-- 建議：A，自寫匯出程式少，正確性由 notebook 內 logits 比對把關
-- 提出：architect（bert-design）
-
-### D-023 shadow 推論的資源上限
-- 選項：A. 2 CPU、1.5g 記憶體、`INFERENCE_THREADS=2`／B. 不設上限
-- 建議：A，權重推估約 440MB（未實測），不設限可能搶走 Kafka、ClickHouse 的 CPU；本機記憶體已不足過（2026-10-21）
-- 提出：architect（bert-design）
-
-### D-024 訓練資料（PTT 內文）上傳到哪個平台
-- 選項：A. Colab，工作階段上傳、不放 Drive／B. Kaggle 私有資料集
-- 建議：A，Kaggle 條款只取得摘要（寫著非商用），新資料集預設可見度查不到官方原文
-- 風險：兩個平台的條款都沒有明文禁止或允許上傳爬取的論壇內容
-- 提出：architect（bert-design）
-
 <!-- 範本：
 ### D-001 一句話問題
 - 背景：為什麼要決定（1–2 行）
@@ -145,4 +114,32 @@
 - 決定：A. agent 準備 fine-tune notebook、模型匯出與評估流程；甲方在 Colab／Kaggle 執行訓練並交回模型檔
 - 理由：agent 無法操作 Colab／Kaggle
 - 影響：開發規格階段 8 S8-01、`bert-design`
+- 日期：2026-10-21
+
+### D-020 推論服務的新套件
+- 決定：A. 執行期 `onnxruntime`＋`tokenizers`，開發用 `onnx`（不用 torch＋transformers 推論）
+- 理由：image 小、載入時不執行模型附帶程式；onnxruntime 有 Python 3.12 x86_64／aarch64 wheel
+- 影響：開發規格 7.27、`bert-skeleton`
+- 日期：2026-10-21
+
+### D-021 預訓練模型
+- 決定：D. ckiplab/bert-base-chinese（GPL-3.0）與 hfl/chinese-macbert-base（Apache-2.0）各訓一版，用人工測試集決定
+- 理由：甲方接受 GPL 風險；模型只在自己的機器與 VM 使用、不對外散布。日後若要對外提供或散布模型、產品，須重新評估 GPL
+- 影響：開發規格 7.27、`bert-notebook`、`bert-eval-report`
+- 日期：2026-10-21
+
+### D-022 notebook 端套件（只裝在 Colab，不進 `uv.lock`）
+- 決定：A. `torch`、`transformers`、`optimum[onnxruntime]`
+- 影響：`bert-notebook`
+- 日期：2026-10-21
+
+### D-023 shadow 推論的資源上限
+- 決定：A. 2 CPU、1.5g 記憶體、`INFERENCE_THREADS=2`
+- 影響：開發規格 7.27、`bert-shadow-inference`
+- 日期：2026-10-21
+
+### D-024 訓練資料（PTT 內文）上傳平台
+- 決定：A. Colab，工作階段上傳、不放 Drive
+- 理由：Kaggle 條款只取得摘要（非商用）、預設可見度查不到；甲方知悉兩平台條款皆未明文規範論壇內容
+- 影響：`bert-notebook`
 - 日期：2026-10-21

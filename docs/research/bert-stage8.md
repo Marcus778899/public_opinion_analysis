@@ -38,3 +38,12 @@
 - 私有資料集：DataCamp「private datasets are visible only to you」；Packt 稱建立時可選 public 或 private。<https://www.datacamp.com/tutorial/tutorial-kaggle-datasets-tutorials-kaggle-notebooks>、<https://www.packtpub.com/en-ee/product/developing-kaggle-notebooks-1-9781805128519/chapter/introducing-kaggle-and-its-basic-functions/kaggle-datasets>；官方原文查不到，建議實機確認預設。
 - 條款（摘要，原頁擷取失敗）：「for internal, personal, non-commercial use」。<https://kaggle.com/terms>；爬取論壇內容的明文限制：查不到。Colab 只明列禁止濫用與勿放個人資訊。<https://research.google.com/colaboratory/faq.html>
 - 影響：非商用條款與商用前景衝突，需法務確認（決策④）；spec 7.27 限定只上傳無作者與推文帳號的欄位，建議維持。
+
+## Colab 與 Google AI Pro（查詢日 2026-10-21）
+**結論**
+1. Google AI 方案附 Colab 福利（官方公告 2026-09-22）；官方未列 CU 數，二手來源稱 Pro 每月約 200 CU；台灣是否開放：查不到。
+2. 免費版 GPU 種類與額度官方不公開，單次上限 12 小時；Pro／Pay As You Go 依 CU 餘額；GPU 單價以第三方實測為準。
+3. 推估：BERT-base 1 萬篇、512、3 epoch 單次約 1–2 CU（約 US$0.1–0.2）；若 AI Pro 的 200 CU 實際可用則不需另付，否則二手報導的最低購買為 US$9.99／100 CU。
+- Q1：官方 [Google Developers Blog](https://developers.googleblog.com/colab-is-now-part-of-your-google-ai-plan/)（2026-09-22）：「priority access to faster accelerators and more powerful machines」，僅適用「Google AI subscribers in Colab supported countries」（未列國家）；未列 CU 數、啟用步驟。二手 [aipromonow](https://www.aipromonow.com/en/promos/google-ai-plan-colab-premium-benefits-sep2026)「about 200 Colab Compute Units per month」、[inside.com.tw](https://www.inside.com.tw/article/42497-google-ai-pro-colab-200-compute-units-a100-cli)（2026/09/27）「每月可獲得 200 個 Colab 運算單元」，未經官方證實。[Google AI 方案頁](https://one.google.com/about/google-ai-plans/)無 Colab 字樣，列 150+ 國家、5 TB 儲存。[Colab FAQ](https://research.google.com/colaboratory/faq.html)：免費試用中不含。
+- Q2：免費版 12 小時上限、GPU 種類「vary over time」、額度不公開（[FAQ](https://research.google.com/colaboratory/faq.html)）。Pro 100 CU／月、Pro+ 500 CU／月（[Workspace 部落格，2024-06-25](https://workspaceupdates.googleblog.com/2024/06/google-workspace-colab-pro-and-colab-pro-plus.html)，舊資料）。官方定價頁無數字（[signup](https://colab.research.google.com/signup) 只回傳標題，查不到官方價格）；二手 $10／100 CU、無折扣（[McCormick，2026-03 更新，查於 2026-03-10，南加州](https://mccormickml.com/2024/04/23/colab-gpus-features-and-pricing/)）。每小時：T4 1.19、L4 1.71、A100 40GB 5.40、A100 80GB 7.52 CU；該頁註明「fluctuate」，非官方。
+- Q3（推估，未實測）：以 6×參數×token 約 1e16 FLOPs（110M × 1 萬篇 × 512 × 3）；假設實效 2–5 TFLOPS 得 T4 約 0.5–1.5 小時 ≈ 0.6–1.8 CU ≈ US$0.06–0.18；含失敗重跑與調參（×10）約 US$1–2。
