@@ -39,7 +39,7 @@
 | certifi-security-bump | backend | done | 0 | PR #103 |
 | dashboard-views | backend | done | 0 | PR #105 |
 | dashboard-panels | backend | done | 0 | PR #107 |
-| dashboard-integration | qa | todo | 0 |  |
+| dashboard-integration | backend | done | 1 | PR #109 |
 
 ## 卡住／待甲方決定
 
