@@ -35,11 +35,11 @@
 | bot-allowlist-required | backend | done | 0 | PR #93 |
 | dashboard-test-align | architect | done | 0 | PR #94 |
 | test-infra-fast-waits | backend | done | 0 | PR #97 |
-| dashboard-grafana-infra | backend | qa | 0 |  |
+| dashboard-grafana-infra | backend | blocked | 1 |  |
 
 ## 卡住／待甲方決定
 
-- 暫停中（甲方明天繼續）：PR #100 dashboard-grafana-infra 已開、驗收測試已鎖；等甲方在 .env 補 7 個 Grafana 變數（兩個密碼自訂、不可 change-me）後派 qa B；之後開單前甲方要跑 check_env.py
+- dashboard-grafana-infra（PR #100）：CI Security 因 certifi 2026.7.22 弱點（PYSEC-2026-4320）失敗，非本 PR 造成；先合 certifi-security-bump，再 sync PR #100、重跑 qa
 
 ## 注意事項（踩過的坑）
 
