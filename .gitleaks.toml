@@ -1,0 +1,10 @@
+# 擴充預設規則；只排除 tasks/ 封存路徑（D-018）
+# NOTE: 封存派工單與報告會引用誤判內容，逐筆加 fingerprint 會無限循環
+title = "radar gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "tasks/ 封存派工單、qa／review 紀錄（D-018）"
+paths = ['''^tasks/''']
