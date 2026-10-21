@@ -361,7 +361,7 @@
 | 推論快取重啟後從 ClickHouse 載入（7.19） | ✅ 完成；單元測試重現「重啟後快取空、既有文章被編輯不推論」；整合測試（真的 ClickHouse、PG）驗證 migration 0004、載入與補舊 hash。2026-10-16 部署：補 5,509 篇，重啟後 4 分鐘內 3 篇既有文章被編輯，都重新推論 | #37 |
 | S5-01～S5-05 熱度偵測、錄製回放（7.20） | ✅ 程式完成；加入 `quixstreams`，`confluent-kafka` 降到 2.12.x。整合測試（真實 Kafka、exactly-once）：暴增各單位只發一則、改寫不算新增、只靠 changelog 恢復後不重發、壞訊息進 DLQ。2026-10-17 實測推文進 PG 晚約 8 分鐘，時間基準由 `commented_at` 改成觀測時間（S5-02）。開發環境已部署 heat，待第 5 階段驗收 | — |
 | 文章基準每分鐘更新一次、分鐘結算才發警示（7.20，#49、#50） | ✅ 完成；單元測試重現兩個問題（40 篇活躍文章時文章基準 1 分鐘就洗掉舊值、一分鐘湧入 200 則警示只寫 30），修正後通過；整合測試（真實 Kafka）暴增 40 則的警示 `value` 為 40、重啟後不重發。待部署（重置 heat）後重跑階段 5 的 3 天驗收 | — |
-| 階段 7 規劃：Dashboard 呈現方式（7.25） | ⬜ 文件完成（2026-10-20）；呈現方式已定案：全用 Grafana（D-014） | — |
+| 階段 7 規劃：Dashboard 呈現方式（7.25） | ⬜ 文件完成（2026-10-20）；呈現方式已定案：全用 Grafana（D-014）；`dashboard-grafana-infra`、`dashboard-views`、`dashboard-panels` 完成（2026-10-21），剩 `dashboard-integration` | — |
 | 整合測試改用 compose `test` 服務、CI 加速（7.26，#78） | ✅ `test-infra-compose`、`test-infra-fast-waits` 完成（2026-10-20；本機 150 個全過、連跑兩次、`-n 0` 也過；CI Integration Test 1 分 56 秒） | — |
 | S5-06～S5-07 Telegram bot（7.21） | ✅ 完成；2026-10-16 在開發環境以真的 Telegram 實測指令與推送，修正 compose 漏掉 `app-env`。階段 5 驗收第 1 項（人工暴增約 10 秒收到通知）通過 | — |
 
@@ -1029,7 +1029,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - 新增 `infra/clickhouse/migrations/0005_dashboard_views.sql`，兩個一般 view（不是 materialized），把 bot 已在用的邏輯（`bot/stats.py` 的 `POST_STATS_QUERY`）收成固定的定義，面板與驗收測試都查它：
   - `post_votes`：`comments_latest FINAL`、`is_deleted = 0`，每篇的 `post_id`、`board`、`push`、`boo`、`arrow`
   - `post_sentiment_latest`：`predictions` 每篇最新一筆（`argMax(…, predicted_at)`）的 `post_id`、`model_version`、`polarity`、`score`（三類最高分）
-- 欄位：`post_votes(post_id, board, push, boo, arrow)`、`post_sentiment_latest(post_id, model_version, polarity, score)`；只有推文的文章才在 `post_votes`、只有推論的文章才在 `post_sentiment_latest`，面板用 LEFT JOIN 補「尚無」。實作：`dashboard-views`（2026-10-21）
+- 只有推文的文章才在 `post_votes`、只有推論的文章才在 `post_sentiment_latest`，面板用 LEFT JOIN 補「尚無」。實作：`dashboard-views`（2026-10-21）
 - 其餘直接查 `posts_latest FINAL`、`comments_latest FINAL`、`alerts`（設計文件 6.3）；資料量小（每天數千篇），先不加預先彙總的 MV，慢了再加
 
 **面板**（dashboard 變數：`board` 多選、來源 `SELECT DISTINCT board FROM posts_latest`；`min_score` 文字框、預設與 `TELEGRAM_SENTIMENT_MIN_SCORE` 的預設相同）
@@ -1044,6 +1044,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | 6 | 熱門文章排行 | table | `comments_latest FINAL` ⨝ `posts_latest FINAL` ⟕ `post_votes` ⟕ `post_sentiment_latest` | 時間範圍內新增推文最多的前 20 篇，附推、噓、爭議度、文章情緒 |
 
 - 表格的標題連到原文：只用 `posts_latest.url`，且限 `https://www.ptt.cc/` 開頭（否則留空）
+- 實作：`dashboard-panels`（2026-10-21，`infra/grafana/dashboards/radar.json`）。連結在 SQL 結果過濾（`url` 欄不是 `https://www.ptt.cc/` 開頭就為空字串），表格以 data link 套在標題欄並隱藏 `url`；情緒分布、情緒趨勢的類別為寬表欄（負面／中立／正面／不確定／尚無）；`min_score` 用 `toFloat64OrDefault('$min_score', 0.5)` 轉型，輸入非數字時退回 0.5；警示面板不依看板變數過濾且以 `alert_id` 去重（Kafka 至少一次）；面板 6 的爭議度在推＋噓 < 10 時留空（同 7.23），情緒低於 `min_score` 顯示「不確定」、空白代表沒有推論；JOIN 右邊的 view／`posts_latest` 一律先以 `post_id IN (…)` 縮到左邊會用到的文章，避免整張表聚合
 - 面板 SQL 只用 ClickHouse plugin 的 `$__timeFilter_ms`（欄位都是 DateTime64；秒級的 `$__timeFilter` 展開方式各來源說法不一）、`$__timeInterval` 與上面兩個變數，驗收測試代換後直接在 ClickHouse 執行；plugin 實際展開的結果由 `dashboard-integration` 驗證
 
 **部署與權限**
