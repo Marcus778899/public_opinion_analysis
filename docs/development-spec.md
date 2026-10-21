@@ -1032,7 +1032,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - 只有推文的文章才在 `post_votes`、只有推論的文章才在 `post_sentiment_latest`，面板用 LEFT JOIN 補「尚無」。實作：`dashboard-views`（2026-10-21）
 - 其餘直接查 `posts_latest FINAL`、`comments_latest FINAL`、`alerts`（設計文件 6.3）；資料量小（每天數千篇），先不加預先彙總的 MV，慢了再加
 
-**面板**（dashboard 變數：`board` 多選、來源 `SELECT DISTINCT board FROM posts_latest`；`min_score` 文字框、預設與 `TELEGRAM_SENTIMENT_MIN_SCORE` 的預設相同）
+**面板**（dashboard 變數：`board` 多選、來源 `SELECT DISTINCT board FROM posts_latest`；`min_score` 下拉選單 0.4／0.5／0.6／0.7、預設 0.5（與 `TELEGRAM_SENTIMENT_MIN_SCORE` 的預設相同），說明文字寫明「三類最高機率低於此值標為不確定，影響情緒分布與熱門文章排行」；兩個變數都關閉 `allowCustomValue`，網址帶不在選項內的值會被丟棄）
 
 | # | 面板 | 類型 | 來源 | 定義 |
 |---|---|---|---|---|
@@ -1044,8 +1044,13 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | 6 | 熱門文章排行 | table | `comments_latest FINAL` ⨝ `posts_latest FINAL` ⟕ `post_votes` ⟕ `post_sentiment_latest` | 時間範圍內新增推文最多的前 20 篇，附推、噓、爭議度、文章情緒 |
 
 - 表格的標題連到原文：只用 `posts_latest.url`，且限 `https://www.ptt.cc/` 開頭（否則留空）
-- 實作：`dashboard-panels`（2026-10-21，`infra/grafana/dashboards/radar.json`）。連結在 SQL 結果過濾（`url` 欄不是 `https://www.ptt.cc/` 開頭就為空字串），表格以 data link 套在標題欄並隱藏 `url`；情緒分布、情緒趨勢的類別為寬表欄（負面／中立／正面／不確定／尚無）；`min_score` 用 `toFloat64OrDefault('$min_score', 0.5)` 轉型，輸入非數字時退回 0.5；警示面板不依看板變數過濾且以 `alert_id` 去重（Kafka 至少一次）；面板 6 的爭議度在推＋噓 < 10 時留空（同 7.23），情緒低於 `min_score` 顯示「不確定」、空白代表沒有推論；JOIN 右邊的 view／`posts_latest` 一律先以 `post_id IN (…)` 縮到左邊會用到的文章，避免整張表聚合
-- 面板 SQL 只用 ClickHouse plugin 的 `$__timeFilter_ms`（欄位都是 DateTime64；秒級的 `$__timeFilter` 展開方式各來源說法不一）、`$__timeInterval` 與上面兩個變數，驗收測試代換後直接在 ClickHouse 執行；`$__timeFilter_ms`、`$__timeInterval` 由 `dashboard-integration` 經 `/api/ds/query` 驗證；`$board`、`$min_score` 由 Grafana 前端代換，整合測試依假設的格式（多選展開成 `'a','b'`、單引號與反斜線跳脫、空清單展開為空字串）模擬，真正的前端展開（多選、All、含單引號的值、沒有看板）由階段收尾的 uat 以真畫面確認
+- 實作：`dashboard-panels`（2026-10-21，`infra/grafana/dashboards/radar.json`）。連結在 SQL 結果過濾（`url` 欄不是 `https://www.ptt.cc/` 開頭就為空字串），表格以 data link 套在標題欄並隱藏 `url`；情緒分布、情緒趨勢的類別為寬表欄（負面／中立／正面／不確定／尚無）；`min_score` 用 `toFloat64OrDefault(${min_score:sqlstring}, 0.5)` 轉型，輸入非數字時退回 0.5；警示面板不依看板變數過濾且以 `alert_id` 去重（Kafka 至少一次）；面板 6 的爭議度在推＋噓 < 10 時留空（同 7.23），情緒低於 `min_score` 顯示「不確定」、空白代表沒有推論；JOIN 右邊的 view／`posts_latest` 一律先以 `post_id IN (…)` 縮到左邊會用到的文章，避免整張表聚合
+- 面板 SQL 只用 ClickHouse plugin 的 `$__timeFilter_ms`（欄位都是 DateTime64；秒級的 `$__timeFilter` 展開方式各來源說法不一）、`$__timeInterval` 與上面兩個變數，驗收測試代換後直接在 ClickHouse 執行；`$__timeFilter_ms`、`$__timeInterval` 由 `dashboard-integration` 經 `/api/ds/query` 驗證；`$board`、`$min_score` 由 Grafana 前端代換，SQL 一律寫 `${board:sqlstring}`、`${min_score:sqlstring}`（sqlstring 自帶引號，不可再手寫 `'…'`；資安 L-5，未指定格式會原樣拼接）。sqlstring 只把 `'` 變 `''`、不處理反斜線，ClickHouse 卻把 `\'` 當跳脫的引號，所以 SQL 端擋不住含反斜線的值；防線是 `allowCustomValue: false`（變數值只能是選項之一）加唯讀帳號。威脅表見下，整合測試依假設的格式（多選展開成 `'a','b'`、單引號與反斜線跳脫、空清單展開為空字串）模擬，真正的前端展開（多選、All、含單引號的值、沒有看板）由階段收尾的 uat 以真畫面確認
+
+| 輸入 | 風險 | 對策 |
+|---|---|---|
+| 網址 `var-board`／`var-min_score` 帶單引號或 SQL 片段 | 改寫查詢（L-5） | `:sqlstring` 跳脫單引號；`allowCustomValue: false` 丟棄非選項的值；ClickHouse 用唯讀帳號，最壞是讀到本來就可讀的資料 |
+| 帶反斜線（`\') OR 1=1 --`） | sqlstring 不跳脫反斜線，可提早結束字串 | 同上，主要靠 `allowCustomValue: false`；整合測試只模擬展開，真畫面由 uat 確認 |
 
 **部署與權限**
 
