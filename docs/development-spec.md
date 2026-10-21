@@ -1029,6 +1029,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - 新增 `infra/clickhouse/migrations/0005_dashboard_views.sql`，兩個一般 view（不是 materialized），把 bot 已在用的邏輯（`bot/stats.py` 的 `POST_STATS_QUERY`）收成固定的定義，面板與驗收測試都查它：
   - `post_votes`：`comments_latest FINAL`、`is_deleted = 0`，每篇的 `post_id`、`board`、`push`、`boo`、`arrow`
   - `post_sentiment_latest`：`predictions` 每篇最新一筆（`argMax(…, predicted_at)`）的 `post_id`、`model_version`、`polarity`、`score`（三類最高分）
+- 欄位：`post_votes(post_id, board, push, boo, arrow)`、`post_sentiment_latest(post_id, model_version, polarity, score)`；只有推文的文章才在 `post_votes`、只有推論的文章才在 `post_sentiment_latest`，面板用 LEFT JOIN 補「尚無」。實作：`dashboard-views`（2026-10-21）
 - 其餘直接查 `posts_latest FINAL`、`comments_latest FINAL`、`alerts`（設計文件 6.3）；資料量小（每天數千篇），先不加預先彙總的 MV，慢了再加
 
 **面板**（dashboard 變數：`board` 多選、來源 `SELECT DISTINCT board FROM posts_latest`；`min_score` 文字框、預設與 `TELEGRAM_SENTIMENT_MIN_SCORE` 的預設相同）
