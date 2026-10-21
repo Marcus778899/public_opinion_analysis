@@ -29,6 +29,10 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
+| ci-sync-branch-update | architect | done | 1 | PR #131 |
+| integration-flaky-tests | backend | in-progress | 0 |  |
+| bot-skip-alert-log | backend | qa | 0 |  |
+| gitleaks-v070-archive-ignore | backend | done | 0 | PR #134 |
 
 ## 卡住／待甲方決定
 
