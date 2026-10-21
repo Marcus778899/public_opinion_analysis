@@ -107,7 +107,7 @@
 ### D-018 封存派工單反覆觸發 gitleaks 誤判
 - 決定：根治：gitleaks 不掃 `tasks/` 底下的封存（派工單、qa／review 報告），改 gitleaks 設定而非逐筆加忽略
 - 理由：v0.6.0、v0.7.0、backlog 清理三次封存都觸發誤判，且每次修正單的報告又成為下一次的誤判來源
-- 影響：gitleaks 設定（派工單 `gitleaks-archive-allowlist`）；`tasks/` 只放派工流程文件，不可放設定值或密鑰
+- 影響：gitleaks 設定（派工單 `gitleaks-archive-allowlist`，PR #153）；`tasks/` 只放派工流程文件，不可放設定值或密鑰；v0.8.0 security 審查要更新「`.gitleaks.toml` 存在、排除 `^tasks/`」並抽查 `tasks/` 新增內容；開發規格第 38 行忽略檔說明待下一張改開發規格的單補一句
 - 日期：2026-10-21
 
 ### D-019 階段 8 BERT fine-tune 的分工
