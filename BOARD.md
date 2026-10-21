@@ -37,7 +37,8 @@
 | test-infra-fast-waits | backend | done | 0 | PR #97 |
 | dashboard-grafana-infra | backend | done | 1 | PR #100 |
 | certifi-security-bump | backend | done | 0 | PR #103 |
-| dashboard-views | backend | todo | 0 |  |
+| dashboard-views | backend | done | 0 | PR #105 |
+| dashboard-panels | backend | todo | 0 |  |
 
 ## 卡住／待甲方決定
 
