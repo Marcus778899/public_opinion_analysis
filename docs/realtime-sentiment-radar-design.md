@@ -447,6 +447,8 @@ ClickHouse 的 `AvroConfluent` 格式能直接讀 Apicurio 序列化的訊息，
 | `labels` | `MergeTree` | `labels` | 標註結果；一則訊息的 `sentiments` 以 `ARRAY JOIN` 攤成一列一個 (target, polarity)（15.3） |
 | `predictions` | `MergeTree` | `predictions` | 推論結果（含 `model_version`） |
 | `alerts` | `MergeTree` | `alerts` | 警示紀錄 |
+| `post_votes`（view） | 一般 view | `comments_latest` | 每篇文章的 `post_id`、`board`、`push`、`boo`、`arrow`（`FINAL`、不含已刪除推文）；dashboard 用（開發規格 7.25） |
+| `post_sentiment_latest`（view） | 一般 view | `predictions` | 每篇最新一筆推論的 `post_id`、`model_version`、`polarity`、`score`（三類最高分，`argMax(…, predicted_at)`）；沒有推論的文章不出現 |
 
 - `posts_latest` 的 version 用 `__source_lsn`：同一列的後續變更 LSN 一定較大；`ts_ms` 是毫秒，同一毫秒內多次變更會分不出先後
 - 查詢 `posts_latest`、`comments_latest` 加 `FINAL` 或用 `argMax`
