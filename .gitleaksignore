@@ -1,6 +1,7 @@
 # gitleaks 誤判（2026-10-20 逐筆確認，不是密鑰）：
 # - apicurio:8080 是 schema registry 的 URL（docker 內部主機名＋port），被 generic-api-key 規則誤認
 # - unit_key 是文件範例裡的 PTT 文章 ID（含資安報告、封存派工單引用的誤判內容）
+# - UAT 報告測錯誤密碼用的假帳密
 cd3d88f9aa55605b108e7ee3cf1b5202ed7de01b:infra/docker-compose.yaml:generic-api-key:26
 301f13d3b03b847f7c8aad80e3f0ed31cf0cbb9d:src/radar/common/settings.py:generic-api-key:82
 077dc6d3d69dd6e577b552c62cf0b03012f8928c:infra/docker-compose.yaml:generic-api-key:305
@@ -11,3 +12,5 @@ e245c302c8020f4a4b10852a80f181c96f8e26c5:infra/docker-compose.yaml:generic-api-k
 27610fd981f48b851b3c25e86c426b9ee34c4ad4:tasks/v0.6.0/ci-gitleaks-ignore.qa.md:generic-api-key:14
 27610fd981f48b851b3c25e86c426b9ee34c4ad4:tasks/v0.6.0/ci-gitleaks-ignore.md:generic-api-key:6
 27610fd981f48b851b3c25e86c426b9ee34c4ad4:tasks/v0.6.0/ci-gitleaks-ignore.review.md:generic-api-key:9
+7b0386c72267117fa573f7e2d83913371bc8dfc4:docs/uat/v0.7.0.md:curl-auth-user:19
+95ef462c3de5f6cf78d4041b222c40ba3e457b36:.gitleaksignore:curl-auth-user:4
