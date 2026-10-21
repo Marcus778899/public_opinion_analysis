@@ -205,13 +205,13 @@ def _ref_at(sql: str, i: int, in_string: bool) -> tuple[Ref, int] | None:
 
 
 def references(sql: str) -> list[Ref]:
-    """依序找出 $board、$min_score 的每個引用，並標出是否位於 SQL 引號（' " `）內。"""
+    """依序找出 $board、$min_score 的每個引用，並標出是否在 SQL 單引號內（雙引號、反引號不算）。"""
     refs: list[Ref] = []
     quote_char: str | None = None
     i = 0
     while i < len(sql):
         ch = sql[i]
-        found = _ref_at(sql, i, quote_char is not None) if ch in "$[" else None
+        found = _ref_at(sql, i, quote_char == "'") if ch in "$[" else None
         if found:
             refs.append(found[0])
             i = found[1]

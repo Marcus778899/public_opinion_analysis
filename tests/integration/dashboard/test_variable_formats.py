@@ -83,6 +83,13 @@ def test_references_helper_detects_quoted_and_formatted_references() -> None:
     ]
 
 
+def test_references_helper_counts_only_single_quotes_as_in_string() -> None:
+    ref = "${board:percentencode}"
+    sql = f'a = "{ref}" AND b = `{ref}` AND c = {ref}'
+    assert [r.in_string for r in references(sql)] == [False, False, False]
+    assert [r.in_string for r in references("x = '${board:percentencode}'")] == [True]
+
+
 # ---------- 正常值 ----------
 
 
