@@ -43,11 +43,11 @@
 | dashboard-integration | backend | done | 1 | PR #109 |
 | e2e-grafana-volume | backend | done | 1 | PR #114 |
 | gitleaks-uat-ignore | backend | done | 1 | PR #116 |
-| dashboard-min-score-select | backend | qa-fail | 2 |  |
+| dashboard-min-score-select | backend | done | 2 | PR #124 |
 
 ## 卡住／待甲方決定
 
-- 甲方驗收 v0.7.0 進行中：甲方要求 min_score 改下拉選單＋說明（dashboard-min-score-select，併修 L-5 #120）；F-1、F-2、README 甲方已看過無問題；改完請甲方重看 Dashboard 並寫 甲方驗收：PASS
+- v0.7.0 甲方驗收 PASS；等 security 重審結果後 release.py open v0.7.0
 
 ## 注意事項（踩過的坑）
 
