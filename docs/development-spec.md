@@ -1,7 +1,7 @@
 # 即時輿情雷達：開發流程規格
 
 > 狀態：v0.4，對應設計文件 [realtime-sentiment-radar-design.md](realtime-sentiment-radar-design.md)
-> 最後更新：2026-10-21（階段 8 規劃：BERT 與 shadow 比較，7.27）
+> 最後更新：2026-10-21（階段 8 骨架：D-020～D-024 同步進 7.27）
 
 設計文件回答「要做什麼、為什麼」；本文件回答「怎麼做、做到什麼程度算完成」。兩者衝突時，先修設計文件再改本文件。**文件必須與程式同步**：行為、格式、相依套件有變動時，同一個 PR 內一併更新。
 
@@ -35,7 +35,7 @@
 | Python | 3.12 | 所有自寫服務共用 |
 | 套件管理 | uv | `pyproject.toml` + `uv.lock` |
 | Lint / format | ruff | 已在 pre-commit |
-| 安全掃描 | bandit；CI 另跑 gitleaks、osv-scanner、semgrep | bandit 在 pre-commit；誤判寫進 `.gitleaksignore` 等忽略檔並附理由 |
+| 安全掃描 | bandit；CI 另跑 gitleaks、osv-scanner、semgrep | bandit 在 pre-commit；誤判寫進 `.gitleaksignore` 等忽略檔並附理由；`tasks/` 由 `.gitleaks.toml` 整體排除（D-018） |
 | 測試 | pytest、pytest-asyncio、pytest-cov、pytest-xdist（D-015）；整合測試用 compose 的 `test` 服務（7.26） | 覆蓋率：PR 改到的程式碼 ≥ 80%（`scripts/coverage_gate.py`），不量的路徑列在 `.coverage-exempt` |
 | 設定 | pydantic-settings | 全部從環境變數讀，提供 `.env.example` |
 | Kafka client | confluent-kafka | |
@@ -45,6 +45,7 @@
 | PG 存取 | SQLAlchemy 2.0（driver 用 psycopg 3） | 用法分工見 2.4 |
 | DB migration | Alembic | 由 ORM model 自動產生，再人工檢查 |
 | ML | scikit-learn（含 joblib） | 階段 3 baseline；階段 4 推論也在同一個 image 內使用 |
+| BERT 推論 | onnxruntime、tokenizers（D-020）；開發用 onnx | 階段 8；載入 ONNX 與 JSON，不載 pickle；測試用 onnx 即時產生小模型（7.27） |
 | LLM 標註 | Groq、OpenRouter（OpenAI 相容 API）、Gemini REST，皆以 httpx2 直接呼叫 | 不用官方 SDK；包在 `Labeler` 介面後，換服務商只換實作；Claude 以 skill 手動標註（7.11） |
 | CDC Avro 解碼 | `confluent-kafka[avro]` | Python 端讀 `cdc.public.*`（S3-08、階段 4） |
 | Log | loggerhelper 2.0.0（`lib/` 內的 wheel） | `LOG_NAME` 設成服務名稱；訊息中帶 `post_id`（如有）；錯誤可選擇送 Slack |
@@ -75,7 +76,7 @@
 │   ├── integration/
 │   ├── e2e/                 # 假 PTT 伺服器與端到端測試
 │   └── fixtures/ptt/        # 存下來的 PTT HTML
-├── notebooks/               # 甲方在 Colab／Kaggle 執行的 notebook（階段 8，7.27），不帶輸出進 repo
+├── notebooks/               # 甲方在 Colab 執行的 notebook（階段 8，7.27），不帶輸出進 repo
 ├── data/                    # 不進 repo：testset/、manual/、datasets/、prompt-tuning/
 └── models/                  # 不進 repo：<model_version>/model_card.json，加上 model.joblib（baseline）或 model.onnx、tokenizer.json（BERT，7.27）
 ```
@@ -364,7 +365,7 @@
 | S5-01～S5-05 熱度偵測、錄製回放（7.20） | ✅ 程式完成；加入 `quixstreams`，`confluent-kafka` 降到 2.12.x。整合測試（真實 Kafka、exactly-once）：暴增各單位只發一則、改寫不算新增、只靠 changelog 恢復後不重發、壞訊息進 DLQ。2026-10-17 實測推文進 PG 晚約 8 分鐘，時間基準由 `commented_at` 改成觀測時間（S5-02）。開發環境已部署 heat，待第 5 階段驗收 | — |
 | 文章基準每分鐘更新一次、分鐘結算才發警示（7.20，#49、#50） | ✅ 完成；單元測試重現兩個問題（40 篇活躍文章時文章基準 1 分鐘就洗掉舊值、一分鐘湧入 200 則警示只寫 30），修正後通過；整合測試（真實 Kafka）暴增 40 則的警示 `value` 為 40、重啟後不重發。待部署（重置 heat）後重跑階段 5 的 3 天驗收 | — |
 | 階段 7 規劃：Dashboard 呈現方式（7.25） | ✅ 實作完成（2026-10-21）；呈現方式已定案：全用 Grafana（D-014）；`dashboard-grafana-infra`、`dashboard-views`、`dashboard-panels`、`dashboard-integration` 完成（畫面截圖由階段收尾的 uat 做） | — |
-| 階段 8 規劃：BERT 與 shadow 比較（7.27） | ✅ 文件完成（2026-10-21，`bert-design`）；骨架等待決定的 D-編號 | — |
+| 階段 8 規劃：BERT 與 shadow 比較（7.27） | ✅ 文件完成（2026-10-21，`bert-design`）；D-020～D-024 定案；骨架 `bert-skeleton` | — |
 | 整合測試改用 compose `test` 服務、CI 加速（7.26，#78） | ✅ `test-infra-compose`、`test-infra-fast-waits` 完成（2026-10-20；本機 150 個全過、連跑兩次、`-n 0` 也過；CI Integration Test 1 分 56 秒） | — |
 | S5-06～S5-07 Telegram bot（7.21） | ✅ 完成；2026-10-16 在開發環境以真的 Telegram 實測指令與推送，修正 compose 漏掉 `app-env`。階段 5 驗收第 1 項（人工暴增約 10 秒收到通知）通過 | — |
 
@@ -611,7 +612,7 @@
 
 | ID | 任務 |
 |---|---|
-| S8-01 | fine-tune notebook（`notebooks/bert_finetune.ipynb`）：agent 撰寫、甲方在 Colab／Kaggle 執行（D-019），產出 ONNX 模型包；`import_model` 驗證後放進 `models/<model_version>/`（不進 git） |
+| S8-01 | fine-tune notebook（`notebooks/bert_finetune.ipynb`）：agent 撰寫、甲方在 Colab 執行（D-019、D-024），兩個預訓練模型各一版（D-021），產出 ONNX 模型包；`import_model` 驗證後放進 `models/<model_version>/`（不進 git） |
 | S8-02 | `Classifier` 介面讓評估與推論同時支援 sklearn、ONNX；shadow 推論 `inference-shadow` 用新 consumer group 與新 `model_version` 並行，寫 `predictions.shadow` → ClickHouse `predictions_shadow` |
 | S8-03 | 比較兩版：人工測試集 macro-F1（`evaluate`，離線）；ClickHouse 上的一致率、對 LLM 標註的 macro-F1、不一致的文章、推論延遲、信心分布（`compare`） |
 
@@ -1233,16 +1234,16 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 
 ### 7.27 BERT 與 shadow 比較（S8-01～S8-03，規劃，2026-10-21）
 
-調查：`docs/research/bert-stage8.md`（以下「調查」指這份）。分工依 D-019：agent 寫 notebook、匯入、推論、比較的程式；甲方在 Colab／Kaggle 執行 notebook，交回模型包。agent 的 sandbox 連不到 Hugging Face，**任何測試與 agent 端的步驟都不下載預訓練模型**：ONNX 推論的測試用測試內即時產生的小模型（見「測試」）。
+調查：`docs/research/bert-stage8.md`（以下「調查」指這份）。分工依 D-019：agent 寫 notebook、匯入、推論、比較的程式；甲方在 Colab 執行 notebook（D-024），交回模型包。agent 的 sandbox 連不到 Hugging Face，**任何測試與 agent 端的步驟都不下載預訓練模型**：ONNX 推論的測試用測試內即時產生的小模型（見「測試」）。
 
 **流程與交付物**
 
 | 步驟 | 誰 | 輸入 | 輸出 |
 |---|---|---|---|
 | 1. 匯出訓練資料 | 甲方 | `python -m radar.ml.training.export`（與 baseline 相同，S3-06） | `data/datasets/<名稱>.jsonl` 與同名的 meta 檔：每列 `post_id`、`board`、`text`（已用 `post_text` 截斷到 `max_chars`）、`polarity`；不含作者、推文、人工測試集 |
-| 2. fine-tune | 甲方在 Colab／Kaggle 執行 `notebooks/bert_finetune.ipynb` | 上傳步驟 1 的兩個檔 | 兩個模型包：fp32 `<model_version>.zip` 與 int8 動態量化 `<model_version>-int8.zip`（格式見下表）；notebook 最後一格印出各檔的 SHA-256 |
+| 2. fine-tune | 甲方在 Colab 執行 `notebooks/bert_finetune.ipynb`，第一格參數 `BASE` 選預訓練模型（`macbert`＝`hfl/chinese-macbert-base`、`ckip`＝`ckiplab/bert-base-chinese`，D-021），兩個各執行一次 | 工作階段上傳步驟 1 的兩個檔（D-024） | 每次執行兩個模型包：fp32 `<model_version>.zip` 與 int8 動態量化 `<model_version>-int8.zip`（格式見下表），兩次共四個；notebook 最後一格印出各檔的 SHA-256 |
 | 3. 匯入 | 甲方 `python -m radar.ml.training.import_model --zip <路徑>` | 模型包 | `models/<model_version>/`（不進 git，`.gitignore` 已含 `/models/`、`*.onnx`） |
-| 4. 測試集評估 | 甲方 `python -m radar.ml.training.evaluate --model models/<model_version>`，fp32、int8 各跑一次 | 人工測試集（只在本機） | `models/<model_version>/evaluation.md`（與 baseline 同格式），另加 CPU 推論耗時（每篇 p50／p95、每批 `INFERENCE_BATCH_SIZE` 篇的耗時，記下 `INFERENCE_THREADS`）與程序記憶體峰值；依「自行決定」選一個進 shadow |
+| 4. 測試集評估 | 甲方 `python -m radar.ml.training.evaluate --model models/<model_version>`，四個模型包各跑一次 | 人工測試集（只在本機） | `models/<model_version>/evaluation.md`（與 baseline 同格式），另加 CPU 推論耗時（每篇 p50／p95、每批 `INFERENCE_BATCH_SIZE` 篇的耗時，記下 `INFERENCE_THREADS`）與程序記憶體峰值；依「自行決定」選一個進 shadow |
 | 5. shadow 並行 | 甲方 `make up-shadow`（`.env` 設 `INFERENCE_SHADOW_MODEL_VERSION`） | `cdc.public.posts` | `predictions.shadow` → ClickHouse `predictions_shadow` |
 | 6. 比較 | 甲方 `python -m radar.ml.training.compare --a <現行版本> --b <shadow 版本> --since <shadow 開始時間>` | ClickHouse | `models/<b>/comparison.md`、`data/review/disagreements-<a>-vs-<b>.csv` |
 | 7. 評估報告 | 依 7.11 寫入 `docs/reports/model-evaluation.md` | 步驟 4、6 的輸出 | 甲方決定是否切換預設模型與信心門檻（設計文件 15.8） |
@@ -1259,24 +1260,24 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | `tokenizer.json` | Hugging Face fast tokenizer 格式，以 `tokenizers` 載入；推論時 truncation 到 `max_len`、batch 內 padding |
 | `model_card.json` | 沿用 `ModelCard`（`ml/training/train.py`），新增欄位皆有預設值，舊的 baseline 卡片照常讀取：`kind`（`sklearn`｜`onnx`，預設 `sklearn`）、`base_model`（含 revision）、`max_len`、`labels`（logits 順序）、`files`（檔名 → SHA-256）；`max_chars` 取自訓練資料的 meta 檔，推論與 hash 照舊（7.18） |
 
-- `model_version` = `bert-<UTC yyyymmddHHMM>`，int8 版加 `-int8`，由 notebook 產生；`base_model` 記模型名稱與 revision
+- `model_version` = `bert-<BASE>-<UTC yyyymmddHHMM>`（`BASE` 為 `macbert`｜`ckip`），int8 版加 `-int8`，由 notebook 產生；`base_model` 記模型名稱與 revision
 - 匯出：notebook 用 `optimum-cli export onnx`（動態軸預設開）。`--dynamo` 與 opset 官方文件前後矛盾（調查 2），不靠文件判斷：匯出後在 notebook 內比對 PyTorch 與 ONNX 的 logits（驗證集抽樣，最大絕對差 < 1e-3）才打包，int8 版另比對驗證集 macro-F1
 - 不接受 pickle 類格式（`.bin`、`.pt`、joblib）：ONNX 與 JSON 載入時不執行程式。`load_model` 的 joblib 只用於本機訓練的 baseline（現狀）
 
-**載入**：新增 `ml/training/classifier.py`，`Classifier` 介面 `predict_proba(texts) -> list[dict[Polarity, float]]`（三類齊全、總和為 1），`load_classifier(model_dir)` 依 `model_card.kind` 回傳 sklearn 或 ONNX 實作。`evaluate.py`、`inference/main.py` 改用它；`inference/main.py` 的 `predict()` 中「缺類補 0」的邏輯搬進 sklearn 實作。ONNX 實作以 `INFERENCE_THREADS` 限制 intra-op thread 數。
+**載入**：新增 `ml/training/classifier.py`，`Classifier` 介面 `predict_proba(texts) -> list[dict[Polarity, float]]`（三類齊全、總和為 1），`load_classifier(model_dir, *, threads)` 依 `model_card.kind` 回傳 `(Classifier, ModelCard)`（簽名見骨架）。`evaluate.py`、`inference/main.py` 改用它；`inference/main.py` 的 `predict()` 中「缺類補 0」的邏輯搬進 sklearn 實作。ONNX 實作以 `INFERENCE_THREADS` 限制 intra-op thread 數。
 
 **shadow 並行**（設計文件 8.4）
 
 | 項目 | 現行（primary） | shadow |
 |---|---|---|
-| compose 服務／profile | `inference`／`inference` | `inference-shadow`／`shadow`（`make up-shadow`），同一個 image，唯讀掛 `models/` |
-| `INFERENCE_ROLE` | `primary`（預設） | `shadow`（compose 寫死在服務定義） |
+| compose 服務／profile | `inference`／`inference` | `inference-shadow`／`shadow`（`make up-shadow`），同一個 image，唯讀掛 `models/`；`cpus: 2`、`mem_limit: 1.5g`、`INFERENCE_THREADS=2`（D-023） |
+| `INFERENCE_ROLE` | `primary`（預設；compose 也寫死） | `shadow`（compose 寫死在服務定義） |
 | consumer group | `inference` | `inference-shadow-<model_version>`：每個 shadow 版本從頭消費，自動補上 `cdc.public.posts` 保留期間（14 天）內的新文章 |
 | 輸出 topic → ClickHouse 表 | `predictions` → `predictions` | `predictions.shadow` → `predictions_shadow`（migration `0006`，結構同 `predictions` 含 `text_hash`） |
 | 啟動載入快取（7.19） | `predictions` | `predictions_shadow` |
 
 - 為什麼分開 topic 與表：`post_sentiment_latest` 與 `bot/stats.py` 的 `POST_STATS_QUERY`、`SENTIMENT_QUERY` 都取「每篇最新一筆」而不分版本，shadow 寫進 `predictions` 會直接改變 Telegram 與 Dashboard 顯示的情緒。分開後呈現層不必改，也不必新增「現行版本」設定
-- `INFERENCE_ROLE` 是列舉，group、topic、表名都由它查固定的對照表得出，不接受任意字串
+- `INFERENCE_ROLE` 是列舉（`common/settings.py` 的 `InferenceRole`），group、topic、表名都由 `ml/inference/roles.py` 的固定對照表得出，不接受任意字串；骨架期間 `main()` 遇到 `shadow` 拒絕啟動（`require_primary`），由 `bert-shadow-inference` 移除
 - 切換預設模型：`INFERENCE_MODEL_VERSION` 改成新版本、重啟 `inference`、停掉 shadow。新版本在 `predictions` 沒有 hash，只推論新文章，舊文章保留舊版本的結果（與 7.19「換模型版本」相同）；view 的 `model_version` 欄位可分辨
 
 **比較**（`ml/training/compare.py`，一次性 CLI；查詢全部參數化）
@@ -1292,8 +1293,8 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 
 **測試**
 
-- 骨架（`bert-skeleton`）的驗收：`uv lock` 後在 arm64 主機以 `docker compose -f infra/docker-compose.yaml --env-file .env build` 建 image，容器內 `import onnxruntime, tokenizers` 成功；`tokenizers` 只有 `cp310-abi3` wheel、沒有 cp312 專屬的（調查 3），要實際裝過才算數。x86_64 由 CI 驗證
-- 測試用小模型：共用 helper `tests/helpers/onnx_model.py`（`bert-skeleton` 完整實作，不是骨架；之後各單只呼叫、不修改），提供以小字典建立的 `tokenizers` tokenizer、以 `onnx.helper` 產生的 fp32 與 int8 小 ONNX 模型（輸入輸出同「模型包格式」），以及打包成模型包 zip（含正確的 `model_card.files` 雜湊）；檔案寫在 pytest 的 `tmp_path`，`*.onnx` 不進 git。helper 自己的單元測試 `tests/unit/helpers/test_onnx_model_helper.py`
+- 骨架（`bert-skeleton`）的驗收：`uv lock` 後在 arm64 主機以 `docker compose -f infra/docker-compose.yaml --env-file .env --profile app build init` 建 image（`radar-app` 只由 `init` 建置），再以 `--profile app run --rm --no-deps inference python -c "import onnxruntime, tokenizers"` 檢查（worktree 沒有 `.env`，`run` 用主目錄的 compose 檔，image 相同），容器內 `import onnxruntime, tokenizers` 成功；`tokenizers` 只有 `cp310-abi3` wheel、沒有 cp312 專屬的（調查 3），要實際裝過才算數。x86_64 由 CI 驗證
+- 測試用小模型：共用 helper `tests/helpers/onnx_model.py`（`bert-skeleton` 完整實作，不是骨架；之後各單只呼叫、不修改），提供以小字典建立的 `tokenizers` tokenizer、以 `onnx.helper` 產生的 fp32 與 int8 小 ONNX 模型（輸入輸出同「模型包格式」），以及打包成模型包 zip（含正確的 `model_card.files` 雜湊）；檔案寫在 pytest 的 `tmp_path`，`*.onnx` 不進 git。helper 自己的單元測試 `tests/unit/helpers/test_onnx_model_helper.py`。驗收測試的共用 fixture（`tests/unit/acceptance/conftest.py`、`tests/integration/acceptance/conftest.py`）：`tiny_model_dir`、`tiny_int8_model_dir`（import 後的資料夾）、`make_model_package`（產生模型包 zip）；單元測試的 `Classifier` 替身為 `tests/unit/ml/fakes.py` 的 `FakeClassifier`
 - 單元測試（不需容器）：用上面的 helper；notebook 靜態檢查（沒有輸出、類別順序、card 欄位）；`import_model` 的雜湊不符、多餘檔名、路徑穿越、超過大小上限、目標已存在
 - 整合測試（compose `test` 服務）：shadow 推論只寫 `predictions.shadow`、`predictions_shadow` 有資料、`predictions` 沒有；重啟從 `predictions_shadow` 載入快取；`compare` 的查詢對預先寫入的資料算出預期值
 - notebook 本身不在 CI 執行（需要 GPU 與下載）；由甲方第一次執行時確認，ONNX 與 PyTorch 的 logits 差異在 notebook 內檢查
@@ -1305,9 +1306,9 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 |---|---|---|
 | 推論主機（載入模型的程序） | 模型包在下載或傳遞途中被換掉；pickle 格式載入即執行任意程式 | 只接受 ONNX、JSON；`import_model` 比對 `model_card.files` 的 SHA-256，甲方對照 notebook 最後一格印出的值；`model_card` 用 pydantic 驗證，`labels` 必須恰好是三個 `Polarity` |
 | 本機檔案系統 | 模型包的 zip slip、zip bomb；`model_version` 帶路徑字元 | 只解出白名單的三個檔名，不依 zip 內路徑；解壓總大小上限 2 GB；`model_version` 限 `^[a-z0-9][a-z0-9-]{0,63}$`；目標資料夾已存在就拒絕 |
-| 預訓練模型的授權 | 選 GPL-3.0 的模型後，若散布模型或相關程式要負擔 GPL 義務；GPL 是否及於權重查不到判定（調查 1） | 列為待決定 2 的取捨，甲方決定；不論選哪個，`models/` 不進 git、模型包不對外提供 |
+| 預訓練模型的授權 | `ckiplab/bert-base-chinese` 為 GPL-3.0，散布模型或相關程式要負擔 GPL 義務；GPL 是否及於權重查不到判定（調查 1） | 甲方接受，只在自己的機器與 VM 使用、不對外散布（D-021）；`models/` 不進 git、模型包不對外提供；日後要對外提供須重新評估 |
 | 預訓練模型的來源 | Hugging Face 上同名模型被改、含自訂程式 | notebook 釘 `revision`（commit hash）、`trust_remote_code=False`、只載 safetensors；`base_model` 連同 revision 記進 card |
-| 訓練資料（PTT 文字、標註） | 上傳到第三方平台後外流；Kaggle 新資料集的預設可見度官方原文查不到（調查 4） | 只上傳步驟 1 的檔（無作者、推文帳號）；平台見待決定 5；人工測試集不上傳 |
+| 訓練資料（PTT 文字、標註） | 上傳到第三方平台後外流 | 只上傳步驟 1 的檔（無作者、推文帳號）；只在 Colab 工作階段上傳、不放 Drive（D-024）；人工測試集不上傳 |
 | 平台 token | 寫進 notebook 進 git | 公開模型不需要 token；需要時用平台的 secrets；notebook 不帶輸出進 git |
 | 使用者看到的情緒 | shadow 結果混入 Telegram、Dashboard | 分開 topic 與表；整合測試確認 `predictions` 沒有 shadow 的版本 |
 | shadow 服務 | 對外介面：無（不開 port，只連 Kafka、ClickHouse、讀 `models/`）；PTT 文章內容是外部輸入，超長內容耗盡 CPU | 先 `post_text` 截到 `max_chars`、tokenizer 截到 `max_len`；`INFERENCE_THREADS` 限 thread；解碼失敗進 DLQ（既有） |
@@ -1317,11 +1318,11 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 
 | 檔案 | 負責 |
 |---|---|
-| `pyproject.toml`、`uv.lock`、`Makefile`、`.env.example`、`infra/docker-compose.yaml`、`infra/kafka/topics.yaml`、`common/kafka/names.py`、`common/settings.py`（`InferenceSettings` 加 `role`、`threads`）、`ml/training/train.py`（`ModelCard` 新欄位）、`infra/clickhouse/migrations/0006_predictions_shadow.sql`、各模組骨架、驗收測試上層的共用 fixture、`tests/helpers/onnx_model.py` 與 `tests/unit/helpers/test_onnx_model_helper.py`（測試用小模型，見「測試」）、開發規格與設計文件的同步 | `bert-skeleton` |
+| `pyproject.toml`、`uv.lock`、`Makefile`、`.env.example`、`infra/docker-compose.yaml`、`infra/docker-compose.e2e.yaml`（shadow 的 log volume）、`infra/kafka/topics.yaml`、`common/kafka/names.py`、`common/settings.py`（`InferenceRole`；`InferenceSettings` 加 `role`、`threads`）、`ml/training/train.py`（`ModelCard` 新欄位與驗證）、`ml/inference/roles.py`（角色對照表，完整實作）、`tests/unit/ml/fakes.py`（`FakeClassifier`）、`tests/unit/ml/test_stage8_interfaces.py`（平行各單之間的函式簽名；要改簽名先改本節）、`infra/clickhouse/migrations/0006_predictions_shadow.sql`、各模組骨架、驗收測試上層的共用 fixture、`tests/helpers/onnx_model.py` 與 `tests/unit/helpers/test_onnx_model_helper.py`（測試用小模型，見「測試」）、開發規格與設計文件的同步 | `bert-skeleton` |
 | `notebooks/bert_finetune.ipynb`、`tests/unit/ml/notebook/` | `bert-notebook` |
 | `ml/training/classifier.py`、`ml/training/evaluate.py`、`tests/unit/ml/training/test_classifier.py`、`tests/unit/ml/training/test_evaluate.py` | `bert-classifier` |
 | `ml/training/import_model.py`、`tests/unit/ml/training/test_import_model.py` | `bert-model-import` |
-| `ml/inference/main.py`、`tests/unit/ml/inference/`、`tests/integration/ml/test_inference_*.py` | `bert-shadow-inference` |
+| `ml/inference/main.py`、`tests/unit/ml/inference/`（`test_roles.py` 除外）、`tests/integration/ml/test_inference_*.py`、`tests/integration/conftest.py`（`CLICKHOUSE_TOPICS` 加 `names.PREDICTIONS_SHADOW`：Kafka engine 表訂閱前 topic 要存在） | `bert-shadow-inference` |
 | `ml/training/compare.py`、`tests/unit/ml/training/test_compare.py`、`tests/integration/ml/test_compare.py` | `bert-compare` |
 | `tests/integration/ml/test_bert_pipeline.py`（worker 自己的整條流程測試：helper 產生模型包 → `import_model` → `evaluate` 的評估函式 → shadow `Predictor` 寫 Kafka／ClickHouse → `compare` 的查詢） | `bert-integration` |
 | `docs/reports/model-evaluation.md` | `bert-eval-report` |
@@ -1330,7 +1331,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 
 | 順序 | task_id | 負責 | 驗收測試 | 相依／平行 |
 |---|---|---|---|---|
-| 0 | — | 甲方 | — | 決定本節「待決定」（D-編號），之後才派骨架 |
+| 0 | — | 甲方 | — | ✅ D-020～D-024 |
 | 1 | `bert-skeleton` | architect | —（`make check` 通過；arm64 建 image 後容器內 import `onnxruntime`、`tokenizers` 成功，見「測試」） | 等順序 0 |
 | 2 | `bert-notebook` | worker | `tests/unit/acceptance/bert-notebook/` | 等 1；與 3～6 平行 |
 | 3 | `bert-classifier` | worker | `tests/unit/acceptance/bert-classifier/` | 等 1；平行；含 `evaluate` 的耗時與記憶體峰值輸出 |
@@ -1338,13 +1339,13 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | 5 | `bert-shadow-inference` | worker | `tests/integration/acceptance/bert-shadow-inference/` | 等 1；平行（`Classifier` 介面在骨架，測試用 fake） |
 | 6 | `bert-compare` | worker | `tests/integration/acceptance/bert-compare/` | 等 1；平行 |
 | 7 | `bert-integration` | worker | `tests/integration/acceptance/bert-integration/` | 等 3～6：測試內產生的小 ONNX 模型（fp32 與 int8 各一）打包 → `import_model` → `evaluate` 輸出耗時欄位 → shadow 推論 → `compare`，跑通整條；不量真實延遲。只改自己的 `tests/integration/ml/test_bert_pipeline.py`；發現 3～6 的程式有錯時回報 manager 開修正單，不直接改別張單的檔 |
-| 8 | **甲方執行 notebook，交回 fp32 與 int8 兩個模型包** | 甲方 | — | 等 2；可與 3～7 同時進行 |
-| 9 | 甲方匯入、評估兩個模型包（實測 CPU 耗時與記憶體），依「自行決定」選一個 `make up-shadow`，運作至少 3 天且重疊 ≥ 500 篇後跑 `compare` | 甲方 | 步驟 4 的耗時通過進 shadow 的門檻；`compare` 的延遲 p95 有數字 | **等 7 與 8** |
+| 8 | **甲方執行 notebook 兩次（`BASE`＝`macbert`、`ckip`），交回兩個預訓練模型 × fp32／int8 共四個模型包**（D-021） | 甲方 | — | 等 2；可與 3～7 同時進行 |
+| 9 | 甲方匯入、評估四個模型包（實測 CPU 耗時與記憶體），依「自行決定」選一個 `make up-shadow`，運作至少 3 天且重疊 ≥ 500 篇後跑 `compare` | 甲方 | 步驟 4 的耗時通過進 shadow 的門檻；`compare` 的延遲 p95 有數字 | **等 7 與 8** |
 | 10 | `bert-eval-report` | worker（依甲方交來的 `evaluation.md`、`comparison.md` 撰寫） | 無（docs） | 等 9 |
 | 11 | 是否切換預設模型、新的信心門檻 | 甲方 | — | 等 10；切換屬設定變更，不需新程式 |
 
 - 平行的 2～6 各自只改上表的檔；整合測試各自用 worktree 的 compose，不搶 port 與資料庫
-- 若待決定改成「不用 ONNX」（例如 PyTorch CPU 推論），只換 `classifier.py` 的實作與模型包格式，其餘單不受影響
+- 若日後改成「不用 ONNX」（例如 PyTorch CPU 推論），只換 `classifier.py` 的實作與模型包格式，其餘單不受影響
 
 **自行決定**（可逆、在範圍內）
 
@@ -1358,28 +1359,27 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | 比較期間 | shadow 至少 3 天且兩版重疊 ≥ 500 篇才跑最終的 `compare` |
 | 模型包上限 | 解壓總大小 2 GB |
 | 推論延遲的起點 | PG commit 時間（`posts_history` 的 `changed_at`），與階段 4 驗收一致 |
-| fp32 或 int8 進 shadow | int8 在人工測試集的 macro-F1 比 fp32 低不超過 0.02，且步驟 4 的每批耗時較短，就用 int8；否則 fp32（量化可能明顯掉分，調查 2 的論壇個案從 0.78 掉到 0.33） |
+| fp32 或 int8 進 shadow | 每個預訓練模型各自比較：int8 在人工測試集的 macro-F1 比 fp32 低不超過 0.02，且步驟 4 的每批耗時較短，就用 int8；否則 fp32（量化可能明顯掉分，調查 2 的論壇個案從 0.78 掉到 0.33） |
+| 兩個預訓練模型選哪個（D-021） | 各自選出 fp32／int8 後，取人工測試集 macro-F1 較高者；差距小於 0.01 時取 `macbert`（Apache-2.0，授權風險較低） |
+| notebook 選預訓練模型的方式 | 第一格參數 `BASE`，一次執行訓練一個；不在同一次執行裡連訓兩個（Colab 12 小時上限） |
+| `model_version` 帶預訓練模型簡稱 | `bert-<BASE>-<時間>`，四個模型包一看就分得出來；仍符合 `model_version` 的格式限制 |
+| 角色對照表的位置 | `ml/inference/roles.py`；`compare` 讀表名也用它，不另寫字串 |
 | 進 shadow 的門檻 | 步驟 4 每批 `INFERENCE_BATCH_SIZE` 篇的耗時 < 30 秒（新文章每分鐘不到 10 篇，留足餘裕）；不到就重跑 notebook 改 `max_len` 256 |
 | Colab 12 小時上限 | 預估時間超過 10 小時就停；同一工作階段內從 epoch checkpoint 續跑 |
 
-**待決定**（決策分級②④，由 manager 開 D-編號；選項後為 architect 的建議，決定權在甲方）
+**已定案**（細節見 `docs/decisions.md`）
 
-| # | 問題 | 選項 | 建議與理由 |
-|---|---|---|---|
-| 1 | ② 執行期新套件 | A：`onnxruntime`、`tokenizers`（推論、評估），開發用 `onnx`（測試內產生小模型）／B：`torch` + `transformers` 在 CPU 推論 | **A**：image 小、載入不執行程式（威脅表），onnxruntime 1.31.0 有 cp312 x86_64／aarch64 wheel（調查 3） |
-| 2 | ②④ 預訓練模型 | A：`ckiplab/bert-base-chinese`（GPL-3.0；唯一明寫以繁中語料預訓練，102M 參數）／B：`hfl/chinese-macbert-base`（Apache-2.0；約 0.1B 參數；語料是否含繁中未說明）／C：`google-bert/bert-base-chinese`（Apache-2.0；語料未說明）／D：A 與 B 各訓一版，以人工測試集決定 | **B**；甲方確認接受下方 GPL 風險時改 **D**。理由：繁中效果可以用人工測試集量出來，授權風險量不出來 |
-| 3 | ② notebook 端套件（只裝在 Colab／Kaggle，第一格釘版本，不進 `uv.lock`） | A：`torch`、`transformers`、`optimum[onnxruntime]`（用 `optimum-cli` 匯出與量化）／B：`torch`、`transformers`、`onnx`、`onnxruntime`（`torch.onnx.export` 自己寫匯出） | **A**：少寫匯出程式；文件的矛盾由 logits 比對把關 |
-| 4 | ② shadow 推論的資源上限 | A：compose 限 `cpus: 2`、`mem_limit: 1.5g`，`INFERENCE_THREADS=2`／B：不設上限 | **A**：fp32 權重推估約 440MB（調查 3，未實測），不設限可能搶走 Kafka、ClickHouse 的 CPU；不夠時看步驟 4 的實測再調 |
-| 5 | ④ 訓練資料上傳到哪個平台 | A：Colab，工作階段上傳（不放 Drive，工作階段結束就刪）／B：Kaggle 私有資料集 | **A**：Colab FAQ 只列禁止濫用與勿放個資；Kaggle 條款摘要寫「internal, personal, non-commercial use」，預設可見度與官方原文都查不到 |
+| 編號 | 決定 | 影響本節 |
+|---|---|---|
+| D-020 | 執行期 `onnxruntime`、`tokenizers`；開發用 `onnx` | 「載入」「測試」 |
+| D-021 | `ckiplab/bert-base-chinese`（GPL-3.0）與 `hfl/chinese-macbert-base`（Apache-2.0）各訓一版，用人工測試集決定；不對外散布，日後要散布須重新評估 GPL | 步驟 2、8、9；威脅表；「自行決定」 |
+| D-022 | notebook 端 `torch`、`transformers`、`optimum[onnxruntime]`（只裝在 Colab，第一格釘版本，不進 `uv.lock`） | `bert-notebook` |
+| D-023 | shadow 限 2 CPU、1.5g 記憶體、`INFERENCE_THREADS=2` | shadow 表 |
+| D-024 | 訓練資料只在 Colab 工作階段上傳、不放 Drive | 步驟 2；威脅表 |
 
-甲方決定前要知道的風險（查不到結論，不是沒有風險）：
+仍查不到結論、甲方已知悉的風險：GPL 是否及於模型權重（需法務意見，對外提供前確認）；Colab 條款未明文規範上傳爬取的論壇內容。
 
-- **GPL 是否及於模型權重**（選項 2-A、2-D）：查不到判定，需要法務意見。目前模型只在自己的機器與自己的 VM（階段 9）上使用、不對外提供；之後若要對外提供模型或服務，要先確認
-- **Kaggle 的「非商用」條款**（選項 5-B）：只取得搜尋摘要；若專案之後商用，可能與條款衝突
-- **在 Colab／Kaggle 上傳爬取的論壇內容**：兩個平台的條款都查不到明文限制，也查不到明文允許
-- **Apache-2.0 候選的繁中效果**（選項 2-B、2-C）：模型頁沒說明語料；hfl 作者 README 寫處理繁中時建議用 `BERT` 或 `BERT-wwm`（不是 RoBERTa），所以建議 MacBERT 而非 `hfl/chinese-roberta-wwm-ext`。實際效果只能看人工測試集
-
-**需調查**：無剩餘項目。原本的四項已由調查回答，或改成實測與甲方決定：CPU 延遲與記憶體改在步驟 4、6 實測；`tokenizers` 在 3.12 arm64 的安裝在骨架驗證；`optimum` 的 opset 與 dynamo 由 logits 比對把關；GPL 與 Kaggle 條款屬法務，列在上方的風險；Kaggle GPU 額度在待決定 5 選 A 時不需要
+**需調查**：兩個預訓練模型在 Hugging Face 上要釘的 `revision`（commit hash）。agent 的 sandbox 連不到 Hugging Face，由 researcher 或甲方查好後填進 notebook 第一格；查到前 `bert-notebook` 以佔位字串留空，notebook 執行時若仍是佔位字串就停止。其餘原本的調查項目已由調查回答或改成實測：CPU 延遲與記憶體在步驟 4、6 實測；`tokenizers` 在 3.12 arm64 的安裝已在骨架驗證；`optimum` 的 opset 與 dynamo 由 logits 比對把關
 
 **風險**
 

@@ -1,5 +1,6 @@
 """ml 單元測試共用的替身。"""
 
+from radar.common.enums import Polarity
 from radar.common.schemas import Sentiment
 from radar.ml.labeling.prompt import PostText
 
@@ -48,3 +49,19 @@ def post(post_id: str = "Stock.M.1759730000.A.1B2", board: str = "Stock") -> Pos
 
 def row(post_id: str, board: str = "Stock") -> dict:
     return {"post_id": post_id, "board": board, "title": "t", "content": "c"}
+
+
+class FakeClassifier:
+    """實作 radar.ml.training.classifier.Classifier：每篇回傳同一組分數；記錄每次的輸入。"""
+
+    def __init__(self, scores: dict[Polarity, float] | None = None) -> None:
+        self._scores = scores or {
+            Polarity.POSITIVE: 0.1,
+            Polarity.NEGATIVE: 0.7,
+            Polarity.NEUTRAL: 0.2,
+        }
+        self.calls: list[list[str]] = []
+
+    def predict_proba(self, texts: list[str]) -> list[dict[Polarity, float]]:
+        self.calls.append(list(texts))
+        return [dict(self._scores) for _ in texts]

@@ -24,6 +24,7 @@ from radar.common.log import log, setup_logging
 from radar.common.schemas import CdcPost, Prediction
 from radar.common.settings import (
     ClickHouseSettings,
+    InferenceRole,
     InferenceSettings,
     SchemaRegistrySettings,
     get_kafka_settings,
@@ -142,6 +143,13 @@ def predict(pipeline: Pipeline, texts: list[str]) -> list[tuple[Polarity, dict[P
     return results
 
 
+def require_primary(role: InferenceRole) -> None:
+    """shadow 尚未實作：拒絕啟動，避免 shadow 結果寫進 predictions（開發規格 7.27）。"""
+    # TODO(bert-shadow-inference): 改用 roles.ROLE_TARGETS 決定 group、topic、表後移除
+    if role is not InferenceRole.PRIMARY:
+        raise NotImplementedError(f"INFERENCE_ROLE={role} is not supported yet")
+
+
 class Predictor:
     """BatchConsumer 的 handler：選文章 → 批次推論 → 送出並 flush → 更新快取。"""
 
@@ -188,6 +196,7 @@ class Predictor:
 def main() -> None:
     setup_logging("inference")
     settings = InferenceSettings()
+    require_primary(settings.role)
     pipeline, card = load_model(settings.model_dir)
     cache = HashCache(settings.cache_size)
     ch = ClickHouseClient(ClickHouseSettings())
