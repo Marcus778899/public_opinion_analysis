@@ -23,6 +23,7 @@
 | 2026-10-20 | D-014 | 階段 7 全用 Grafana；自建 web 前端延到階段 9 |
 | 2026-10-20 | D-015 | CI 加速加 pytest-xdist，不用付費 runner |
 | 2026-10-20 | D-016 | qa 也可以跑 docker compose |
+| 2026-10-21 | D-017 | Dashboard 變數一律 percentencode 由 ClickHouse 解碼；驗收只做靜態＋正常值，不用攻擊字串 |
 
 ## 任務狀態
 
@@ -42,7 +43,7 @@
 | dashboard-integration | backend | done | 1 | PR #109 |
 | e2e-grafana-volume | backend | done | 1 | PR #114 |
 | gitleaks-uat-ignore | backend | done | 1 | PR #116 |
-| dashboard-min-score-select | backend | todo | 0 |  |
+| dashboard-min-score-select | backend | qa-fail | 2 |  |
 
 ## 卡住／待甲方決定
 
