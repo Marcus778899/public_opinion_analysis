@@ -54,3 +54,11 @@
 - 來源：<https://huggingface.co/api/models/hfl/chinese-macbert-base/revision/main>、<https://huggingface.co/api/models/ckiplab/bert-base-chinese/revision/main>（與 `/api/models/<id>` 兩次擷取 sha 一致）。
 - 查不到：無。注意：本次為 WebFetch 摘要擷取，非原始 JSON 直接核對；釘版前建議以 `curl` 再核對一次。
 - 建議：notebook 以上述 hash 作 revision；ckiplab 無 tokenizer.json，需以 vocab.txt 載入 tokenizer。
+
+## safetensors 與 ckiplab tokenizer（查詢日 2026-10-21）
+1. safetensors：hfl/chinese-macbert-base 的 `pullRequests` 為空（查不到 convert PR）；ckiplab/bert-base-chinese 的 refs/pr/1「Adding `safetensors` variant of this model」（SFconvertbot，2023-03-19，commit `d3e55b839fccbf1bba9e194b8626b18b30fcc5f3`）頁面顯示「Ready to merge」，未見合併，明確狀態查不到。
+2. ckiplab tokenizer：README 原文「Please use BertTokenizerFast as tokenizer instead of AutoTokenizer.」，範例 `BertTokenizerFast.from_pretrained('bert-base-chinese')`（即 Google 版）。
+3. vocab.txt：兩者皆 109540 bytes、git blob oid 皆 `ca4f9781030019ab9b253c6dcb8c7878b6dc87a5`，兩者皆無 LFS sha256；行數查不到。
+4. google-bert/bert-base-chinese main：`8f23c25b06e129b6c986331a13d8d025a92cf0ea`；該 repo 有 model.safetensors（sha256 `3404a1ffd8da507042e8161013ba2a4fc49858b4e3f8fbf5ce5724f94883aec3`）。
+5. 與上方「建議」衝突：ckiplab README 指定 Google 版 tokenizer，上節建議以 vocab.txt 載入；由 architect 決定，本段不改寫。
+來源：<https://huggingface.co/api/models/hfl/chinese-macbert-base/refs?include_prs=1>、<https://huggingface.co/api/models/ckiplab/bert-base-chinese/refs?include_prs=1>、<https://huggingface.co/ckiplab/bert-base-chinese/discussions/1>、<https://huggingface.co/ckiplab/bert-base-chinese>、<https://huggingface.co/api/models/ckiplab/bert-base-chinese/tree/main>、<https://huggingface.co/api/models/google-bert/bert-base-chinese/tree/main>、<https://huggingface.co/api/models/google-bert/bert-base-chinese/refs?include_prs=1>
