@@ -29,6 +29,7 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
+| gitleaks-cleanup-archive-ignore | backend | done | 0 | PR #150 |
 
 ## 卡住／待甲方決定
 
