@@ -16,6 +16,7 @@ diff-cover 對「不在報告裡的檔案」不算行數：報告路徑對不上
 exit code：0 通過；1 不通過或設定錯誤
 """
 
+import ast
 import fnmatch
 import json
 import os
@@ -52,7 +53,23 @@ def exempt_patterns() -> tuple[str, ...]:
 def changed_code(base: str) -> list[str]:
     files = run("git", "diff", "--name-only", "--diff-filter=AMR", f"{base}...HEAD").splitlines()
     skip = TEST_PATTERNS + exempt_patterns()
-    return [f for f in files if f.endswith(CODE_EXT) and not any(fnmatch.fnmatch(f, pat) for pat in skip)]
+    code = [f for f in files if f.endswith(CODE_EXT) and not any(fnmatch.fnmatch(f, pat) for pat in skip)]
+    return [f for f in code if has_statements(f)]
+
+
+def has_statements(f: str) -> bool:
+    """空檔、只有註解或 docstring 的 .py（常見於 __init__.py）沒有可執行的行，報告裡永遠量不到。
+    不整個豁免 __init__.py：裡面寫了程式（例：create_app）一樣要量。"""
+    text = (ROOT / f).read_text(encoding="utf-8", errors="ignore")
+    if not f.endswith(".py"):
+        return bool(text.strip())
+    try:
+        body = ast.parse(text).body
+    except SyntaxError:
+        return True
+    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
+        body = body[1:]
+    return bool(body)
 
 
 def measured(stats: dict, f: str) -> bool:
@@ -61,6 +78,8 @@ def measured(stats: dict, f: str) -> bool:
 
 def not_in_report(reports: list[Path], files: list[str]) -> list[str]:
     """這次改到的行都不是可執行的行（例：只改註解）時 diff-cover 也是 0 行：拿整個檔案當成新增再量一次。"""
+    if not files:
+        return []  # 不指定路徑的 git diff 會變成整個 repo
     with tempfile.TemporaryDirectory() as tmp:
         whole = Path(tmp) / "whole.diff"
         whole.write_text(run("git", "diff", EMPTY_TREE, "HEAD", "--", *files) + "\n", encoding="utf-8")
@@ -102,7 +121,7 @@ def main() -> None:
                 "這些改到的程式檔不在覆蓋率報告裡：" + "、".join(missing) + "\n"
                 "可能是：沒有任何測試載入它（補測試）；這一端的報告沒產出（例：只設了後端覆蓋率，make coverage 要涵蓋每一端）；"
                 "報告路徑對不到 repo 根目錄（JaCoCo 要設 COVERAGE_SRC_ROOTS）；"
-                f"本來就不該量（設定檔、進入點）就加進 {EXEMPT_FILE.name}"
+                f"本來就不該量（設定檔、進入點、只有型別宣告的檔）就加進 {EXEMPT_FILE.name}"
             )
         if total == 0:
             print("改到的都不是可執行的行（例：註解、型別宣告），略過")

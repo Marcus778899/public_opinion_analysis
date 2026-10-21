@@ -22,7 +22,6 @@ exit code：0 成功；1 參數或格式錯誤
 import argparse
 import json
 import re
-import json
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -196,6 +195,11 @@ def archive(tag: str) -> None:
                 shutil.move(src, folder / name)
     for path in TASKS_DIR.glob("release-*.json"):
         shutil.move(path, folder / path.name)
+    # agent 用 Write 寫的回報常缺結尾換行，專案的 pre-commit（end-of-file-fixer）會改檔並中止封存提交：進 git 前先補
+    for path in folder.iterdir():
+        text = path.read_text(encoding="utf-8")
+        if text and not text.endswith("\n"):
+            path.write_text(text + "\n", encoding="utf-8")
     (REPORTS_DIR / ".hook-blocks.json").unlink(missing_ok=True)
 
     lines = _read()

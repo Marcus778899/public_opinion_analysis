@@ -3,9 +3,11 @@
 用法：
     release.py open <vX.Y.Z>     # 檢查：任務都已合併、資安審查 PASS 且審的就是要發的程式、UAT 甲方驗收清單全勾且寫了 PASS → 開 develop→main 的 PR
     release.py finish <vX.Y.Z>   # CI 綠才合併（merge commit）→ 在 main 打 tag → 建 GitHub release
+                                 # → 本機把 main 併回 develop 並 push
                                  # → 封存布告欄與派工單到 tasks/<vX.Y.Z>（board.py archive）並提交到 develop
 
-main 更新後，.github/workflows/sync_branch.yml 會把 main 同步回 develop。
+main 併回 develop 由這支在本機做完（緊接著要提交封存，交給非同步的 workflow 會跟這裡的 push 互搶）；
+.github/workflows/sync_branch.yml 只是保底（例：在 GitHub 網頁上合進 main），develop 已包含 main 就什麼都不做。
 exit code：0 成功；1 條件不符或指令失敗
 """
 
@@ -112,18 +114,24 @@ def finish_release(version: str) -> None:
     if not path.exists():
         raise FlowError("先執行 release.py open")
     pr = json.loads(path.read_text(encoding="utf-8"))["pr"]
+    require_on_base()
     check_ci(pr)
     run("gh", "pr", "merge", str(pr), "--merge")
     run("git", "fetch", "origin")
     run("git", "tag", "-a", version, f"origin/{RELEASE_BRANCH}", "-m", f"release {version}")
     run("git", "push", "origin", version)
     run("gh", "release", "create", version, "--verify-tag", "--generate-notes", "--title", version)
-    print(f"{version} 已合併到 {RELEASE_BRANCH} 並打 tag；develop 會由 sync_branch workflow 同步")
+    run("git", "pull", "--ff-only", "origin", BASE_BRANCH)
+    run("git", "merge", "--no-edit", f"origin/{RELEASE_BRANCH}")  # 通常是 fast-forward
+    run("git", "push", "origin", BASE_BRANCH)
+    print(f"{version} 已合併到 {RELEASE_BRANCH} 並打 tag，{BASE_BRANCH} 已同步")
     try:
         archive(version)
         commit_docs(f"封存 {version} 布告欄與派工單")
     except (BoardError, FlowError) as e:
-        raise FlowError(f"發版已完成，但封存沒做完：{e}\n處理後執行 board.py archive {version}（已封存就略過）與 docs.py commit") from e
+        archived = (TASKS_DIR / f"{version}.md").exists()
+        todo = "" if archived else f"board.py archive {version}，再執行 "
+        raise FlowError(f"發版已完成，但封存沒做完：{e}\n處理後執行 {todo}docs.py commit \"封存 {version} 布告欄與派工單\"") from e
 
 
 def main() -> None:

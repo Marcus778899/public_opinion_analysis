@@ -24,14 +24,15 @@
       "Bash(git diff:*)",
       "Bash(git log:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(python3 scripts/release.py open:*)"
     ],
     "ask": [
       "Bash(python3 scripts/init_project.py:*)",
-      "Bash(python3 scripts/release.py:*)",
       "Bash(python3 scripts/pr.py approve:*)",
       "Bash(python3 scripts/pr.py unblock:*)",
-      "Bash(dangerouslyDisableSandbox:true)"
+      "Bash(dangerouslyDisableSandbox:true)",
+      "Bash(python3 scripts/release.py finish:*)"
     ],
     "deny": [
       "Bash(git push:*)",

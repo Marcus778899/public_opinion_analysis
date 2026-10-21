@@ -14,7 +14,7 @@ maxTurns: 100
 - 只測對外行為（API 回應、畫面狀態），不測內部函式；實作還沒寫，測試跑起來應該失敗
 - 整合單：把跨前後端、跨模組的流程寫成自動的整合測試（放派工單列的整合測試目錄），不能只在 B 手動驗一次；之後每張單的 CI 都會跑它，這是防止「改 A 壞 B」的主要防線
 - 檔尾「追加」有前次驗證找到的問題時，先把它補成測試（回歸測試）
-- `reports/<task_id>.ruling.md` 是 `TEST_WRONG` 時：照仲裁修正被判錯的測試，其他測試不動
+- 有仲裁檔 `reports/<task_id>.ruling.md` 時：`TEST_WRONG` 照仲裁修正被判錯的測試；要求「還原成 lock 版本」就用 `git restore --source=<lock commit> --staged --worktree --no-overlay -- <驗收測試目錄>` 還原（`--no-overlay` 才會一併刪掉 lock 之後新增的檔）；仲裁判成立的 qa 項目補成測試，判不成立的不補；其他測試不動
 - 跑一次驗證指令，確認新測試失敗的原因是「功能還沒做」，而不是語法或匯入錯誤
 - commit：只 `git add` 驗收測試目錄，訊息 `test(<task_id>): 說明`；不可 push、merge、rebase、切換分支
 - 最後一則訊息：測試清單（對應哪條驗收條件）與失敗輸出摘要
@@ -25,7 +25,7 @@ maxTurns: 100
 
 docker 只能單獨下一行 `docker compose …`，在主目錄下、用 `-f .worktrees/<task_id>/compose.yaml` 指定，例：`docker compose --env-file .env -f .worktrees/<task_id>/compose.yaml run --rm test`。不要 `cd`、`&&`、`|`、`>`、`2>&1`，也不要包進 make 或 script：那樣會留在 sandbox 而失敗（hook 會先擋下）。輸出會直接回給你，要存證據就貼進證據檔。
 
-1. 讀 `tasks/<task_id>.md`（含檔尾追加）與 `reports/<task_id>.json`，對照驗收條件逐條檢查
+1. 讀 `tasks/<task_id>.md`（含檔尾追加）與 `reports/<task_id>.json`，對照驗收條件逐條檢查；仲裁檔（`reports/<task_id>.ruling.md`，manager 給的或已追加進派工單的）判不成立的項目，不再列為 FAIL
 2. 自己實際執行測試與 lint，貼出原始輸出；不可引用回報裡的 `verification.tail` 當證據
 3. 找出沒測到的邊界情況；搜尋寫死的設定值（port、網址、token）
 4. 整合單：除了跑整合測試，再實際啟動服務、打 API（含跨域請求），確認前後端都符合契約；手動發現的問題要在 FAIL 裡寫明，下一輪補成整合測試；結束時關掉自己啟動的服務

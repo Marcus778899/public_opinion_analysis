@@ -32,7 +32,11 @@ sync 在 worktree 把 develop 併進來：乾淨合併且任務 diff 不變（pa
 diff 變了 → 重新 qa、review；有衝突 → 留在衝突狀態，派原 worker 解完 commit，再走 open → qa → review。
 測試本身可能寫錯，仲裁由 architect 依契約判定（不等撞到上限才找甲方）：
 - worker 回報 disputes（測試與契約矛盾），或 qa FAIL 達 RULING_AT_FAILS 次 → open 要求先有這個 FAIL 次數之後的仲裁
-- 仲裁 TEST_WRONG：那次 FAIL 不算 worker 的，退還 1 次，每張單最多 MAX_REFUNDS 次；迴圈仍有上限，最壞情況多跑一輪就找甲方
+- 仲裁結論有三種：TEST_WRONG（驗收測試檔要改 → qa 修、重新 lock）、QA_WRONG（qa 列的 FAIL 全部不成立，測試檔不用改 → 重派 qa 驗證）、
+  TEST_OK（實作確實有問題；不成立的 qa 項目列在仲裁檔）；QA_WRONG 只能用在 qa 剛 FAIL 目前 commit 時，沒有驗收測試目錄（fast）不能判 TEST_WRONG
+- 仲裁 TEST_WRONG／QA_WRONG 推翻的是 qa 剛 FAIL 的這個 commit 時：那次 FAIL 不算 worker 的，退還 1 次，每張單最多 MAX_REFUNDS 次；
+  worker 的 disputes 不退（帳上的 FAIL 是上一輪的，不是這次判錯的測試造成的）；迴圈仍有上限，最壞情況多跑一輪就找甲方
+- QA_WRONG 之後 qa 在同一個 commit 又 FAIL：剩下的是仲裁沒推翻的問題，FAIL 照算，不再要求仲裁
 - 每張單最多仲裁 MAX_RULINGS 次：disputes 可能發生在開 PR 之前，qa 失敗次數管不到「申訴 → TEST_OK → 再申訴」的迴圈；
   還需要仲裁就停下來問甲方（unblock 一併歸零）
 exit code：0 成功；1 條件不符或指令失敗
@@ -71,7 +75,7 @@ from validate_report import ReportError, check_consistency, check_schema, load_r
 VERDICTS = {
     "qa": {"PASS": "pass", "FAIL": "fail"},
     "review": {"APPROVE": "approve", "REQUEST_CHANGES": "changes"},
-    "ruling": {"TEST_WRONG": "test_wrong", "TEST_OK": "test_ok"},
+    "ruling": {"TEST_WRONG": "test_wrong", "QA_WRONG": "qa_wrong", "TEST_OK": "test_ok"},
 }
 LABELS = {"qa": "QA", "review": "Code review（architect）", "ruling": "驗收測試仲裁（architect）"}
 GATED_OWNERS = ("architect", "designer")
@@ -148,6 +152,11 @@ def check_scope(meta: dict) -> None:
     lock = meta.get("acceptance_lock")
     if not lock:
         raise FlowError(f"驗收測試還沒鎖定：qa 寫完測試、確認失敗原因正確後執行 pr.py lock {task_id}")
+    if meta.get("needs_relock"):
+        raise FlowError(
+            f"仲裁判驗收測試有錯（TEST_WRONG），測試還沒修：先派 qa「A」依 reports/{task_id}.ruling.md 修正測試，"
+            f"再 pr.py lock {task_id}；不可讓 worker 照錯的測試實作"
+        )
     if not acceptance_unchanged(meta, acceptance):
         raise FlowError(
             f"驗收測試跟鎖定時（commit {lock['sha'][:7]}）不一樣：worker 不可改測試，請還原；"
@@ -218,8 +227,15 @@ def lock(task_id: str) -> None:
     patch = acceptance_patch(meta, acceptance)
     if not patch:
         raise FlowError(f"{meta['branch']} 還沒有加或改任何驗收測試：先派 qa「A. 寫驗收測試」並 commit")
+    # 跟上次 lock 也要不同：仲裁前測試被改過，還原回去就跟仲裁當下不同，卻還是判錯的那一版
+    if meta.get("needs_relock") and patch in (meta["needs_relock"]["patch"], (meta.get("acceptance_lock") or {}).get("patch")):
+        raise FlowError(
+            f"仲裁判 TEST_WRONG 之後驗收測試沒依仲裁修正（跟仲裁當下或上次鎖定時一樣）：qa 要依 reports/{task_id}.ruling.md 修正並 commit 再 lock；"
+            "如果是還原成上次鎖定的版本（被非 qa 改壞），那次該判 TEST_OK：請 architect 對目前 commit 重新仲裁"
+        )
     sha = head_sha(meta)
     meta["acceptance_lock"] = {"patch": patch, "sha": sha}
+    meta.pop("needs_relock", None)
     save_meta(meta)
     print(f"{task_id} 驗收測試已鎖定 @ {sha[:7]}")
 
@@ -314,15 +330,37 @@ def evidence_list(task_id: str) -> str:
 
 
 def ruling(task_id: str) -> None:
-    """architect 依契約判定驗收測試對不對。TEST_WRONG 退還 1 次 FAIL（有上限）；之後由 qa 依仲裁修測試、重新 lock。"""
+    """architect 依契約判定驗收測試與 qa 的判定對不對。TEST_WRONG／QA_WRONG 退還 1 次 FAIL（有上限）。"""
     meta = load_meta(task_id)
     if meta.get("rulings", 0) >= MAX_RULINGS:
         raise rulings_exhausted(meta, "要再仲裁一次")
     sha = head_sha(meta)
+    ruled = meta.get("ruling") or {}
+    if ruled.get("sha") == sha and ruled.get("after_fails") == meta.get("qa_fails", 0):
+        # 同一個狀態再仲裁只會白用額度（例：QA_WRONG 後同一個 commit 又 FAIL）；commit 或 FAIL 次數變了才是新狀況
+        raise FlowError(
+            f"{task_id} 在 commit {sha[:7]}、FAIL {meta.get('qa_fails', 0)} 次的狀態已仲裁過（{ruled['result'].upper()}）："
+            "照那次仲裁的下一步做（qa FAIL 就照第 10 步 task.py amend），不用再仲裁；不同意仲裁結果就問甲方"
+        )
     result, body = read_verdict(task_id, "ruling", sha)
+    acceptance = card_paths(task_id, "驗收測試")
+    # qa 剛 FAIL 目前這個 commit：仲裁是 FAIL 觸發的（不是 worker 的 disputes）
+    after_fail = (meta.get("qa") or {}).get("result") == "fail" and meta["qa"]["sha"] == sha
+    if result == "test_wrong" and not acceptance:
+        raise FlowError(f"{task_id} 沒有驗收測試目錄（fast），不能判 TEST_WRONG：qa 判錯是 QA_WRONG，否則 TEST_OK；請 architect 改結果檔")
+    if result == "qa_wrong" and not after_fail:
+        raise FlowError(f"QA_WRONG 只能判 qa 剛 FAIL 的這個 commit（{sha[:7]}）：worker 的 disputes 是 TEST_WRONG 或 TEST_OK；請 architect 改結果檔")
     meta["rulings"] = meta.get("rulings", 0) + 1
     note = f"（第 {meta['rulings']} 次仲裁，上限 {MAX_RULINGS}）"
-    if result == "test_wrong" and meta.get("qa_fails", 0) > 0:
+    changed_after_lock = bool(
+        acceptance and meta.get("acceptance_lock") and not meta.get("needs_relock") and not acceptance_unchanged(meta, acceptance)
+    )
+    if changed_after_lock:
+        # 只警告不擋：sync 衝突動到測試時 lock 要先仲裁，這裡再擋就互等卡死
+        warning = f"驗收測試在 lock（commit {meta['acceptance_lock']['sha'][:7]}）之後被改過，仲裁看的是改過的版本：確認是誰改的，worker 改的要還原"
+        note += f"；警告：{warning}"
+        body = f"> ⚠️ {warning}\n\n{body}"
+    if after_fail and result in ("test_wrong", "qa_wrong") and meta.get("qa_fails", 0) > 0:
         if meta.get("refunds", 0) < MAX_REFUNDS:
             meta["qa_fails"] -= 1
             meta["refunds"] = meta.get("refunds", 0) + 1
@@ -330,9 +368,33 @@ def ruling(task_id: str) -> None:
         else:
             note += f"；退還次數已用完（每張單 {MAX_REFUNDS} 次），FAIL 次數不變"
     meta["ruling"] = {"result": result, "sha": sha, "after_fails": meta.get("qa_fails", 0)}
+    if result == "test_wrong":
+        # 只靠提示 manager 會漏：open／merge 在重新 lock 前拒絕。記仲裁當下的測試，不是上次 lock 的：
+        # 仲裁前 qa「A」可能已經改過測試，跟上次 lock 比會誤以為修過了
+        meta["needs_relock"] = {"patch": acceptance_patch(meta, acceptance)}
+    else:
+        meta.pop("needs_relock", None)  # 最新的仲裁取代前一次（例：TEST_WRONG 誤判，還原後改判 TEST_OK）
     save_meta(meta)
     comment(meta, f"**{LABELS['ruling']}：{result.upper()}**（commit `{sha[:7]}`）\n\n{body.strip()}")
-    next_step = "派 qa 依仲裁修正驗收測試 → pr.py lock" if result == "test_wrong" else "測試沒錯，派回 worker 照測試實作"
+    ruling_file = f"reports/{task_id}.ruling.md"
+    restore = ""
+    if changed_after_lock and result == "test_ok":
+        restore = f"把 lock 之後被改的驗收測試還原成 lock 版本（commit {meta['acceptance_lock']['sha'][:7]}）"
+    if result == "qa_wrong":
+        next_step = "派 qa「B」重新驗證並給仲裁檔路徑（被判不成立的項目不再列為 FAIL；同一個 commit 又 FAIL 就照第 10 步，不用再仲裁）→ pr.py record"
+    elif after_fail:
+        # TEST_WRONG 也可能同時有成立的 FAIL：一律追加，仲裁檔標出哪些不成立
+        next_step = f"照第 10 步 board.py、task.py amend {task_id} --from reports/{task_id}.qa.md {ruling_file}、"
+        if acceptance:
+            fixes = "、".join(x for x in (restore, "修正被判錯的測試" if result == "test_wrong" else "", "把成立的項目補成測試") if x)
+            next_step += f"派 qa「A」依仲裁{fixes}、pr.py lock，"
+        next_step += f"再派回 worker 並給 {ruling_file}"
+    elif result == "test_wrong":
+        next_step = f"派 qa「A」依 {ruling_file} 修正驗收測試 → pr.py lock → 派回 worker 並給 {ruling_file}"
+    elif restore:
+        next_step = f"測試沒錯：派 qa「A」{restore} → 派回 worker 照測試實作並給 {ruling_file}"
+    else:
+        next_step = f"測試沒錯，派回 worker 照測試實作並給 {ruling_file}"
     print(f"{task_id} ruling={result} @ {sha[:7]}{note}；下一步：{next_step}")
 
 
@@ -345,12 +407,24 @@ def record(task_id: str, kind: str) -> None:
     meta[kind] = {"result": result, "sha": sha, "by": "architect" if kind == "review" else "qa"}
     if kind == "qa" and result == "fail":
         meta["qa_fails"] = meta.get("qa_fails", 0) + 1
+        ruled = meta.get("ruling") or {}
+        if ruled.get("result") == "qa_wrong" and ruled.get("sha") == sha:
+            # 同一個 commit 剛仲裁過：剩下的是仲裁沒推翻的問題，不再要求仲裁（否則白用掉一次仲裁額度）
+            ruled["after_fails"] = meta["qa_fails"]
     save_meta(meta)
     comment(meta, f"**{LABELS[kind]}：{result.upper()}**（commit `{sha[:7]}`）\n\n{body.strip()}")
     fails = f"（第 {meta['qa_fails']} 次）" if kind == "qa" and result == "fail" else ""
     print(f"{task_id} {kind}={result} @ {sha[:7]}{fails}")
     if meta.get("qa_fails", 0) >= MAX_QA_FAILS:
         print(f"{task_id} qa 已 FAIL {meta['qa_fails']} 次：不可再重派，問甲方", file=sys.stderr)
+    elif fails and (meta.get("ruling") or {}).get("sha") == sha and meta["ruling"]["after_fails"] == meta["qa_fails"]:
+        print(f"{task_id} 這個 commit 已仲裁過：不用再仲裁，直接照第 10 步 task.py amend（帶 reports/{task_id}.ruling.md）")
+    elif fails and meta["qa_fails"] == RULING_AT_FAILS and (meta.get("ruling") or {}).get("after_fails") != RULING_AT_FAILS:
+        print(
+            f"{task_id} qa 已 FAIL {RULING_AT_FAILS} 次：先派 architect 仲裁驗收測試 → pr.py ruling {task_id}，照它印的下一步做；"
+            "仲裁前不要 task.py amend、派 qa 補測試（會把測試寫錯造成的 FAIL 寫進派工單）",
+            file=sys.stderr,
+        )
 
 
 def approve(task_ids: list[str], body: str) -> None:
@@ -374,6 +448,7 @@ def unblock(task_id: str, body: str) -> None:
     meta["qa_fails"] = 0
     meta["rulings"] = 0
     meta["ruling"] = None  # 舊仲裁對應的是舊的 FAIL 次數，不可沿用
+    meta.pop("needs_relock", None)  # 甲方的決定取代那次仲裁（例：測試不改，照方案繼續）
     save_meta(meta)
     comment(meta, f"**甲方決定繼續**（qa 失敗與仲裁次數歸零）\n\n{body.strip()}")
     print(f"{task_id} 已解除封鎖")

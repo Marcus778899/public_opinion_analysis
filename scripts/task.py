@@ -143,12 +143,34 @@ def check_card(task_id: str, body: str) -> list[str]:
         problems.append("設計類任務（architect／designer）不可走 fast 通道")
     if kind in TDD_KINDS and lane != "fast" and "驗收測試" in fields and not acceptance_paths(fields):
         problems.append(f"{kind} 單要列出「驗收測試」目錄（qa 先寫測試，worker 再實作）")
+    elif kind in TDD_KINDS and lane != "fast" and not any(p.endswith(f"/{task_id}/") for p in acceptance_paths(fields)):
+        # 每張單一個子目錄：同一端平行的單不會改到同一個測試檔，重疊檢查也不會把共用的上層目錄當成衝突
+        problems.append(f"「驗收測試」要有這張單自己的子目錄，例 `api/tests/acceptance/{task_id}/`（共用 fixture 放上層，由骨架建好）")
     lines = [line for line in body.splitlines() if line.strip()]
     if len(lines) > MAX_CARD_LINES:
         problems.append(f"派工單 {len(lines)} 行，上限 {MAX_CARD_LINES}；背景改用引用（見 docs/... §N），不要重講契約")
     if len(fields.get("背景", [])) > MAX_BACKGROUND_LINES:
         problems.append(f"背景超過 {MAX_BACKGROUND_LINES} 行")
     return problems
+
+
+def paths_overlap(a: str, b: str) -> bool:
+    """同一個檔，或一邊是另一邊所在的目錄（以 / 結尾）。"""
+    return a == b or (a.endswith("/") and b.startswith(a)) or (b.endswith("/") and a.startswith(b))
+
+
+def overlapping_tasks(paths: list[str]) -> list[str]:
+    """進行中（沒合併、沒作廢）的單裡，負責檔案或驗收測試跟 paths 重疊的；平行開工時同時改同一個檔會衝突。"""
+    hits = []
+    for meta_file in sorted(TASKS_DIR.glob("*.meta.json")):
+        meta = load_meta(meta_file.name.removesuffix(".meta.json"))
+        if meta.get("merged") or meta.get("cancelled"):
+            continue
+        theirs = card_paths(meta["task_id"], "負責檔案") + card_paths(meta["task_id"], "驗收測試")
+        shared = sorted({p for p in paths for q in theirs if paths_overlap(p, q)})
+        if shared:
+            hits.append(f"{meta['task_id']}（{'、'.join(f'`{p}`' for p in shared)}）")
+    return hits
 
 
 def exclude_shared_paths() -> None:
@@ -192,6 +214,13 @@ def new_card(task_id: str, body: str) -> None:
     problems = check_card(task_id, body)
     if problems:
         raise FlowError("；".join(problems))
+    fields = parse_fields(body)
+    overlaps = overlapping_tasks(field_paths(fields, "負責檔案") + acceptance_paths(fields))
+    if overlaps:
+        raise FlowError(
+            "負責檔案或驗收測試跟進行中的單重疊：" + "；".join(overlaps)
+            + "。同時改會衝突：等那張合併再開，或請 architect 重新拆單"
+        )
     require_on_base()
     pending_docs = run("git", "status", "--porcelain", "--", *DISPATCH_DOCS)
     if pending_docs:
@@ -204,7 +233,6 @@ def new_card(task_id: str, body: str) -> None:
     if deps_outdated():
         raise FlowError("develop 的相依檔跟主目錄環境不一致（有單改了相依）：先 check_env.py setup 重裝，worktree 共用這份環境")
 
-    fields = parse_fields(body)
     kind = fields["類型"][0]
     title = fields["目標"][0]
     heading = f"# 派工單 {task_id}"
@@ -273,6 +301,11 @@ def amend_card(task_id: str, body: str) -> None:
     if not body.strip():
         raise FlowError("追加內容是空的")
     meta = load_meta(task_id)
+    from pr import MAX_QA_FAILS, require_ruling  # pr 會 import task，放這裡避免循環
+
+    if meta.get("qa_fails", 0) >= MAX_QA_FAILS:
+        raise FlowError(f"{task_id} qa 已 FAIL {meta['qa_fails']} 次：先照甲方關卡處理，甲方決定繼續後 pr.py unblock 再追加")
+    require_ruling(meta)  # 該仲裁還沒仲裁就追加，會把測試或 qa 判錯造成的 FAIL 寫進派工單，還用掉這一輪唯一一次追加
     sha = run("git", "rev-parse", meta["branch"])
     if meta.get("amend_sha") == sha:
         raise FlowError(

@@ -17,7 +17,7 @@ model: opus
 
 ## 甲方關卡（甲方用 auto 模式，這些由程式與權限硬擋，不可繞過）
 
-- `init_project.py`、`pr.py approve`、`pr.py unblock`、`release.py` 一定會跳確認給甲方，**確認視窗就是核可本身**：先在對話裡講清楚要核可什麼、問完待決定；甲方回覆後直接執行（沒有待決定就直接執行），不要再要甲方打字確認一次。甲方按允許才算數，按拒絕就問要改什麼
+- `init_project.py`、`pr.py approve`、`pr.py unblock`、`release.py finish` 一定會跳確認給甲方，**確認視窗就是核可本身**：先在對話裡講清楚要核可什麼、問完待決定；甲方回覆後直接執行（沒有待決定就直接執行），不要再要甲方打字確認一次。甲方按允許才算數，按拒絕就問要改什麼
 - 甲方只核可決策（D-編號）與設計：architect／designer 負責的 docs 類任務只能用 `pr.py approve` 核可，`pr.py merge` 會檢查；fix、chore 等其他任務一律走 qa＋architect review，不找甲方核可
 - `.env` 沒填齊時 `task.py new` 會拒絕開單
 - qa FAIL 達 3 次 `pr.py open` 會拒絕；第 2 次 FAIL 後要先有 architect 對驗收測試的仲裁才能再 open；每張單最多仲裁 2 次，還要仲裁就問甲方（同樣 `pr.py unblock`）
@@ -41,12 +41,13 @@ model: opus
 3. architect／designer 列的「需調查」→ 派 researcher，結果交回原角色修訂；「待決定」先過濾：不屬於 CLAUDE.md「決策分級」四類的，退回原角色自己決定（寫進「自行決定」表），不開 D-編號；其餘寫進 `docs/decisions.md` 待決定區，一次問甲方
 4. `pr.py open`（程式檢查沒改到負責檔案以外）→ 派 qa 確認檢查沒被弄壞 → `pr.py record <id> qa`
 5. 把設計摘要、設計稿路徑（請甲方用瀏覽器打開）、「自行決定」表（甲方有意見可以直接改）、待決定交給甲方，並說明「回覆待決定後我會直接送核可，跳出的確認視窗按允許＝核可設計」；甲方回覆 → 決策移到已決定區、`board.py decision add` → 同階段的設計單一次核可 `pr.py approve <id> <id>…`（內容寫核可了哪些 D-編號；只跳一次確認）→ `pr.py merge`。甲方的回覆有疑問或要改設計時才不送核可
-6. 依設計的派工順序寫實作派工單（frontend 的設計依據要列 UI 規格與設計稿；feat／fix 要寫「驗收測試」目錄，見設計文件）→ `task.py new`
+6. 依設計的派工順序寫實作派工單（frontend 的設計依據要列 UI 規格與設計稿；feat／fix 要寫「驗收測試」：設計文件的驗收測試目錄底下這張單自己的子目錄 `<task_id>/`）→ `task.py new`
 7. 先派 qa「A. 寫驗收測試」→ 確認分支上有 `test(<id>)` commit、測試失敗 → `pr.py lock <id>` 鎖定驗收測試 → 再派 worker，只給派工單路徑。同一條分支、同一個 PR，不另開測試單
+    - 平行：派工順序標為可平行的單，一批最多 3 張一起開工（qa「A」、worker 同時派、背景跑）；負責檔案或驗收測試跟進行中的單重疊，`task.py new` 會擋，等那張合併再開。各單完成後照完成順序各自走 8～11，merge 一次一張，後合併的照 11 sync
 8. worker 回報（有 `disputes` 就先走 10 的仲裁）→ `pr.py open` → 派 qa（給派工單、回報、worktree 路徑）→ 派 qa「B. 驗證」→ `pr.py record <id> qa`（結論由程式從 qa 的證據檔讀，你不用轉述）
 9. qa PASS → 派 architect review PR → `pr.py record <id> review`
-10. FAIL 或 changes：`board.py task set <id> qa-fail`、`task.py amend <id> --from reports/<id>.qa.md`（有 review 結果就一起列；甲方臨時的意見加 `-` 從 stdin 補）把這一輪的所有問題合併成一次追加（一輪只能一次，task.py 會擋；證據檔直接帶入，不要自己重打）→ qa FAIL 的問題先派 qa「A」補成測試、重新 `pr.py lock` → 派回原 worker，回到 8；`pr.py open` 拒絕（FAIL 達 3 次）就照「甲方關卡」處理，甲方決定繼續後 `pr.py unblock <id>`
-    - 仲裁：worker 回報 `disputes`，或 `pr.py open` 要求（qa FAIL 第 2 次）→ 派 architect「仲裁驗收測試」→ `pr.py ruling <id>` → `TEST_WRONG` 派 qa「A」依仲裁修測試、重新 `pr.py lock`，`TEST_OK` 派回 worker 並給仲裁檔路徑（`pr.py lock` 會擋到仲裁完才能重派）。不要自己判斷測試對不對
+10. FAIL 或 changes：qa FAIL 第 2 次先走下面的仲裁（`pr.py record` 會提示，`task.py amend` 也會擋），判 `TEST_WRONG`／`TEST_OK` 才接著做這一步；`board.py task set <id> qa-fail`、`task.py amend <id> --from reports/<id>.qa.md`（剛仲裁過就加 `reports/<id>.ruling.md`，讓 qa 與 worker 看到哪些項目不成立；有 review 結果就一起列；甲方臨時的意見加 `-` 從 stdin 補）把這一輪的所有問題合併成一次追加（一輪只能一次，task.py 會擋；證據檔直接帶入，不要自己重打）→ qa FAIL 的問題先派 qa「A」補成測試、重新 `pr.py lock`（fast 單沒有這步）→ 派回原 worker，回到 8；`pr.py open` 拒絕（FAIL 達 3 次）就照「甲方關卡」處理，甲方決定繼續後 `pr.py unblock <id>`
+    - 仲裁：worker 回報 `disputes`，或 qa FAIL 第 2 次（`pr.py record` 提示；漏了 `lock`／`open` 也會擋）→ 派 architect「仲裁驗收測試」→ `pr.py ruling <id>`，照它印的下一步：qa FAIL 觸發的 `TEST_WRONG`／`TEST_OK` 都做上面第 10 步（qa「A」依仲裁修錯的測試、補成立項目的測試，`pr.py lock` 會擋到仲裁完才能重派）；`QA_WRONG`（qa 列的 FAIL 全部不成立，測試不用改）派 qa「B」重新驗證並給仲裁檔路徑（同一個 commit 又 FAIL 就直接做第 10 步，不用再仲裁，`pr.py ruling` 也會擋）；disputes 觸發的 `TEST_WRONG` 派 qa「A」依仲裁修測試、重新 `pr.py lock`（沒重新 lock，`open`／`merge` 會擋）→ 派回 worker，`TEST_OK` 直接派回 worker；都給仲裁檔路徑。不要自己判斷測試對不對
 11. `pr.py merge <id>`（程式檢查分支已含最新 develop、qa、review 都對應最新 commit、範圍與驗收測試鎖、CI 綠——含改到的程式碼覆蓋率）；一次合併一張
     - 拒絕說要 sync：`pr.py sync <id>`。任務 diff 沒變會沿用 qa／review，等 CI 綠再 merge；diff 變了回到 8 的 qa；有衝突派原 worker 解衝突並 commit，回到 8；衝突包含驗收測試時，先派 qa 確認測試沒被改壞再 `pr.py lock`
     - CI 的覆蓋率步驟沒過：不到 80% → `task.py amend` 帶 CI 輸出的未覆蓋行號，請原 worker 補測試，回到 8；改到的檔案不在報告裡 → 是新檔沒測試就同樣請 worker 補，是報告沒產出、路徑對不上或該排除的檔，派 architect 修 `make coverage` 或 `.coverage-exempt`
@@ -69,7 +70,7 @@ model: opus
 3. 修完後派 uat 重測失敗的情境
 4. 派 security 做發版前資安審查 → `docs/security/<版本>.md` → `docs.py commit`；FAIL（有 critical／high）就開 fix 單修完、合併後再派 security 重審；medium／low 開 `gh issue create --label backlog` 列給甲方。`release.py open` 會檢查報告是 PASS、且審查之後程式沒再變
 5. 更新 README（功能表、版本表）→ `docs.py commit`
-6. 請甲方照「甲方驗收清單」親手勾選並寫 `甲方驗收：PASS`
+6. 請甲方照「甲方驗收清單」親手勾選並寫 `甲方驗收：PASS` → `docs.py commit`（`release.py open` 要求主目錄沒有未提交的修改）
 7. `release.py open <版本>` → CI 綠後 `release.py finish <版本>`：發版後自動封存布告欄到 `tasks/<版本>.md`、本階段派工單到 `tasks/<版本>/` 並提交；新布告欄沿用已定案決策與注意事項，下一階段從 `board.py scope` 開始
 8. 不發版的里程碑（主題）結束：`board.py archive <主題名>` → `docs.py commit`
 
