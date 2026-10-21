@@ -1,7 +1,7 @@
 # 即時輿情雷達：設計草案
 
 > 狀態：實作中（階段 1～4 已驗收；階段 5 MVP 待 3 天驗收；進度見開發規格第 6 章）
-> 最後更新：2026-10-17
+> 最後更新：2026-10-21（階段 8 規劃：shadow 推論、模型包，開發規格 7.27）
 >
 > 本文件需與程式同步：改動資料流、表、topic、訊息格式時先更新這裡（CLAUDE.md）。
 
@@ -123,6 +123,7 @@
 | `cdc.public.comments` | Debezium | ClickHouse、熱度偵測 | 3 | 7～14 天 |
 | `labels` | 標註 | ClickHouse | 3 | 30 天 |
 | `predictions` | 推論 | ClickHouse | 3 | 30 天 |
+| `predictions.shadow` | shadow 推論（8.4） | ClickHouse | 3 | 30 天 |
 | `alerts` | 熱度偵測 | Telegram bot、ClickHouse | 1 | 7 天 |
 | `dlq` | 各 consumer | 人工檢查 | 1 | 30 天 |
 
@@ -446,6 +447,7 @@ ClickHouse 的 `AvroConfluent` 格式能直接讀 Apicurio 序列化的訊息，
 | `comments_latest` | `ReplacingMergeTree(lsn, is_deleted)` | `cdc.public.comments` | 每分鐘新增推文數；多一個 `board` 欄位（從 `post_id` 取出，PG 的 `comments` 沒有），依看板統計時不必 join；PG 端的改寫、刪除以 LSN 取代，`is_deleted` 來自 `__deleted`，查詢加 `FINAL` 才會去掉已刪除的列 |
 | `labels` | `MergeTree` | `labels` | 標註結果；一則訊息的 `sentiments` 以 `ARRAY JOIN` 攤成一列一個 (target, polarity)（15.3） |
 | `predictions` | `MergeTree` | `predictions` | 推論結果（含 `model_version`） |
+| `predictions_shadow` | `MergeTree` | `predictions.shadow` | shadow 推論結果，結構同 `predictions`；只供模型比較，呈現層不讀（8.4） |
 | `alerts` | `MergeTree` | `alerts` | 警示紀錄 |
 | `post_votes`（view） | 一般 view | `comments_latest` | 每篇文章的 `post_id`、`board`、`push`、`boo`、`arrow`（`FINAL`、不含已刪除推文）；dashboard 用（開發規格 7.25） |
 | `post_sentiment_latest`（view） | 一般 view | `predictions` | 每篇最新一筆推論的 `post_id`、`model_version`、`polarity`、`score`（三類最高分，`argMax(…, predicted_at)`）；沒有推論的文章不出現 |
@@ -524,7 +526,7 @@ Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED
 ### 7.5 模型路線
 
 1. Baseline：TF-IDF + Logistic Regression
-2. 進階：fine-tune 中文 BERT（Kaggle / Colab 免費 GPU 訓練，CPU 推論）
+2. 進階：fine-tune 中文 BERT（Kaggle / Colab 免費 GPU 訓練，CPU 推論）：agent 準備 notebook，甲方執行並交回模型包（D-019）；模型包格式與流程見開發規格 7.27
 3. 比較兩版與 LLM 標註的準確率、成本
 
 ### 7.6 訓練頻率
@@ -554,6 +556,7 @@ Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED
   - Connect 重啟重送的 `op=c` 事件，hash 相同也不會重複推論
 - 刪除的文章（`is_deleted`）不推論
 - 模型檔不進 image：compose 以唯讀方式掛載 `models/`，模型版本由環境變數指定
+- 模型格式由 `model_card.json` 的 `kind` 區分（baseline 為 sklearn，BERT 為 ONNX），推論與評估經同一個 `Classifier` 介面載入（開發規格 7.27）
 - **呈現**：Telegram（警示、熱門、看板概況，9.2）與 Dashboard（9.1）讀 ClickHouse `predictions` 每篇最新一筆；信心不足顯示「不確定」（15.8）
 
 ### 8.3 熱度偵測
@@ -570,8 +573,10 @@ Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED
 
 ### 8.4 Shadow 比較
 
-- 新版模型使用新的 consumer group，與舊版並行
-- 結果以 `model_version` 區分，在 ClickHouse 比較
+- 新版模型由另一個推論服務（`inference-shadow`）執行，使用新的 consumer group（每個模型版本一個），與舊版並行
+- shadow 寫到 `predictions.shadow` → ClickHouse `predictions_shadow`，不寫 `predictions`：呈現層取每篇最新一筆時不分版本，shadow 結果混進去會改變使用者看到的情緒
+- 兩表以 `model_version` 區分，在 ClickHouse 比較一致率、不一致的文章、推論延遲與信心分布；人工測試集的分數離線評估（開發規格 7.27）
+- 切換預設模型只改現行推論服務的模型版本，呈現層不必改
 
 ---
 
@@ -633,12 +638,13 @@ Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、�
 │   │   │   ├── testset.py   # [一次性] 人工測試集
 │   │   │   └── human_app.py # [本機] 人工標註頁
 │   │   ├── experiments/     # [一次性] push_ratio（推噓比弱標註實驗）
-│   │   ├── training/        # [一次性] export / train / evaluate
+│   │   ├── training/        # [一次性] export / train / evaluate / import_model / compare；classifier（sklearn、ONNX 共用介面）
 │   │   └── inference/main.py  # [常駐]
 │   ├── streaming/
 │   │   ├── heat.py          # [常駐] Quix Streams
 │   │   └── replay.py        # [一次性] 錄製、回放、人工暴增
 │   └── bot/                 # [常駐] Telegram bot：main（long polling、推送）、views（訊息與按鈕）、callbacks、stats（ClickHouse 查詢）
+├── notebooks/               # 甲方在 Colab／Kaggle 執行的 BERT fine-tune notebook（開發規格 7.27）
 ├── infra/
 │   ├── docker-compose.yaml
 │   ├── debezium/
@@ -652,8 +658,9 @@ Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、�
 
 | 類型 | 程式 | 執行方式 |
 |---|---|---|
-| 常駐 | api、scheduler、crawler、ingest、cdc/watchdog、labeling/stream、inference、heat、bot | docker-compose service |
-| 一次性 | labeling/backfill、manual、cross_check、testset、experiments/*、training/*、inference/backfill_hash、streaming/replay | 手動執行或 Colab |
+| 常駐 | api、scheduler、crawler、ingest、cdc/watchdog、labeling/stream、inference（含 shadow）、heat、bot | docker-compose service |
+| 一次性 | labeling/backfill、manual、cross_check、testset、experiments/*、training/*、inference/backfill_hash、streaming/replay | 手動執行 |
+| Colab／Kaggle | `notebooks/bert_finetune.ipynb` | 甲方在 GPU 平台執行，交回模型包（D-019） |
 | 本機 | labeling/human_app | 人工標註時執行，只綁 127.0.0.1 |
 
 不使用系統 cron，定時行為都在常駐程式內用 APScheduler 處理。
@@ -668,6 +675,7 @@ Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、�
 | `apicurio-db-init`、`apicurio`、`connect`、`clickhouse` | （預設） | 階段 2 起屬於資料流的一部分，`make up` 一併啟動；`apicurio-db-init` 是一次性服務 |
 | `label-stream` | `labeling` | 串流抽樣標註，會持續呼叫 LLM API，`make up-labeling` 才啟動 |
 | `inference` | `inference` | 情緒推論（8.2），需要先訓練好模型；`make up-inference` 才啟動，以唯讀方式掛載 `models/` |
+| `inference-shadow` | `shadow` | shadow 推論（8.4），模型版本與現行不同；`make up-shadow` 才啟動，比較結束就停 |
 | `heat`、`bot` | `alerting` | 熱度偵測（8.3）與 Telegram bot（9.2）；bot 需要 `TELEGRAM_BOT_TOKEN`，`make up-alerting` 才啟動；heat 的 RocksDB 掛 volume `heat_state` |
 | `grafana` | （預設） | Dashboard（開發規格 7.25）：只綁 `127.0.0.1:${GRAFANA_PORT}`、需登入，以唯讀帳號查 ClickHouse；`infra/grafana/Dockerfile` 建置時裝好 ClickHouse plugin，datasource 與 dashboard 以 provisioning 載入，資料放 volume `grafana_data` |
 | `kafka-ui` | （預設） | 開發期間預設啟動（http://localhost:8089，只綁本機），部署前移除（S9-06） |
@@ -703,6 +711,7 @@ Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、�
 | Kafka UI | ~0.3GB |
 | Grafana | ~0.1～0.2GB |
 | 自寫 Python 服務 | ~1～1.5GB |
+| shadow 推論（BERT，階段 8 比較期間） | 未實測；BERT-base fp32 權重推估約 0.44GB，實測與上限見開發規格 7.27 |
 | **合計** | **約 6～7GB** |
 
 ### 11.2 吞吐量
