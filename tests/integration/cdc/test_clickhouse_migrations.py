@@ -162,19 +162,27 @@ def test_json_topic_rows_land_in_target_tables(kafka, ch):
         )
     producer.flush(10)
 
-    _wait_rows(ch, "labels", 2)
-    _wait_rows(ch, "predictions", 1)
+    _wait_rows(ch, "labels WHERE post_id = 'Stock.M.1.A.1'", 2)
+    _wait_rows(ch, "predictions WHERE post_id = 'Stock.M.1.A.1'", 1)
     # NOTE: heat 測試也會寫 alerts topic，所以只看這則訊息的 unit_key
     _wait_rows(ch, "alerts WHERE unit_key = 'Stock.M.1.A.1'", 1)
 
-    assert sorted(_query(ch, "SELECT ifNull(target, '<whole>'), polarity FROM labels")) == [
+    assert sorted(
+        _query(
+            ch,
+            "SELECT ifNull(target, '<whole>'), polarity FROM labels "
+            "WHERE post_id = 'Stock.M.1.A.1'",
+        )
+    ) == [
         ["<whole>", "negative"],
         ["台積電", "positive"],
     ]
     # 0004 之前的訊息沒有 text_hash，存成空字串（開發規格 3.5）
-    assert _query(ch, "SELECT predicted_at, scores['negative'], text_hash FROM predictions") == [
-        ["2026-10-07 06:00:00.123456", "0.7", ""]
-    ]
+    assert _query(
+        ch,
+        "SELECT predicted_at, scores['negative'], text_hash FROM predictions "
+        "WHERE post_id = 'Stock.M.1.A.1'",
+    ) == [["2026-10-07 06:00:00.123456", "0.7", ""]]
     sql = "SELECT unit_key, window_end, zscore FROM alerts WHERE unit_key = 'Stock.M.1.A.1'"
     assert _query(ch, sql) == [["Stock.M.1.A.1", "2026-10-07 06:00:00.000000", "7.4"]]
 
