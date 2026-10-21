@@ -55,6 +55,12 @@ def confirmed_flush_lsn(engine: Engine, slot: str) -> int:
         )
 
 
+def current_wal(conn) -> int:
+    return int(
+        conn.execute(text("SELECT pg_wal_lsn_diff(pg_current_wal_lsn(), '0/0')")).scalar_one()
+    )
+
+
 def test_read_slot_missing_returns_none(logical_pg):
     with logical_pg.connect() as conn:
         assert read_slot(conn, "no_such_slot") is None
@@ -72,7 +78,7 @@ def test_read_slot_unconsumed_slot_is_inactive_and_lag_grows_with_writes(logical
     assert after.lag_bytes > before.lag_bytes + 500 * 1000
 
 
-def test_read_slot_after_consuming_changes_lag_drops(logical_pg, slot):
+def test_read_slot_after_consuming_changes_lag_measured_from_confirmed_flush(logical_pg, slot):
     write_rows(logical_pg, 500)
     with logical_pg.connect() as conn:
         lagging = read_slot(conn, slot)
@@ -82,10 +88,15 @@ def test_read_slot_after_consuming_changes_lag_drops(logical_pg, slot):
             text("SELECT count(*) FROM pg_logical_slot_get_changes(:s, NULL, NULL)"), {"s": slot}
         )
     with logical_pg.connect() as conn:
+        wal_before = current_wal(conn)
         consumed = read_slot(conn, slot)
+        wal_after = current_wal(conn)
+    flushed_after = confirmed_flush_lsn(logical_pg, slot)
 
     assert lagging is not None and consumed is not None
     # NOTE: lag 含整個 cluster 的 WAL，平行時別的 worker 也在寫（#117），
     # NOTE: 所以斷言自己 slot 的 confirmed_flush_lsn 前進量，不比 lag 的絕對值
-    assert confirmed_flush_lsn(logical_pg, slot) - flushed_before > 400_000
+    assert flushed_after - flushed_before > 400_000
+    # NOTE: 其他 worker 的寫入只會同時推高上下界，lag 仍夾在自己 slot 的位置之間
+    assert wal_before - flushed_after <= consumed.lag_bytes <= wal_after - flushed_after
     assert consumed.active is False
