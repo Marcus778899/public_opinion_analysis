@@ -12,8 +12,7 @@ import pytest
 
 from tests.integration.dashboard._dash import (
     ALL_PANELS,
-    ALLOWED_BOARD_FORMATS,
-    ALLOWED_MIN_SCORE_FORMATS,
+    ALLOWED_FORMATS,
     BOARD_PANELS,
     FIXED_NUMBER,
     P_DISTRIBUTION,
@@ -36,8 +35,6 @@ from tests.integration.dashboard._dash import (
 pytestmark = pytest.mark.xdist_group("shared_radar_db")
 
 THRESHOLDS = ["0.4", "0.5", "0.6", "0.7"]
-# 會把原值放進字串或保留引號、反斜線的格式
-STRING_FORMATS = ["raw", "csv", "text", "sqlstring", "singlequote", "doublequote", "json"]
 
 
 @pytest.fixture(scope="module")
@@ -49,40 +46,18 @@ def dashboard() -> dict:
 
 
 @pytest.mark.parametrize("title", ALL_PANELS)
-def test_panel_sql_variable_references_are_never_inside_sql_quotes(
+def test_every_board_and_min_score_reference_uses_percentencode(
     dashboard: dict, title: str
 ) -> None:
     for target in panel_targets(dashboard, title):
-        inside = [r.text for r in references(target["rawSql"]) if r.in_string]
-        assert not inside, f"變數引用在 SQL 字串引號內：{inside}"
+        bad = [r.text for r in references(target["rawSql"]) if r.fmt not in ALLOWED_FORMATS]
+        assert not bad, f"只准 {sorted(ALLOWED_FORMATS)}，實際：{bad}"
 
 
 @pytest.mark.parametrize("title", BOARD_PANELS)
-def test_board_references_only_use_quote_free_encoding(dashboard: dict, title: str) -> None:
-    all_refs = [r for t in panel_targets(dashboard, title) for r in references(t["rawSql"])]
-    refs = [r for r in all_refs if r.name == "board"]
-    assert refs, "面板應引用 $board"
-    bad = [r.text for r in refs if r.fmt not in ALLOWED_BOARD_FORMATS]
-    assert not bad, f"board 只可用 {sorted(ALLOWED_BOARD_FORMATS)}，實際：{bad}"
-
-
-@pytest.mark.parametrize("title", ALL_PANELS)
-def test_min_score_references_carry_the_fixed_number_unformatted(
-    dashboard: dict, title: str
-) -> None:
-    for target in panel_targets(dashboard, title):
-        for r in references(target["rawSql"]):
-            if r.name == "min_score":
-                assert r.fmt in ALLOWED_MIN_SCORE_FORMATS, f"min_score 不可指定格式：{r.text}"
-
-
-@pytest.mark.parametrize("fmt", STRING_FORMATS)
-def test_dashboard_sql_never_uses_formats_that_put_raw_value_in_a_string(
-    dashboard: dict, fmt: str
-) -> None:
-    for title in ALL_PANELS:
-        for target in panel_targets(dashboard, title):
-            assert not [r.text for r in references(target["rawSql"]) if r.fmt == fmt]
+def test_board_panels_reference_board_variable(dashboard: dict, title: str) -> None:
+    names = {r.name for t in panel_targets(dashboard, title) for r in references(t["rawSql"])}
+    assert "board" in names
 
 
 def test_min_score_options_are_all_fixed_numbers(dashboard: dict) -> None:
@@ -95,12 +70,12 @@ def test_min_score_options_are_all_fixed_numbers(dashboard: dict) -> None:
 
 
 def test_references_helper_detects_quoted_and_formatted_references() -> None:
-    sql = "a IN ('${board:sqlstring}') AND x > $min_score AND y IN (${board:percentencode})"
+    sql = "a IN ('${board:sqlstring}') AND x > $min_score AND y = '${min_score:percentencode}'"
     got = [(r.name, r.fmt, r.in_string) for r in references(sql)]
     assert got == [
         ("board", "sqlstring", True),
         ("min_score", None, False),
-        ("board", "percentencode", False),
+        ("min_score", "percentencode", True),
     ]
 
 

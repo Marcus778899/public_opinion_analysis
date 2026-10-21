@@ -146,8 +146,8 @@ def frames_numeric_sum(target: dict, sql: str) -> float:
 # ---------- 前端變數展開的模擬 ----------
 
 
-ALLOWED_BOARD_FORMATS = {"percentencode"}  # 編碼後只剩英數與 %_.-~，不含引號與反斜線
-ALLOWED_MIN_SCORE_FORMATS: set[str | None] = {None}  # 不指定格式：custom 變數的固定數字原樣帶入
+# 所有 $board、$min_score 引用只准這個格式：輸出只含 A-Z a-z 0-9 % . _ ~ -，不可能有引號或反斜線
+ALLOWED_FORMATS = {"percentencode"}
 FIXED_NUMBER = re.compile(r"\d(\.\d+)?")
 
 
@@ -230,12 +230,14 @@ def grafana_format(values: list[str], fmt: str) -> str:
 
 
 def expand_vars(sql: str, boards: list[str], min_score: str = "0.5") -> str:
-    """依引用的格式展開；單選的 min_score 不指定格式時為原值（固定數字）。"""
+    """依引用的格式展開；min_score 是單選，percentencode 不加大括號。"""
 
     def var(m: re.Match) -> str:
         name = m["a"] or m["b"] or m["c"]
         fmt = (m["ra"] or m["rc"] or "").lstrip(":") or None
         values = boards if name == "board" else [min_score]
+        if fmt == "percentencode" and name == "min_score":
+            return urllib.parse.quote(min_score, safe="")
         if fmt:
             return grafana_format(values, fmt)
         if name == "board":

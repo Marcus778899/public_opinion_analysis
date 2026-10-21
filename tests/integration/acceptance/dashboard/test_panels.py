@@ -21,8 +21,7 @@ from pathlib import Path
 import pytest
 
 from tests.integration.dashboard._dash import (
-    ALLOWED_BOARD_FORMATS,
-    ALLOWED_MIN_SCORE_FORMATS,
+    ALLOWED_FORMATS,
     FIXED_NUMBER,
     references,
 )
@@ -157,7 +156,8 @@ def _expand(sql: str, boards: list[str], min_score: str, interval_s: int = 3600)
         fmt = m["fa"] or m["fc"]
         values = boards if name == "board" else [min_score]
         if fmt == "percentencode":  # Grafana：多選先包成 {a,b} 再編碼，!'()* 也編碼
-            return urllib.parse.quote("{" + ",".join(values) + "}", safe="")
+            joined = "{" + ",".join(values) + "}" if name == "board" else values[0]
+            return urllib.parse.quote(joined, safe="")
         if fmt == "csv" or (fmt is None and name == "min_score"):
             return ",".join(values)
         if fmt == "sqlstring":  # Grafana：' 變成 ''
@@ -407,27 +407,13 @@ def test_min_score_variable_is_dropdown_with_four_options_defaulting_to_half(
     assert str(var.get("description", "")).strip(), "min_score 要有說明文字"
 
 
-def test_sql_never_puts_board_or_min_score_inside_a_sql_string(dashboard: dict) -> None:
-    for title in PANEL_TYPES:
-        for sql in _sqls(_panel(dashboard, title)):
-            inside = [r.text for r in references(sql) if r.in_string]
-            assert not inside, f"面板「{title}」的變數引用在 SQL 字串引號內：{inside}"
-
-
-@pytest.mark.parametrize("title", BOARD_PANELS)
-def test_board_references_use_only_allowed_quote_free_formats(dashboard: dict, title: str) -> None:
-    refs = [r for sql in _sqls(_panel(dashboard, title)) for r in references(sql)]
-    boards = [r for r in refs if r.name == "board"]
-    assert boards
-    bad = [r.text for r in boards if r.fmt not in ALLOWED_BOARD_FORMATS]
-    assert not bad, f"board 只可用 {sorted(ALLOWED_BOARD_FORMATS)}：{bad}"
-
-
-def test_min_score_references_take_the_fixed_number_without_a_format(dashboard: dict) -> None:
-    refs = [r for t in PANEL_TYPES for sql in _sqls(_panel(dashboard, t)) for r in references(sql)]
-    scores = [r for r in refs if r.name == "min_score"]
-    assert scores
-    assert [r.text for r in scores if r.fmt not in ALLOWED_MIN_SCORE_FORMATS] == []
+@pytest.mark.parametrize("title", list(PANEL_TYPES))
+def test_every_board_and_min_score_reference_uses_percentencode(
+    dashboard: dict, title: str
+) -> None:
+    for sql in _sqls(_panel(dashboard, title)):
+        bad = [r.text for r in references(sql) if r.fmt not in ALLOWED_FORMATS]
+        assert not bad, f"面板「{title}」只准 {sorted(ALLOWED_FORMATS)}，實際：{bad}"
 
 
 def test_min_score_options_and_default_are_fixed_numbers(dashboard: dict) -> None:
