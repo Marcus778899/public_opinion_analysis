@@ -1,0 +1,27 @@
+{
+ "task_id": "integration-flaky-tests",
+ "status": "done",
+ "files_changed": [
+  "tests/integration/conftest.py",
+  "tests/integration/common/test_producer_partition.py",
+  "tests/integration/common/test_topics_apply.py",
+  "tests/integration/cdc/test_slot.py",
+  "tests/integration/acceptance/dashboard/test_views.py",
+  "tests/integration/acceptance/dashboard/test_panels.py",
+  "docs/development-spec.md"
+ ],
+ "verification": {
+  "command": "make check; docker compose --env-file .env -f .worktrees/integration-flaky-tests/compose.yaml run --rm test (x3 on fresh stack, then pytest tests/integration -n 0 -q), then down -v",
+  "exit_code": 0,
+  "tail": "make check: 1114 passed. compose run 1: 329 passed in 217.45s; run 2: 329 passed in 89.11s; run 3: 329 passed in 143.83s; -n 0: 329 passed in 153.85s; down -v done; 追加後：make check 1114 passed；全新堆疊 cdc/test_slot.py -n 8: 3 passed、-n 0: 3 passed；down -v 完成（全套 3 連跑為追加前的結果，追加只動 test_slot 與文件）"
+ },
+ "open_questions": [
+  "根因 #110：topic create 回來時 metadata（partition leader）尚未傳播，producer.partition_count/送出撞 UNKNOWN_TOPIC_OR_PART；修法：測試用 wait_until 等 3 個 partition 都有 leader 才送（conftest 新增 wait_until fixture）。src 不變",
+  "根因 #126：create_partitions 回來時 list_topics 仍回舊 metadata，partitions 為 3 而非 4（不是 src 的 bug，src 的 apply_plan 沒等待是設計）；修法：wait_until 等 fetch_existing 看到新數量，再斷言",
+  "根因 #111：acceptance/dashboard 兩檔在 radar DB 放種子但沒分組，會被 cdc 模組 TRUNCATE；修法：補 pytestmark xdist_group(shared_radar_db)，更新 docstring 與開發規格 7.26",
+  "根因 #117：read_slot 的 lag 含整個 cluster WAL，其他 worker 寫入使其不降反升；修法：消費後改斷言自己 slot 的 confirmed_flush_lsn 前進 >400KB（pg_wal_lsn_diff），不比 lag 絕對值；lag 增長那條本來就單調，不動",
+  "環境：第一次 3 輪嘗試時主機 Docker 同時跑 radar 開發堆疊(19 容器)與 bot-skip-alert-log，clickhouse 被 OOM(137)、kafka unhealthy，出現 test_crawler_kafka、test_kafka_roundtrip 等無關失敗（共 42 個，皆為連線失敗）；down -v 後重跑全過。已不計入 3 次連跑。這些無關測試在記憶體吃緊時有負載敏感性，未另開 issue",
+  "PR 的 CI 全綠尚未確認（我不 push，需 manager 處理）",
+  "review 退回修正（0d62e95）：①test_slot 消費後補回 read_slot lag 斷言：同連線讀 read_slot 前後的 pg_current_wal_lsn（w1、w2）與自己 slot 的 confirmed_flush_lsn（c），斷言 w1-c <= lag <= w2-c，並保留 confirmed_flush_lsn 前進>400KB；②測試改名 test_read_slot_after_consuming_changes_lag_measured_from_confirmed_flush；③開發規格舊句加註已取代並更新新條目。無 sleep／retry／xdist_group"
+ ]
+}

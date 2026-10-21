@@ -1,0 +1,18 @@
+{
+  "task_id": "it-helper-mv-filter",
+  "status": "done",
+  "files_changed": [
+    "tests/helpers/clickhouse.py",
+    "tests/unit/helpers/__init__.py",
+    "tests/unit/helpers/test_clickhouse_helper.py"
+  ],
+  "verification": {
+    "command": "docker compose --env-file .env -f .worktrees/it-helper-mv-filter/compose.yaml run --rm test (sync 到 develop a1d5810 後、全新堆疊、無其他測試堆疊); make check 先前 1128 passed",
+    "exit_code": 0,
+    "tail": "============================= 329 passed in 51.61s ============================= (已 down -v)"
+  },
+  "open_questions": [
+    "先前 dashboard test_panels min_score 等失敗與本單無關：真實 migration 下 without_kafka 輸出與舊版相同（單元測試驗證），is_current 在 DB 已是最新時為 True（與舊行為同），失敗每輪不同且出現在 Kafka/PG/Grafana 時序；integration-flaky-tests 合併後同一份改動 329 全過。未做 develop 基準對照（git checkout 被權限擋下）。早期輪次另有 ClickHouse OOM kill（exit 137），當時 radar 開發堆疊與另一測試堆疊同時在跑。",
+    "is_current 不查 system.kafka_consumers（版本相依），改查 Kafka engine 表與讀 *_queue 的 MV 是否都存在；無法判斷 consumer 是否存活。"
+  ]
+}

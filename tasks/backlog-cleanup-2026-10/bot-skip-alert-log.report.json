@@ -1,0 +1,11 @@
+{
+  "task_id": "bot-skip-alert-log",
+  "status": "done",
+  "files_changed": ["src/radar/bot/repository.py", "tests/unit/bot/test_repository.py"],
+  "verification": {"command": "make check; docker compose --env-file .env -f .worktrees/bot-skip-alert-log/compose.yaml run --rm test", "exit_code": 0, "tail": "make check: 1118 passed; integration: 329 passed in 148.84s"},
+  "open_questions": [
+    "做法：recipients 仍是一次查詢，改為取回所有該看板訂閱者的 (chat_id, 開關, 是否 muted)，由純函式 filter_recipients 過濾並對每個被略過的 chat 記 INFO（含 alert、unit、chat、原因 chat_settings disabled / post muted）；回傳結果與原本一致（既有整合測試 test_preference_repository 全過）。notify.py、main.py 不需改。",
+    "log 在 repository 層而非 notify.py；多個原因並存時只記先判斷到的 chat_settings disabled。"
+  ],
+  "disputes": []
+}

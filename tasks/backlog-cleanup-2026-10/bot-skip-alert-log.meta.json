@@ -1,0 +1,28 @@
+{
+  "task_id": "bot-skip-alert-log",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "bot 因 chat_settings（通知設定）略過警示時記一行 log，說明 chat、unit、原因",
+  "issue": 130,
+  "branch": "fix/bot-skip-alert-log",
+  "worktree": ".worktrees/bot-skip-alert-log",
+  "pr": 133,
+  "qa": {
+    "result": "pass",
+    "sha": "132c0698c99cfbf9e446cf4157634bf5697d7bac",
+    "by": "qa",
+    "carried_from": "bc5ec0388fa230533c8cc83646d8f85d2d4b1c76"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "132c0698c99cfbf9e446cf4157634bf5697d7bac",
+    "by": "architect",
+    "carried_from": "bc5ec0388fa230533c8cc83646d8f85d2d4b1c76"
+  },
+  "merged": true,
+  "amend_sha": "bc5ec0388fa230533c8cc83646d8f85d2d4b1c76",
+  "lane_upgraded": [
+    "改了 110 行（上限 100）"
+  ]
+}

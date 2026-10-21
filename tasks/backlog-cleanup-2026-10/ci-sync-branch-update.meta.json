@@ -1,0 +1,23 @@
+{
+  "task_id": "ci-sync-branch-update",
+  "kind": "chore",
+  "owner": "architect",
+  "lane": "full",
+  "title": "`.github/workflows/sync_branch.yml` 同步成上游範本新版（`templates/github/workflows/sync_branch.yml`）",
+  "issue": 128,
+  "branch": "chore/ci-sync-branch-update",
+  "worktree": ".worktrees/ci-sync-branch-update",
+  "pr": 131,
+  "qa": {
+    "result": "pass",
+    "sha": "32bd0096ccb5d218aebadfe8ad8ded8557a5a63f",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "32bd0096ccb5d218aebadfe8ad8ded8557a5a63f",
+    "by": "architect"
+  },
+  "merged": true,
+  "qa_fails": 1
+}

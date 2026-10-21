@@ -2,12 +2,12 @@
 
 <!-- 只放目前這一階段；只有 manager 透過 scripts/board.py 修改；階段完成時整份封存到 tasks/<tag>.md -->
 
-> 上一階段：`tasks/v0.7.0.md`（派工單在 `tasks/v0.7.0/`）
+> 上一階段：`tasks/backlog-cleanup-2026-10.md`（派工單在 `tasks/backlog-cleanup-2026-10/`）
 
 ## 目標與範圍
 
-- 本輪：backlog 清理（不發版，併 v0.8.0）：CI 穩定 #110 #111 #117 #126、同步範本 sync_branch.yml；小修 #112 #118 #125 #81 #98；甲方追加：consumer commit 暫時性錯誤重試（kafka-commit-retry）；#141 review 建議（it-helper-docs-align）
-- 不做：#119 #121 #122 #82 #80（牽涉決策或需調查）；不發 v0.7.1
+- 本輪：（尚未設定）
+- 不做：（尚未設定）
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
@@ -29,15 +29,6 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
-| ci-sync-branch-update | architect | done | 1 | PR #131 |
-| integration-flaky-tests | backend | done | 0 | PR #138 |
-| bot-skip-alert-log | backend | done | 0 | PR #133 |
-| gitleaks-v070-archive-ignore | backend | done | 0 | PR #134 |
-| grafana-dockerfile-arg | backend | done | 0 | PR #136 |
-| it-helper-mv-filter | backend | done | 0 | PR #141 |
-| e2e-volume-regression | backend | done | 0 | PR #140 |
-| dashboard-var-test-hardening | backend | done | 1 | PR #143 |
-| kafka-commit-retry | backend | done | 0 | PR #145 |
 
 ## 卡住／待甲方決定
 
