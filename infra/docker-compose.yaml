@@ -331,6 +331,8 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
       CLICKHOUSE_DB: ${CLICKHOUSE_DB}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+      # grafana.xml 以 from_env 讀；唯讀帳號給 Grafana 用（開發規格 7.25）
+      CLICKHOUSE_GRAFANA_PASSWORD: ${CLICKHOUSE_GRAFANA_PASSWORD:?CLICKHOUSE_GRAFANA_PASSWORD 未設定}
     ports:
       - "127.0.0.1:8123:8123"
     ulimits:
@@ -340,6 +342,7 @@ services:
     volumes:
       - ./clickhouse/config.d/named_collections.xml:/etc/clickhouse-server/config.d/named_collections.xml:ro
       - ./clickhouse/users.d/radar.xml:/etc/clickhouse-server/users.d/radar.xml:ro
+      - ./clickhouse/users.d/grafana.xml:/etc/clickhouse-server/users.d/grafana.xml:ro
       - clickhouse_data:/var/lib/clickhouse
     healthcheck:
       test: ["CMD-SHELL", "clickhouse-client -u $${CLICKHOUSE_USER} --password $${CLICKHOUSE_PASSWORD} -q 'SELECT 1'"]
@@ -347,6 +350,38 @@ services:
       timeout: 5s
       retries: 20
 
+  # ======= Grafana（開發規格 7.25）=======
+  # 只綁本機並需登入；datasource 與 dashboard 以 provisioning 載入，plugin 在建置 image 時已裝好
+  grafana:
+    build:
+      context: grafana
+      args:
+        GRAFANA_VERSION: ${GRAFANA_VERSION:?GRAFANA_VERSION 未設定}
+        GRAFANA_CLICKHOUSE_PLUGIN_VERSION: ${GRAFANA_CLICKHOUSE_PLUGIN_VERSION:?GRAFANA_CLICKHOUSE_PLUGIN_VERSION 未設定}
+    image: radar-grafana:${GRAFANA_VERSION}-${GRAFANA_CLICKHOUSE_PLUGIN_VERSION}
+    container_name: radar_grafana
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:?GRAFANA_PORT 未設定}:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD 未設定}
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB}
+      CLICKHOUSE_GRAFANA_USER: ${CLICKHOUSE_GRAFANA_USER:?CLICKHOUSE_GRAFANA_USER 未設定}
+      CLICKHOUSE_GRAFANA_PASSWORD: ${CLICKHOUSE_GRAFANA_PASSWORD:?CLICKHOUSE_GRAFANA_PASSWORD 未設定}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    depends_on:
+      clickhouse:
+        condition: service_healthy
 
   # ======= Kafka UI（http://localhost:8089）=======
   # TODO(S8-06): 開發期間預設啟動，方便觀察 topic 與 partition；部署前移除（沒有身分驗證）
@@ -378,3 +413,4 @@ volumes:
   kafka_3_data:
   postgres_data:
   clickhouse_data:
+  grafana_data:

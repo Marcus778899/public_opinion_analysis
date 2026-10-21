@@ -61,14 +61,49 @@ services:
       CLICKHOUSE_USER: radar
       CLICKHOUSE_PASSWORD: it
       CLICKHOUSE_DB: radar
+      # 測試用固定值，不讀 .env（開發規格 7.25）；grafana.xml 以 from_env 讀
+      CLICKHOUSE_GRAFANA_USER: grafana
+      CLICKHOUSE_GRAFANA_PASSWORD: it
     # NOTE: 只掛單一檔案；整個目錄覆蓋會蓋掉 image 的 listen 設定與 entrypoint 要寫入的使用者檔
     volumes:
       - ./infra/clickhouse/config.d/named_collections.xml:/etc/clickhouse-server/config.d/named_collections.xml:ro
       - ./infra/clickhouse/users.d/radar.xml:/etc/clickhouse-server/users.d/radar.xml:ro
+      - ./infra/clickhouse/users.d/grafana.xml:/etc/clickhouse-server/users.d/grafana.xml:ro
     tmpfs:
       - /var/lib/clickhouse
+    networks: [default, grafana_offline]
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8123/ping"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  # NOTE: 只接 internal network，每次啟動都沒有對外網路（離線啟動，開發規格 7.25）；不開 port
+  grafana:
+    build:
+      context: ./infra/grafana
+      args:
+        GRAFANA_VERSION: ${GRAFANA_VERSION:?GRAFANA_VERSION 未設定，請加 --env-file .env}
+        GRAFANA_CLICKHOUSE_PLUGIN_VERSION: ${GRAFANA_CLICKHOUSE_PLUGIN_VERSION:?GRAFANA_CLICKHOUSE_PLUGIN_VERSION 未設定，請加 --env-file .env}
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: it
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      CLICKHOUSE_DB: radar
+      CLICKHOUSE_GRAFANA_USER: grafana
+      CLICKHOUSE_GRAFANA_PASSWORD: it
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/etc/grafana/dashboards:ro
+    # NOTE: tmpfs 預設只有 root 能寫，Grafana 以 uid 472 執行
+    tmpfs:
+      - /var/lib/grafana:mode=1777
+    networks: [grafana_offline]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/api/health"]
       interval: 3s
       timeout: 5s
       retries: 30
@@ -93,6 +128,12 @@ services:
       IT_POSTGRES_HOST: postgres
       IT_POSTGRES_PORT: '5432'
       IT_CLICKHOUSE_URL: http://clickhouse:8123
+      IT_GRAFANA_URL: http://grafana:3000
+      GRAFANA_VERSION: ${GRAFANA_VERSION:?GRAFANA_VERSION 未設定，請加 --env-file .env}
+      GRAFANA_CLICKHOUSE_PLUGIN_VERSION: ${GRAFANA_CLICKHOUSE_PLUGIN_VERSION:?GRAFANA_CLICKHOUSE_PLUGIN_VERSION 未設定，請加 --env-file .env}
+      GRAFANA_ADMIN_PASSWORD: it
+      CLICKHOUSE_GRAFANA_USER: grafana
+      CLICKHOUSE_GRAFANA_PASSWORD: it
     depends_on:
       kafka:
         condition: service_healthy
@@ -100,8 +141,15 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+      grafana:
+        condition: service_healthy
+    networks: [default, grafana_offline]
     entrypoint: ["sh", "-c", "uv sync --frozen && exec uv run --no-sync \"$$@\"", "sh"]
     command: pytest tests/integration -n auto --dist loadgroup --durations=15
+
+networks:
+  grafana_offline:
+    internal: true
 
 volumes:
   test_venv:

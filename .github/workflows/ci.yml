@@ -46,7 +46,7 @@ jobs:
         if: steps.detect.outputs.found == 'true'
         run: make check
 
-  # 整合測試用 compose 的 kafka／postgres／clickhouse（開發規格 7.26）；測試在 runner 上跑，報告路徑才對得回 repo
+  # 整合測試用 compose 的 kafka／postgres／clickhouse／grafana（開發規格 7.25、7.26）；測試在 runner 上跑，報告路徑才對得回 repo
   # 每個事件只跑一次，覆蓋率閘門只在開到 develop 的 PR；只改文件時其餘步驟以 if 跳過（job 仍回報成功）
   integration:
     name: Integration Test
@@ -90,7 +90,7 @@ jobs:
         run: docker compose --env-file .env -f compose.yaml -f compose.ci.yaml pull kafka postgres clickhouse
       - name: Start services
         if: steps.changes.outputs.code == 'true'
-        run: docker compose --env-file .env -f compose.yaml -f compose.ci.yaml up -d --wait kafka postgres clickhouse
+        run: docker compose --env-file .env -f compose.yaml -f compose.ci.yaml up -d --wait kafka postgres clickhouse grafana
       - name: Install uv
         if: steps.changes.outputs.code == 'true'
         uses: astral-sh/setup-uv@v5
@@ -108,6 +108,7 @@ jobs:
           export IT_POSTGRES_HOST=127.0.0.1
           export IT_POSTGRES_PORT="$(port IT_POSTGRES_HOST_PORT)"
           export IT_CLICKHOUSE_URL="http://127.0.0.1:$(port IT_CLICKHOUSE_HOST_PORT)"
+          export IT_GRAFANA_URL="http://127.0.0.1:$(port IT_GRAFANA_HOST_PORT)"
           make coverage
       # 改到的程式碼覆蓋率（scripts/coverage_gate.py，門檻 80%）：發版 PR 是已逐張檢查過的累積，不檢查
       - name: Set up Python for coverage gate  # 不要刪：coverage_gate.py 與 diff-cover 需要，跟專案語言無關

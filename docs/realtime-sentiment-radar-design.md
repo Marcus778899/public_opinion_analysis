@@ -579,7 +579,7 @@ Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED
 
 Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、情緒分布與趨勢、爭議度、近 24 小時警示、熱門文章排行。長時間的趨勢看 Dashboard；即時通知與快速查詢在 Telegram。
 
-- 呈現方式待甲方決定：全用 Grafana 面板（建議），或 Grafana 只做監控＋自建 web 前端；比較與設計見開發規格 7.25
+- 呈現方式已定案：全用 Grafana 面板，自建 web 前端延到階段 9（D-014）；設計見開發規格 7.25
 - 唯讀：Grafana 以專用的 ClickHouse 唯讀帳號查詢，只綁本機並需登入
 
 ### 9.2 Telegram bot
@@ -667,6 +667,7 @@ Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、�
 | `label-stream` | `labeling` | 串流抽樣標註，會持續呼叫 LLM API，`make up-labeling` 才啟動 |
 | `inference` | `inference` | 情緒推論（8.2），需要先訓練好模型；`make up-inference` 才啟動，以唯讀方式掛載 `models/` |
 | `heat`、`bot` | `alerting` | 熱度偵測（8.3）與 Telegram bot（9.2）；bot 需要 `TELEGRAM_BOT_TOKEN`，`make up-alerting` 才啟動；heat 的 RocksDB 掛 volume `heat_state` |
+| `grafana` | （預設） | Dashboard（開發規格 7.25）：只綁 `127.0.0.1:${GRAFANA_PORT}`、需登入，以唯讀帳號查 ClickHouse；`infra/grafana/Dockerfile` 建置時裝好 ClickHouse plugin，datasource 與 dashboard 以 provisioning 載入，資料放 volume `grafana_data` |
 | `kafka-ui` | （預設） | 開發期間預設啟動（http://localhost:8089，只綁本機），部署前移除（S9-06） |
 | `init` | `app` | 一次性：Alembic、建立 topic、ClickHouse migration、註冊 connector（皆冪等）；唯一負責建置 `radar-app` image 的服務 |
 | `api` | `app` | 只綁 `127.0.0.1:8000` |
@@ -698,6 +699,7 @@ Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、�
 | ClickHouse | ~1GB+（spike 實測閒置約 0.3GB，26.8 版） |
 | PostgreSQL | ~0.3GB |
 | Kafka UI | ~0.3GB |
+| Grafana | ~0.1～0.2GB |
 | 自寫 Python 服務 | ~1～1.5GB |
 | **合計** | **約 6～7GB** |
 

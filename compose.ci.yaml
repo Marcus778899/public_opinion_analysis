@@ -1,5 +1,5 @@
-# CI 用覆寫檔：把三個服務的 port 綁在 runner 的 127.0.0.1，測試與覆蓋率直接在 runner 上跑（開發規格 7.26 做法 10）
-# 用法：docker compose --env-file .env -f compose.yaml -f compose.ci.yaml up -d --wait kafka postgres clickhouse
+# CI 用覆寫檔：把四個服務的 port 綁在 runner 的 127.0.0.1，測試與覆蓋率直接在 runner 上跑（開發規格 7.26 做法 10）
+# 用法：docker compose --env-file .env -f compose.yaml -f compose.ci.yaml up -d --wait kafka postgres clickhouse grafana
 
 services:
   kafka:
@@ -14,3 +14,8 @@ services:
   clickhouse:
     ports:
       - "127.0.0.1:${IT_CLICKHOUSE_HOST_PORT:?IT_CLICKHOUSE_HOST_PORT 未設定}:8123"
+  # NOTE: 只接 internal network 的容器無法發布 port，所以另接預設 network；CI 的離線證據不由這裡提供（7.25）
+  grafana:
+    ports:
+      - "127.0.0.1:${IT_GRAFANA_HOST_PORT:?IT_GRAFANA_HOST_PORT 未設定}:3000"
+    networks: [default, grafana_offline]
