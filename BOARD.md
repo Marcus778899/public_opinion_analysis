@@ -32,12 +32,12 @@
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
 | gitleaks-cleanup-archive-ignore | backend | done | 0 | PR #150 |
-| bert-design | architect | review | 0 |  |
+| bert-design | architect | qa | 0 |  |
 | gitleaks-archive-allowlist | backend | done | 0 | PR #153 |
 
 ## 卡住／待甲方決定
 
-- （無）
+- 待甲方決定 D-020～D-024（階段 8 套件、預訓練模型、notebook 套件、shadow 資源、資料上傳平台）
 
 ## 注意事項（踩過的坑）
 
