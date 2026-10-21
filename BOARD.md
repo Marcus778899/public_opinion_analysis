@@ -40,11 +40,13 @@
 | dashboard-views | backend | done | 0 | PR #105 |
 | dashboard-panels | backend | done | 0 | PR #107 |
 | dashboard-integration | backend | done | 1 | PR #109 |
-| e2e-grafana-volume | backend | todo | 0 |  |
+| e2e-grafana-volume | backend | blocked | 1 |  |
+| gitleaks-uat-ignore | backend | todo | 0 |  |
 
 ## 卡住／待甲方決定
 
 - UAT v0.7.0 範圍 1、2（6 個面板截圖、變數與連結的真前端行為）未測：uat 讀不到 GRAFANA_ADMIN_PASSWORD，待甲方決定怎麼補測
+- CI Security 自 develop 7b0386c（UAT v0.7.0 報告）起失敗：gitleaks 誤判 docs/uat/v0.7.0.md 的假密碼 uat-wrong-password；開 gitleaks-uat-ignore 加忽略，合併後 sync PR #114 重跑
 
 ## 注意事項（踩過的坑）
 
