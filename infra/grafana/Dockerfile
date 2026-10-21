@@ -1,5 +1,6 @@
 # Grafana + ClickHouse plugin（開發規格 7.25）；plugin 在建置時裝進 image，執行時不連網、版本不會自己變
-ARG GRAFANA_VERSION
+# NOTE: 預設值只為避免 InvalidDefaultArgInFrom；真正版本由 compose build args 傳入（來源 .env），沒傳會因 tag 不存在而建置失敗
+ARG GRAFANA_VERSION=unset-use-compose-build-arg
 FROM grafana/grafana-oss:${GRAFANA_VERSION}
 
 ARG GRAFANA_CLICKHOUSE_PLUGIN_VERSION
