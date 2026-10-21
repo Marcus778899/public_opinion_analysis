@@ -12,12 +12,20 @@ import json
 import os
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+
+from tests.integration.dashboard._dash import (
+    ALLOWED_BOARD_FORMATS,
+    ALLOWED_MIN_SCORE_FORMATS,
+    FIXED_NUMBER,
+    references,
+)
 
 ROOT = Path(__file__).resolve().parents[4]
 DASHBOARD = ROOT / "infra" / "grafana" / "dashboards" / "radar.json"
@@ -148,6 +156,8 @@ def _expand(sql: str, boards: list[str], min_score: str, interval_s: int = 3600)
         name = m["a"] or m["b"] or m["c"]
         fmt = m["fa"] or m["fc"]
         values = boards if name == "board" else [min_score]
+        if fmt == "percentencode":  # Grafana：多選先包成 {a,b} 再編碼，!'()* 也編碼
+            return urllib.parse.quote("{" + ",".join(values) + "}", safe="")
         if fmt == "csv" or (fmt is None and name == "min_score"):
             return ",".join(values)
         if fmt == "sqlstring":  # Grafana：' 變成 ''
@@ -395,6 +405,61 @@ def test_min_score_variable_is_dropdown_with_four_options_defaulting_to_half(
     assert str(var.get("query")).replace(" ", "") == "0.4,0.5,0.6,0.7"
     assert var.get("multi") in (None, False) and not var.get("includeAll")
     assert str(var.get("description", "")).strip(), "min_score 要有說明文字"
+
+
+def test_sql_never_puts_board_or_min_score_inside_a_sql_string(dashboard: dict) -> None:
+    for title in PANEL_TYPES:
+        for sql in _sqls(_panel(dashboard, title)):
+            inside = [r.text for r in references(sql) if r.in_string]
+            assert not inside, f"面板「{title}」的變數引用在 SQL 字串引號內：{inside}"
+
+
+@pytest.mark.parametrize("title", BOARD_PANELS)
+def test_board_references_use_only_allowed_quote_free_formats(dashboard: dict, title: str) -> None:
+    refs = [r for sql in _sqls(_panel(dashboard, title)) for r in references(sql)]
+    boards = [r for r in refs if r.name == "board"]
+    assert boards
+    bad = [r.text for r in boards if r.fmt not in ALLOWED_BOARD_FORMATS]
+    assert not bad, f"board 只可用 {sorted(ALLOWED_BOARD_FORMATS)}：{bad}"
+
+
+def test_min_score_references_take_the_fixed_number_without_a_format(dashboard: dict) -> None:
+    refs = [r for t in PANEL_TYPES for sql in _sqls(_panel(dashboard, t)) for r in references(sql)]
+    scores = [r for r in refs if r.name == "min_score"]
+    assert scores
+    assert [r.text for r in scores if r.fmt not in ALLOWED_MIN_SCORE_FORMATS] == []
+
+
+def test_min_score_options_and_default_are_fixed_numbers(dashboard: dict) -> None:
+    var = _variable(dashboard, "min_score")
+    values = [str(o["value"]) for o in var["options"]] + [str(var["current"]["value"])]
+    assert all(FIXED_NUMBER.fullmatch(v) for v in values)
+    assert all(FIXED_NUMBER.fullmatch(p.strip()) for p in str(var["query"]).split(","))
+
+
+@pytest.mark.parametrize("min_score", ["0.4", "0.5", "0.6", "0.7"])
+def test_every_min_score_option_gives_the_seeded_distribution(
+    dashboard: dict, min_score: str
+) -> None:
+    board = _board()
+    _insert_posts([_post_in(board, 1, T_FROM + timedelta(hours=1))])
+    _predict(_pid(board, 1), "negative", 0.65)
+    dist = _distribution(_run(dashboard, P_DISTRIBUTION, [board], min_score))
+    unsure = float(min_score) > 0.65
+    assert (dist[LABEL_NEG], dist[LABEL_UNSURE]) == ((0, 1) if unsure else (1, 0))
+
+
+def test_chinese_board_name_with_underscore_is_matched_exactly(dashboard: dict) -> None:
+    mine = f"八卦_測試_{uuid.uuid4().hex}"
+    near = f"八卦_測試x_{uuid.uuid4().hex}"
+    at = T_FROM + timedelta(hours=1)
+    _insert_posts([_post_in(mine, 1, at), _post_in(near, 1, at)])
+    _predict(_pid(mine, 1), "positive", 0.9)
+    _predict(_pid(near, 1), "negative", 0.9)
+    dist = _distribution(_run(dashboard, P_DISTRIBUTION, [mine]))
+    assert (dist[LABEL_POS], dist[LABEL_NEG]) == (1, 0)
+    dist_both = _distribution(_run(dashboard, P_DISTRIBUTION, [mine, near]))
+    assert (dist_both[LABEL_POS], dist_both[LABEL_NEG]) == (1, 1)
 
 
 def test_dashboard_json_contains_no_javascript_links(dashboard: dict) -> None:
