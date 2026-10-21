@@ -1,0 +1,390 @@
+{
+  "uid": "radar",
+  "title": "PTT 即時輿情雷達",
+  "tags": [
+    "radar"
+  ],
+  "schemaVersion": 39,
+  "editable": false,
+  "timezone": "Asia/Taipei",
+  "refresh": "1m",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "board",
+        "label": "看板",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "radar-clickhouse"
+        },
+        "query": {
+          "query": "SELECT DISTINCT board FROM posts_latest ORDER BY board",
+          "rawSql": "SELECT DISTINCT board FROM posts_latest ORDER BY board",
+          "editorType": "sql",
+          "format": 1
+        },
+        "multi": true,
+        "includeAll": true,
+        "refresh": 1,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "min_score",
+        "label": "情緒信心下限",
+        "type": "textbox",
+        "query": "0.5",
+        "current": {
+          "selected": false,
+          "text": "0.5",
+          "value": "0.5"
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": "0.5",
+            "value": "0.5"
+          }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "各看板推文量",
+      "type": "timeseries",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "radar-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "radar-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "queryType": "timeseries",
+          "rawSql": "SELECT $__timeInterval(commented_at) AS time, board, count() AS `推文數`\nFROM comments_latest FINAL\nWHERE is_deleted = 0 AND $__timeFilter_ms(commented_at) AND board IN ($board)\nGROUP BY time, board\nORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 2,
+      "title": "情緒分布",
+      "type": "barchart",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "radar-clickhouse"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "radar-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT\n    p.board AS board,\n    countIf(s.post_id != '' AND s.polarity = 'negative' AND s.score >= toFloat64OrDefault('$min_score', 0.5)) AS `負面`,\n    countIf(s.post_id != '' AND s.polarity = 'neutral' AND s.score >= toFloat64OrDefault('$min_score', 0.5)) AS `中立`,\n    countIf(s.post_id != '' AND s.polarity = 'positive' AND s.score >= toFloat64OrDefault('$min_score', 0.5)) AS `正面`,\n    countIf(s.post_id != '' AND s.score < toFloat64OrDefault('$min_score', 0.5)) AS `不確定`,\n    countIf(s.post_id = '') AS `尚無`\nFROM posts_latest AS p FINAL\nLEFT JOIN post_sentiment_latest AS s ON p.post_id = s.post_id\nWHERE $__timeFilter_ms(p.created_at) AND p.board IN ($board)\nGROUP BY p.board\nORDER BY p.board",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "xField": "board",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "情緒趨勢",
+      "type": "timeseries",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "radar-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "radar-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "queryType": "timeseries",
+          "rawSql": "SELECT\n    toStartOfDay(toTimeZone(p.created_at, 'Asia/Taipei')) AS time,\n    countIf(s.polarity = 'negative') / count() AS `負面`,\n    countIf(s.polarity = 'neutral') / count() AS `中立`,\n    countIf(s.polarity = 'positive') / count() AS `正面`\nFROM posts_latest AS p FINAL\nINNER JOIN post_sentiment_latest AS s ON p.post_id = s.post_id\nWHERE $__timeFilter_ms(p.created_at) AND p.board IN ($board)\nGROUP BY time\nORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "percent"
+            }
+          },
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 4,
+      "title": "爭議度最高的文章",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "radar-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "radar-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT\n    p.board AS `看板`,\n    ifNull(p.title, '') AS `標題`,\n    v.push AS `推`,\n    v.boo AS `噓`,\n    round(v.boo / (v.push + v.boo), 2) AS `爭議度`,\n    if(startsWith(p.url, 'https://www.ptt.cc/'), p.url, '') AS url\nFROM posts_latest AS p FINAL\nINNER JOIN post_votes AS v ON p.post_id = v.post_id\nWHERE $__timeFilter_ms(p.created_at) AND p.board IN ($board) AND v.push + v.boo >= 10\nORDER BY v.boo / (v.push + v.boo) DESC\nLIMIT 20",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "標題"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "開啟原文",
+                    "url": "${__data.fields.url}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "url"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 6,
+      "title": "熱門文章排行",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "radar-clickhouse"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "radar-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT\n    h.board AS `看板`,\n    ifNull(p.title, '') AS `標題`,\n    h.new_comments AS `新增推文`,\n    v.push AS `推`,\n    v.boo AS `噓`,\n    if(v.push + v.boo > 0, round(v.boo / (v.push + v.boo), 2), 0) AS `爭議度`,\n    multiIf(s.post_id = '', '', s.polarity = 'negative', '負面', s.polarity = 'neutral', '中立', s.polarity = 'positive', '正面', '') AS `情緒`,\n    if(startsWith(p.url, 'https://www.ptt.cc/'), p.url, '') AS url\nFROM\n(\n    SELECT post_id, board, count() AS new_comments\n    FROM comments_latest FINAL\n    WHERE is_deleted = 0 AND $__timeFilter_ms(commented_at) AND board IN ($board)\n    GROUP BY post_id, board\n    ORDER BY new_comments DESC\n    LIMIT 20\n) AS h\nINNER JOIN posts_latest AS p FINAL ON h.post_id = p.post_id\nLEFT JOIN post_votes AS v ON h.post_id = v.post_id\nLEFT JOIN post_sentiment_latest AS s ON h.post_id = s.post_id\nORDER BY h.new_comments DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "標題"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "開啟原文",
+                    "url": "${__data.fields.url}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "url"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 5,
+      "title": "近 24 小時警示",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "radar-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "radar-clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT\n    a.created_at AS `時間`,\n    ifNull(a.board, '') AS `看板`,\n    a.unit_type AS `單位`,\n    if(a.unit_type = 'post', ifNull(nullIf(p.title, ''), a.unit_key), a.unit_key) AS `標題`,\n    a.value AS `推文數`,\n    round(a.value / greatest(a.baseline, 1), 2) AS `倍數`,\n    round(a.zscore, 2) AS `z-score`,\n    if(a.unit_type = 'post' AND startsWith(p.url, 'https://www.ptt.cc/'), p.url, '') AS url\nFROM alerts AS a\nLEFT JOIN posts_latest AS p FINAL ON a.unit_key = p.post_id\nWHERE a.created_at >= now64(6) - INTERVAL 24 HOUR\nORDER BY a.created_at DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "標題"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "開啟原文",
+                    "url": "${__data.fields.url}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "url"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    }
+  ]
+}
