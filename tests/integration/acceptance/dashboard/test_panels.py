@@ -12,12 +12,19 @@ import json
 import os
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+
+from tests.integration.dashboard._dash import (
+    ALLOWED_FORMATS,
+    FIXED_NUMBER,
+    references,
+)
 
 ROOT = Path(__file__).resolve().parents[4]
 DASHBOARD = ROOT / "infra" / "grafana" / "dashboards" / "radar.json"
@@ -148,9 +155,16 @@ def _expand(sql: str, boards: list[str], min_score: str, interval_s: int = 3600)
         name = m["a"] or m["b"] or m["c"]
         fmt = m["fa"] or m["fc"]
         values = boards if name == "board" else [min_score]
+        if fmt == "percentencode":  # Grafana：多選先包成 {a,b} 再編碼，!'()* 也編碼
+            joined = "{" + ",".join(values) + "}" if name == "board" else values[0]
+            return urllib.parse.quote(joined, safe="")
         if fmt == "csv" or (fmt is None and name == "min_score"):
             return ",".join(values)
-        if fmt in (None, "singlequote", "sqlstring"):
+        if fmt == "sqlstring":  # Grafana：' 變成 ''
+            return ",".join("'" + v.replace("'", "''") + "'" for v in values)
+        if fmt == "singlequote":  # Grafana：' 變成 \\'
+            return ",".join("'" + v.replace("'", "\\'") + "'" for v in values)
+        if fmt is None:
             return ",".join(f"'{v}'" for v in values)
         pytest.fail(f"測試不支援的變數格式 :{fmt}", pytrace=False)
 
@@ -379,10 +393,59 @@ def test_board_variable_is_multi_select_from_posts_latest(dashboard: dict) -> No
     assert "settings" not in text
 
 
-def test_min_score_variable_is_textbox_defaulting_to_half(dashboard: dict) -> None:
+def test_min_score_variable_is_dropdown_with_four_options_defaulting_to_half(
+    dashboard: dict,
+) -> None:
     var = _variable(dashboard, "min_score")
-    assert var["type"] == "textbox"
-    assert str(var.get("query")) == "0.5" or str(var.get("current", {}).get("value")) == "0.5"
+    assert var["type"] == "custom"
+    values = [str(o["value"]) for o in var["options"]]
+    assert values == ["0.4", "0.5", "0.6", "0.7"]
+    assert str(var.get("current", {}).get("value")) == "0.5"
+    assert [str(o["value"]) for o in var["options"] if o.get("selected")] in ([], ["0.5"])
+    assert str(var.get("query")).replace(" ", "") == "0.4,0.5,0.6,0.7"
+    assert var.get("multi") in (None, False) and not var.get("includeAll")
+    assert str(var.get("description", "")).strip(), "min_score 要有說明文字"
+
+
+@pytest.mark.parametrize("title", list(PANEL_TYPES))
+def test_every_board_and_min_score_reference_uses_percentencode(
+    dashboard: dict, title: str
+) -> None:
+    for sql in _sqls(_panel(dashboard, title)):
+        bad = [r.text for r in references(sql) if r.fmt not in ALLOWED_FORMATS]
+        assert not bad, f"面板「{title}」只准 {sorted(ALLOWED_FORMATS)}，實際：{bad}"
+
+
+def test_min_score_options_and_default_are_fixed_numbers(dashboard: dict) -> None:
+    var = _variable(dashboard, "min_score")
+    values = [str(o["value"]) for o in var["options"]] + [str(var["current"]["value"])]
+    assert all(FIXED_NUMBER.fullmatch(v) for v in values)
+    assert all(FIXED_NUMBER.fullmatch(p.strip()) for p in str(var["query"]).split(","))
+
+
+@pytest.mark.parametrize("min_score", ["0.4", "0.5", "0.6", "0.7"])
+def test_every_min_score_option_gives_the_seeded_distribution(
+    dashboard: dict, min_score: str
+) -> None:
+    board = _board()
+    _insert_posts([_post_in(board, 1, T_FROM + timedelta(hours=1))])
+    _predict(_pid(board, 1), "negative", 0.65)
+    dist = _distribution(_run(dashboard, P_DISTRIBUTION, [board], min_score))
+    unsure = float(min_score) > 0.65
+    assert (dist[LABEL_NEG], dist[LABEL_UNSURE]) == ((0, 1) if unsure else (1, 0))
+
+
+def test_chinese_board_name_with_underscore_is_matched_exactly(dashboard: dict) -> None:
+    mine = f"八卦_測試_{uuid.uuid4().hex}"
+    near = f"八卦_測試x_{uuid.uuid4().hex}"
+    at = T_FROM + timedelta(hours=1)
+    _insert_posts([_post_in(mine, 1, at), _post_in(near, 1, at)])
+    _predict(_pid(mine, 1), "positive", 0.9)
+    _predict(_pid(near, 1), "negative", 0.9)
+    dist = _distribution(_run(dashboard, P_DISTRIBUTION, [mine]))
+    assert (dist[LABEL_POS], dist[LABEL_NEG]) == (1, 0)
+    dist_both = _distribution(_run(dashboard, P_DISTRIBUTION, [mine, near]))
+    assert (dist_both[LABEL_POS], dist_both[LABEL_NEG]) == (1, 1)
 
 
 def test_dashboard_json_contains_no_javascript_links(dashboard: dict) -> None:

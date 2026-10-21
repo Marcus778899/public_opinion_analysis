@@ -39,23 +39,43 @@
           "value": [
             "$__all"
           ]
-        }
+        },
+        "allowCustomValue": false
       },
       {
         "name": "min_score",
         "label": "情緒信心下限",
-        "type": "textbox",
-        "query": "0.5",
+        "type": "custom",
+        "description": "模型對三類情緒（負面、中立、正面）的最高機率若低於此值，該文章在情緒分布與熱門文章排行會標為「不確定」。數字越大越嚴格，標為「不確定」的文章越多。",
+        "query": "0.4,0.5,0.6,0.7",
+        "multi": false,
+        "includeAll": false,
+        "allowCustomValue": false,
         "current": {
-          "selected": false,
+          "selected": true,
           "text": "0.5",
           "value": "0.5"
         },
         "options": [
           {
+            "selected": false,
+            "text": "0.4",
+            "value": "0.4"
+          },
+          {
             "selected": true,
             "text": "0.5",
             "value": "0.5"
+          },
+          {
+            "selected": false,
+            "text": "0.6",
+            "value": "0.6"
+          },
+          {
+            "selected": false,
+            "text": "0.7",
+            "value": "0.7"
           }
         ]
       }
@@ -85,7 +105,7 @@
           "editorType": "sql",
           "format": 0,
           "queryType": "timeseries",
-          "rawSql": "SELECT $__timeInterval(commented_at) AS time, board, count() AS `推文數`\nFROM comments_latest FINAL\nWHERE is_deleted = 0 AND $__timeFilter_ms(commented_at) AND board IN ($board)\nGROUP BY time, board\nORDER BY time",
+          "rawSql": "SELECT $__timeInterval(commented_at) AS time, board, count() AS `推文數`\nFROM comments_latest FINAL\nWHERE is_deleted = 0 AND $__timeFilter_ms(commented_at) AND has(splitByChar(',', trim(BOTH '{}' FROM decodeURLComponent('${board:percentencode}'))), board)\nGROUP BY time, board\nORDER BY time",
           "refId": "A"
         }
       ],
@@ -127,7 +147,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT\n    p.board AS board,\n    countIf(s.post_id != '' AND s.polarity = 'negative' AND s.score >= toFloat64OrDefault('$min_score', 0.5)) AS `負面`,\n    countIf(s.post_id != '' AND s.polarity = 'neutral' AND s.score >= toFloat64OrDefault('$min_score', 0.5)) AS `中立`,\n    countIf(s.post_id != '' AND s.polarity = 'positive' AND s.score >= toFloat64OrDefault('$min_score', 0.5)) AS `正面`,\n    countIf(s.post_id != '' AND s.score < toFloat64OrDefault('$min_score', 0.5)) AS `不確定`,\n    countIf(s.post_id = '') AS `尚無`\nFROM posts_latest AS p FINAL\nLEFT JOIN (SELECT * FROM post_sentiment_latest WHERE post_id IN (SELECT post_id FROM posts_latest WHERE $__timeFilter_ms(created_at) AND board IN ($board))) AS s ON p.post_id = s.post_id\nWHERE $__timeFilter_ms(p.created_at) AND p.board IN ($board)\nGROUP BY p.board\nORDER BY p.board",
+          "rawSql": "SELECT\n    p.board AS board,\n    countIf(s.post_id != '' AND s.polarity = 'negative' AND s.score >= toFloat64OrDefault(decodeURLComponent('${min_score:percentencode}'), 0.5)) AS `負面`,\n    countIf(s.post_id != '' AND s.polarity = 'neutral' AND s.score >= toFloat64OrDefault(decodeURLComponent('${min_score:percentencode}'), 0.5)) AS `中立`,\n    countIf(s.post_id != '' AND s.polarity = 'positive' AND s.score >= toFloat64OrDefault(decodeURLComponent('${min_score:percentencode}'), 0.5)) AS `正面`,\n    countIf(s.post_id != '' AND s.score < toFloat64OrDefault(decodeURLComponent('${min_score:percentencode}'), 0.5)) AS `不確定`,\n    countIf(s.post_id = '') AS `尚無`\nFROM posts_latest AS p FINAL\nLEFT JOIN (SELECT * FROM post_sentiment_latest WHERE post_id IN (SELECT post_id FROM posts_latest WHERE $__timeFilter_ms(created_at) AND has(splitByChar(',', trim(BOTH '{}' FROM decodeURLComponent('${board:percentencode}'))), board))) AS s ON p.post_id = s.post_id\nWHERE $__timeFilter_ms(p.created_at) AND has(splitByChar(',', trim(BOTH '{}' FROM decodeURLComponent('${board:percentencode}'))), p.board)\nGROUP BY p.board\nORDER BY p.board",
           "refId": "A"
         }
       ],
@@ -173,7 +193,7 @@
           "editorType": "sql",
           "format": 0,
           "queryType": "timeseries",
-          "rawSql": "SELECT\n    toStartOfDay(toTimeZone(p.created_at, 'Asia/Taipei')) AS time,\n    countIf(s.polarity = 'negative') / count() AS `負面`,\n    countIf(s.polarity = 'neutral') / count() AS `中立`,\n    countIf(s.polarity = 'positive') / count() AS `正面`\nFROM posts_latest AS p FINAL\nINNER JOIN (SELECT * FROM post_sentiment_latest WHERE post_id IN (SELECT post_id FROM posts_latest WHERE $__timeFilter_ms(created_at) AND board IN ($board))) AS s ON p.post_id = s.post_id\nWHERE $__timeFilter_ms(p.created_at) AND p.board IN ($board)\nGROUP BY time\nORDER BY time",
+          "rawSql": "SELECT\n    toStartOfDay(toTimeZone(p.created_at, 'Asia/Taipei')) AS time,\n    countIf(s.polarity = 'negative') / count() AS `負面`,\n    countIf(s.polarity = 'neutral') / count() AS `中立`,\n    countIf(s.polarity = 'positive') / count() AS `正面`\nFROM posts_latest AS p FINAL\nINNER JOIN (SELECT * FROM post_sentiment_latest WHERE post_id IN (SELECT post_id FROM posts_latest WHERE $__timeFilter_ms(created_at) AND has(splitByChar(',', trim(BOTH '{}' FROM decodeURLComponent('${board:percentencode}'))), board))) AS s ON p.post_id = s.post_id\nWHERE $__timeFilter_ms(p.created_at) AND has(splitByChar(',', trim(BOTH '{}' FROM decodeURLComponent('${board:percentencode}'))), p.board)\nGROUP BY time\nORDER BY time",
           "refId": "A"
         }
       ],
@@ -217,7 +237,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT\n    p.board AS `看板`,\n    ifNull(p.title, '') AS `標題`,\n    v.push AS `推`,\n    v.boo AS `噓`,\n    round(v.boo / (v.push + v.boo), 2) AS `爭議度`,\n    if(startsWith(p.url, 'https://www.ptt.cc/'), p.url, '') AS url\nFROM posts_latest AS p FINAL\nINNER JOIN (SELECT * FROM post_votes WHERE post_id IN (SELECT post_id FROM posts_latest WHERE $__timeFilter_ms(created_at) AND board IN ($board))) AS v ON p.post_id = v.post_id\nWHERE $__timeFilter_ms(p.created_at) AND p.board IN ($board) AND v.push + v.boo >= 10\nORDER BY v.boo / (v.push + v.boo) DESC, p.post_id\nLIMIT 20",
+          "rawSql": "SELECT\n    p.board AS `看板`,\n    ifNull(p.title, '') AS `標題`,\n    v.push AS `推`,\n    v.boo AS `噓`,\n    round(v.boo / (v.push + v.boo), 2) AS `爭議度`,\n    if(startsWith(p.url, 'https://www.ptt.cc/'), p.url, '') AS url\nFROM posts_latest AS p FINAL\nINNER JOIN (SELECT * FROM post_votes WHERE post_id IN (SELECT post_id FROM posts_latest WHERE $__timeFilter_ms(created_at) AND has(splitByChar(',', trim(BOTH '{}' FROM decodeURLComponent('${board:percentencode}'))), board))) AS v ON p.post_id = v.post_id\nWHERE $__timeFilter_ms(p.created_at) AND has(splitByChar(',', trim(BOTH '{}' FROM decodeURLComponent('${board:percentencode}'))), p.board) AND v.push + v.boo >= 10\nORDER BY v.boo / (v.push + v.boo) DESC, p.post_id\nLIMIT 20",
           "refId": "A"
         }
       ],
@@ -281,7 +301,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT\n    h.board AS `看板`,\n    if(p.post_id = '', h.post_id, ifNull(p.title, '')) AS `標題`,\n    h.new_comments AS `新增推文`,\n    v.push AS `推`,\n    v.boo AS `噓`,\n    if(v.push + v.boo >= 10, round(v.boo / (v.push + v.boo), 2), NULL) AS `爭議度`,\n    multiIf(s.post_id = '', '', s.score < toFloat64OrDefault('$min_score', 0.5), '不確定', s.polarity = 'negative', '負面', s.polarity = 'neutral', '中立', s.polarity = 'positive', '正面', '') AS `情緒`,\n    if(startsWith(p.url, 'https://www.ptt.cc/'), p.url, '') AS url\nFROM\n(\n    SELECT post_id, board, count() AS new_comments\n    FROM comments_latest FINAL\n    WHERE is_deleted = 0 AND $__timeFilter_ms(commented_at) AND board IN ($board)\n    GROUP BY post_id, board\n    ORDER BY new_comments DESC\n    LIMIT 20\n) AS h\nLEFT JOIN (SELECT post_id, title, url FROM posts_latest FINAL WHERE post_id IN (SELECT post_id FROM comments_latest WHERE is_deleted = 0 AND $__timeFilter_ms(commented_at) AND board IN ($board))) AS p ON h.post_id = p.post_id\nLEFT JOIN (SELECT * FROM post_votes WHERE post_id IN (SELECT post_id FROM comments_latest WHERE is_deleted = 0 AND $__timeFilter_ms(commented_at) AND board IN ($board))) AS v ON h.post_id = v.post_id\nLEFT JOIN (SELECT * FROM post_sentiment_latest WHERE post_id IN (SELECT post_id FROM comments_latest WHERE is_deleted = 0 AND $__timeFilter_ms(commented_at) AND board IN ($board))) AS s ON h.post_id = s.post_id\nORDER BY h.new_comments DESC",
+          "rawSql": "SELECT\n    h.board AS `看板`,\n    if(p.post_id = '', h.post_id, ifNull(p.title, '')) AS `標題`,\n    h.new_comments AS `新增推文`,\n    v.push AS `推`,\n    v.boo AS `噓`,\n    if(v.push + v.boo >= 10, round(v.boo / (v.push + v.boo), 2), NULL) AS `爭議度`,\n    multiIf(s.post_id = '', '', s.score < toFloat64OrDefault(decodeURLComponent('${min_score:percentencode}'), 0.5), '不確定', s.polarity = 'negative', '負面', s.polarity = 'neutral', '中立', s.polarity = 'positive', '正面', '') AS `情緒`,\n    if(startsWith(p.url, 'https://www.ptt.cc/'), p.url, '') AS url\nFROM\n(\n    SELECT post_id, board, count() AS new_comments\n    FROM comments_latest FINAL\n    WHERE is_deleted = 0 AND $__timeFilter_ms(commented_at) AND has(splitByChar(',', trim(BOTH '{}' FROM decodeURLComponent('${board:percentencode}'))), board)\n    GROUP BY post_id, board\n    ORDER BY new_comments DESC\n    LIMIT 20\n) AS h\nLEFT JOIN (SELECT post_id, title, url FROM posts_latest FINAL WHERE post_id IN (SELECT post_id FROM comments_latest WHERE is_deleted = 0 AND $__timeFilter_ms(commented_at) AND has(splitByChar(',', trim(BOTH '{}' FROM decodeURLComponent('${board:percentencode}'))), board))) AS p ON h.post_id = p.post_id\nLEFT JOIN (SELECT * FROM post_votes WHERE post_id IN (SELECT post_id FROM comments_latest WHERE is_deleted = 0 AND $__timeFilter_ms(commented_at) AND has(splitByChar(',', trim(BOTH '{}' FROM decodeURLComponent('${board:percentencode}'))), board))) AS v ON h.post_id = v.post_id\nLEFT JOIN (SELECT * FROM post_sentiment_latest WHERE post_id IN (SELECT post_id FROM comments_latest WHERE is_deleted = 0 AND $__timeFilter_ms(commented_at) AND has(splitByChar(',', trim(BOTH '{}' FROM decodeURLComponent('${board:percentencode}'))), board))) AS s ON h.post_id = s.post_id\nORDER BY h.new_comments DESC",
           "refId": "A"
         }
       ],

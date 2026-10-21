@@ -1,24 +1,12 @@
 """board、min_score 變數：讀回、展開（All／單選／多選／空）、單引號與非數字。"""
 
-from datetime import timedelta
-
 import pytest
 
 from tests.integration.dashboard._dash import (
     BOARD_PANELS,
     P_DISTRIBUTION,
-    P_HOT,
-    P_VOLUME,
-    T_FROM,
-    QueryError,
     ds_query,
-    insert_comments,
-    insert_posts,
     load_dashboard,
-    new_board,
-    panel_targets,
-    pid,
-    predict,
     quote,
     run_panel,
     seed_board_with_comment,
@@ -83,69 +71,6 @@ def test_all_selection_expands_every_option_without_error_for_every_panel(
 def test_empty_board_list_does_not_break_panel(dashboard: dict, title: str) -> None:
     # 沒有任何看板時變數展開為空字串，SQL 變成 board IN ()
     assert run_panel(dashboard, title, []) == []
-
-
-@pytest.mark.parametrize("suffix", ["'", "\\", "a'b", "x') OR 1=1 --", "x\\'"])
-def test_board_value_with_quote_matches_only_itself_and_keeps_query_structure(
-    dashboard: dict, suffix: str
-) -> None:
-    odd = new_board() + suffix
-    other = seed_board_with_comment()
-    p = pid(odd)
-    at = T_FROM + timedelta(hours=10)
-    insert_posts([(p, odd, at)])
-    insert_comments([(p, odd, 1, "push", at)])
-    for title in (P_DISTRIBUTION, P_VOLUME):
-        rows = run_panel(dashboard, title, [odd])
-        text = " ".join(str(v) for r in rows for v in r.values())
-        assert other.board not in text
-        assert rows, f"面板「{title}」找不到看板 {odd!r}（跳脫後應原樣比對）"
-
-
-def test_unescaped_quote_in_board_value_fails_or_returns_nothing_extra(dashboard: dict) -> None:
-    other = seed_board_with_comment()
-    target = panel_targets(dashboard, P_DISTRIBUTION)[0]
-    raw = "x') OR 1=1 OR ('"
-    sql = target["rawSql"].replace("$board", f"'{raw}'")
-    # 對照組：正常值必須先成功，否則下面的「失敗」可能只是 plugin 全面失效
-    assert ds_query(target, target["rawSql"].replace("$board", quote(other.board)))
-    try:
-        rows = ds_query(target, sql)
-    except QueryError:
-        return
-    text = " ".join(str(v) for r in rows for v in r.values())
-    assert other.board not in text, "未跳脫的單引號改變了查詢結構"
-
-
-@pytest.mark.parametrize("score", ["abc", "", "NaN", "1e999", "-1", "0,5", "0.5 0.6"])
-def test_min_score_non_numeric_does_not_break_panels(dashboard: dict, score: str) -> None:
-    seeded = seed_board_with_comment()
-    predict(seeded.post_id, "negative", 0.9)
-    for title in (P_DISTRIBUTION, P_HOT):
-        run_panel(dashboard, title, [seeded.board], min_score=score)
-
-
-def test_min_score_non_numeric_falls_back_to_default_threshold(dashboard: dict) -> None:
-    seeded = seed_board_with_comment()
-    predict(seeded.post_id, "negative", 0.9)
-    rows = run_panel(dashboard, P_DISTRIBUTION, [seeded.board], min_score="abc")
-    assert rows[0]["負面"] == 1
-
-
-@pytest.mark.parametrize("score", ["0.5' OR '1'='1", "0.5'", "'", "0.5\\", "0.5') --"])
-def test_min_score_with_quote_fails_or_keeps_query_structure(dashboard: dict, score: str) -> None:
-    seeded = seed_board_with_comment()
-    other = seed_board_with_comment()
-    predict(seeded.post_id, "negative", 0.9)
-    # 對照組：正常的 min_score 必須先成功，否則下面的「失敗」可能只是 plugin 全面失效
-    assert run_panel(dashboard, P_DISTRIBUTION, [seeded.board])
-    try:
-        rows = run_panel(dashboard, P_DISTRIBUTION, [seeded.board], min_score=score)
-    except QueryError:
-        return
-    text = " ".join(str(v) for r in rows for v in r.values())
-    assert other.board not in text
-    assert [r["負面"] for r in rows if r["board"] == seeded.board] == [1]
 
 
 def test_quote_helper_matches_clickhouse_escaping() -> None:

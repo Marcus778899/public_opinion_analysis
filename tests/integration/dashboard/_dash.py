@@ -1,7 +1,7 @@
 """dashboard 整合測試共用：Grafana API、種子資料、前端變數展開的模擬（開發規格 7.25）。
 
 /api/ds/query 的後端只展開 $__timeFilter_ms、$__timeInterval；$board、$min_score 是 Grafana
-前端代換的，所以這裡依前端格式（多選 'a','b'、單引號與反斜線跳脫）代換後再送 API。
+前端代換的，所以這裡依所選格式的展開規則代換後再送 API。
 測試帳密與 compose.yaml 一致，不讀 .env。種子資料寫 radar DB，看板名稱帶 uuid。
 """
 
@@ -10,6 +10,7 @@ import json
 import os
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass
@@ -145,15 +146,105 @@ def frames_numeric_sum(target: dict, sql: str) -> float:
 # ---------- 前端變數展開的模擬 ----------
 
 
+# 所有 $board、$min_score 引用只准這個格式：輸出只含 A-Z a-z 0-9 % . _ ~ -，不可能有引號或反斜線
+ALLOWED_FORMATS = {"percentencode"}
+FIXED_NUMBER = re.compile(r"\d(\.\d+)?")
+
+
 def quote(value: str) -> str:
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
+_VAR = re.compile(
+    r"\$\{(?P<a>board|min_score)(?P<ra>[^}]*)\}"
+    r"|\$(?P<b>board|min_score)\b"
+    r"|\[\[(?P<c>board|min_score)(?P<rc>:\w+)?\]\]"
+)
+
+
+@dataclass
+class Ref:
+    name: str
+    fmt: str | None  # None = 沒指定格式；其他寫法（例 .text）原樣保留
+    in_string: bool
+    text: str
+
+
+def _ref_at(sql: str, i: int, in_string: bool) -> tuple[Ref, int] | None:
+    m = _VAR.match(sql, i)
+    if not m:
+        return None
+    rest = (m["ra"] if m["a"] else m["rc"]) or ""
+    fmt = rest[1:] if rest.startswith(":") else (rest or None)
+    return Ref(m["a"] or m["b"] or m["c"], fmt, in_string, m[0]), m.end()
+
+
+def references(sql: str) -> list[Ref]:
+    """依序找出 $board、$min_score 的每個引用，並標出是否位於 SQL 引號（' " `）內。"""
+    refs: list[Ref] = []
+    quote_char: str | None = None
+    i = 0
+    while i < len(sql):
+        ch = sql[i]
+        found = _ref_at(sql, i, quote_char is not None) if ch in "$[" else None
+        if found:
+            refs.append(found[0])
+            i = found[1]
+        elif quote_char is None and sql.startswith("--", i):
+            i = sql.find("\n", i) if "\n" in sql[i:] else len(sql)
+        elif quote_char is None and sql.startswith("/*", i):
+            end = sql.find("*/", i + 2)
+            i = len(sql) if end < 0 else end + 2
+        elif quote_char is None:
+            quote_char = ch if ch in "'\"`" else None
+            i += 1
+        elif ch == "\\":
+            i += 2
+        elif ch == quote_char:
+            if sql[i + 1 : i + 2] == quote_char:
+                i += 2
+            else:
+                quote_char = None
+                i += 1
+        else:
+            i += 1
+    return refs
+
+
+def _percentencode(values: list[str]) -> str:
+    # Grafana 的 percentencode：多選變數的值先包成 {a,b} 再編碼（!'()* 也編碼）
+    return urllib.parse.quote("{" + ",".join(values) + "}", safe="")
+
+
+def grafana_format(values: list[str], fmt: str) -> str:
+    """Grafana 前端對多選值的展開規則（只列測試用到的格式）。"""
+    if fmt == "percentencode":
+        return _percentencode(values)
+    if fmt == "sqlstring":
+        return ",".join("'" + v.replace("'", "''") + "'" for v in values)
+    if fmt == "singlequote":
+        return ",".join("'" + v.replace("'", "\\'") + "'" for v in values)
+    if fmt == "csv":
+        return ",".join(values)
+    pytest.fail(f"測試不支援的變數格式 :{fmt}", pytrace=False)
+
+
 def expand_vars(sql: str, boards: list[str], min_score: str = "0.5") -> str:
-    """多選 board 展開為 'a','b'（空清單展開為空字串）；min_score 為文字框原值。"""
-    sql = re.sub(r"\$\{?board\}?\b", lambda _: ",".join(quote(b) for b in boards), sql)
-    sql = re.sub(r"\$\{?min_score\}?\b", lambda _: min_score, sql)
-    return sql
+    """依引用的格式展開；min_score 是單選，percentencode 不加大括號。"""
+
+    def var(m: re.Match) -> str:
+        name = m["a"] or m["b"] or m["c"]
+        fmt = (m["ra"] or m["rc"] or "").lstrip(":") or None
+        values = boards if name == "board" else [min_score]
+        if fmt == "percentencode" and name == "min_score":
+            return urllib.parse.quote(min_score, safe="")
+        if fmt:
+            return grafana_format(values, fmt)
+        if name == "board":
+            return ",".join(quote(b) for b in values)
+        return min_score
+
+    return _VAR.sub(var, sql)
 
 
 def run_panel(dashboard: dict, title: str, boards: list[str], min_score: str = "0.5") -> list[dict]:
