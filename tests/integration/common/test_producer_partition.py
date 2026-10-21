@@ -14,10 +14,19 @@ class Event(BaseModel):
     board: str
 
 
-def test_list_tasks_land_in_assigned_partitions(kafka_settings):
+def _topic_ready(admin: AdminClient, topic: str, partitions: int) -> bool:
+    meta = admin.list_topics(topic, timeout=10).topics.get(topic)
+    if meta is None or meta.error is not None or len(meta.partitions) != partitions:
+        return False
+    return all(p.leader >= 0 and p.error is None for p in meta.partitions.values())
+
+
+def test_list_tasks_land_in_assigned_partitions(kafka_settings, wait_until):
     topic = f"it.{uuid.uuid4().hex[:8]}"
     admin = AdminClient(admin_config(kafka_settings))
     admin.create_topics([NewTopic(topic, 3, 1)])[topic].result(30)
+    # NOTE: create 回來時 metadata 可能還沒傳播（#110），等到 3 個 partition 都有 leader 才送
+    wait_until(lambda: _topic_ready(admin, topic, 3), f"topic {topic} metadata not ready", 30)
     producer = JsonProducer(kafka_settings)
     boards = ["Gossiping", "Stock", "Tech_Job"]
 
