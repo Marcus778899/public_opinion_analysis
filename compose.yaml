@@ -89,6 +89,8 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: it
       GF_AUTH_ANONYMOUS_ENABLED: 'false'
       GF_USERS_ALLOW_SIGN_UP: 'false'
+      # NOTE: 僅測試環境；錯誤密碼測試會鎖住 admin，同堆疊連跑時其他測試會 401。開發環境不關
+      GF_SECURITY_DISABLE_BRUTE_FORCE_LOGIN_PROTECTION: 'true'
       CLICKHOUSE_DB: radar
       CLICKHOUSE_GRAFANA_USER: grafana
       CLICKHOUSE_GRAFANA_PASSWORD: it
