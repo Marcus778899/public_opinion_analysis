@@ -34,7 +34,8 @@
 | bot-skip-alert-log | backend | done | 0 | PR #133 |
 | gitleaks-v070-archive-ignore | backend | done | 0 | PR #134 |
 | grafana-dockerfile-arg | backend | done | 0 | PR #136 |
-| it-helper-mv-filter | backend | in-progress | 0 |  |
+| it-helper-mv-filter | backend | done | 0 | PR #141 |
+| e2e-volume-regression | backend | done | 0 | PR #140 |
 
 ## 卡住／待甲方決定
 
