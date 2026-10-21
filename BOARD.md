@@ -47,7 +47,7 @@
 
 ## 卡住／待甲方決定
 
-- v0.7.0 甲方驗收 PASS；等 security 重審結果後 release.py open v0.7.0
+- v0.7.0 發版中：甲方驗收 PASS、security PASS 3fccb90；release.py open → CI 綠 → finish
 
 ## 注意事項（踩過的坑）
 

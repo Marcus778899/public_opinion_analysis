@@ -87,7 +87,7 @@
 |---|---|---|
 | `stage-1`、`stage-2` | 2026-10 | 爬取入庫、CDC → ClickHouse |
 | v0.6.0 | 2026-10-20 | 階段 3～6：情緒標註與模型、推論、熱度警示、Telegram 互動 |
-| v0.7.0 | （發版中） | 階段 7：Grafana Dashboard；整合測試改用 compose test 服務並平行執行（#78）；bot 允許清單 fail closed（D-010） |
+| v0.7.0 | 2026-10-21 | 階段 7：Grafana Dashboard（情緒信心下限為下拉選單）；整合測試改用 compose test 服務並平行執行（#78）；bot 允許清單 fail closed（D-010） |
 
 ## 授權
 
