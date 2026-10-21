@@ -361,7 +361,7 @@
 | 推論快取重啟後從 ClickHouse 載入（7.19） | ✅ 完成；單元測試重現「重啟後快取空、既有文章被編輯不推論」；整合測試（真的 ClickHouse、PG）驗證 migration 0004、載入與補舊 hash。2026-10-16 部署：補 5,509 篇，重啟後 4 分鐘內 3 篇既有文章被編輯，都重新推論 | #37 |
 | S5-01～S5-05 熱度偵測、錄製回放（7.20） | ✅ 程式完成；加入 `quixstreams`，`confluent-kafka` 降到 2.12.x。整合測試（真實 Kafka、exactly-once）：暴增各單位只發一則、改寫不算新增、只靠 changelog 恢復後不重發、壞訊息進 DLQ。2026-10-17 實測推文進 PG 晚約 8 分鐘，時間基準由 `commented_at` 改成觀測時間（S5-02）。開發環境已部署 heat，待第 5 階段驗收 | — |
 | 文章基準每分鐘更新一次、分鐘結算才發警示（7.20，#49、#50） | ✅ 完成；單元測試重現兩個問題（40 篇活躍文章時文章基準 1 分鐘就洗掉舊值、一分鐘湧入 200 則警示只寫 30），修正後通過；整合測試（真實 Kafka）暴增 40 則的警示 `value` 為 40、重啟後不重發。待部署（重置 heat）後重跑階段 5 的 3 天驗收 | — |
-| 階段 7 規劃：Dashboard 呈現方式（7.25） | ⬜ 文件完成（2026-10-20）；呈現方式已定案：全用 Grafana（D-014）；`dashboard-grafana-infra`、`dashboard-views`、`dashboard-panels` 完成（2026-10-21），剩 `dashboard-integration` | — |
+| 階段 7 規劃：Dashboard 呈現方式（7.25） | ✅ 實作完成（2026-10-21）；呈現方式已定案：全用 Grafana（D-014）；`dashboard-grafana-infra`、`dashboard-views`、`dashboard-panels`、`dashboard-integration` 完成（畫面截圖由階段收尾的 uat 做） | — |
 | 整合測試改用 compose `test` 服務、CI 加速（7.26，#78） | ✅ `test-infra-compose`、`test-infra-fast-waits` 完成（2026-10-20；本機 150 個全過、連跑兩次、`-n 0` 也過；CI Integration Test 1 分 56 秒） | — |
 | S5-06～S5-07 Telegram bot（7.21） | ✅ 完成；2026-10-16 在開發環境以真的 Telegram 實測指令與推送，修正 compose 漏掉 `app-env`。階段 5 驗收第 1 項（人工暴增約 10 秒收到通知）通過 | — |
 
@@ -1054,7 +1054,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
   - 釘法：兩個版本都寫完整的 patch 版號（不用 `latest`、`13` 這類浮動 tag）。`GRAFANA_VERSION` 取 Docker Hub 上實際存在的 tag（調查時 GitHub 標 13.2.4、Docker Hub 只列到 13.0.2，以拉得到的為準）；plugin 4.23.0（需 Grafana ≥ 11.6）
   - **選定版本（2026-10-20，`dashboard-grafana-infra`）**：Grafana `13.0.2`、plugin `4.23.0`，對 ClickHouse 26.8 的 datasource health check 與 `test_grafana_infra.py` 全過（社群回報的 13.0.0 失效在 13.0.2 沒有重現）。`GRAFANA_VERSION` 取 Docker Hub 實際拉得到的 tag，沒有試 13.2.4
   - plugin 裝在 `/opt/grafana-plugins`（`GF_PATHS_PLUGINS`），不在資料目錄：開發環境的 `grafana_data` volume 與測試的 tmpfs 都不會蓋掉它
-  - **datasource 用 native 協定（`clickhouse:9000`），不用 http**：plugin 連線時會帶 `max_execution_time`，`readonly=1` 的帳號只允許「值與目前相同」的設定。native 協定帶的值與 profile 的 60 相同、通過；http 協定下 health check 失敗（`Cannot modify 'max_execution_time' setting in readonly mode`）。所以 `grafana.xml` 的 `max_execution_time` 固定為 60，改它要連同 plugin 行為一起驗
+  - **datasource 用 native 協定（`clickhouse:9000`），並設 `queryTimeout: '30'`**：plugin 每次查詢都帶 `max_execution_time`（依 `queryTimeout`，未設時超過 60），`readonly=1` 預設拒絕任何修改。health check 只驗連線，曾因此誤判可用（`dashboard-integration` 實測：經 `/api/ds/query` 的任何查詢，連 `SELECT 1` 都回 `Cannot modify 'max_execution_time' setting in readonly mode`）。處理有兩部分，缺一不可：`grafana.xml` 的 profile 加 `constraints`，`max_execution_time` 設 `changeable_in_readonly`、範圍 1～60（不放寬 readonly、帳號、`allow_databases`、記憶體上限）；datasource 的 `queryTimeout` 設 30，低於上限 60，否則回 `Setting max_execution_time shouldn't be greater than 60`。http 協定下 health check 也失敗，仍用 native。改 `queryTimeout` 或上限要重跑 `tests/integration/dashboard/`
   - arm64：Grafana image 有 arm64，plugin 沒有官方平台清單；併入 S9-01，以 arm64 建置這個 image、跑同一組測試
 - 檔案：`infra/grafana/provisioning/datasources/clickhouse.yaml`（固定 uid `radar-clickhouse`）、`infra/grafana/provisioning/dashboards/radar.yaml`、`infra/grafana/dashboards/radar.json`；dashboard 設為 provisioning 管理（UI 改了存不回去，改 JSON 才算數）
 - 登入：`GRAFANA_ADMIN_PASSWORD` 必填（compose 用 `${…:?}`），關閉匿名與註冊；不設預設帳密
@@ -1078,7 +1078,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | 網路 | 另設 `internal: true` 的 network `grafana_offline`，`grafana` 只接這個；`clickhouse`、`test` 同時接預設 network 與它（`test` 的 `uv sync` 要連網，所以不能整個 compose 都 internal）。Grafana 每次啟動都沒有對外網路，等於每次都是離線啟動 |
 | 連線 | `test` 服務設 `IT_GRAFANA_URL`（`http://grafana:3000`），併入 7.26 做法 2 的必填清單（缺就 `pytest.exit`） |
 | 測試用帳密 | Grafana admin 密碼、`CLICKHOUSE_GRAFANA_USER`／`CLICKHOUSE_GRAFANA_PASSWORD` 在 `compose.yaml` 寫測試用的固定值給 `grafana`、`clickhouse`、`test`，不讀 `.env`（同 7.26 風險表 users.d 一列） |
-| 查詢的 DB | 唯讀帳號的 `allow_databases` 只有 `${CLICKHOUSE_DB}`（測試環境為 `radar`），所以 dashboard 的驗收與整合測試一律在 `radar` DB 放種子資料、以唯讀帳號查，不用 xdist 的 `radar_<worker>`（7.26 平行隔離表）；種子資料的看板名稱帶 uuid、斷言只看自己的看板，不需 `xdist_group` |
+| 查詢的 DB | 唯讀帳號的 `allow_databases` 只有 `${CLICKHOUSE_DB}`（測試環境為 `radar`），所以 dashboard 的驗收與整合測試一律在 `radar` DB 放種子資料、以唯讀帳號查，不用 xdist 的 `radar_<worker>`（7.26 平行隔離表）；種子資料的看板名稱帶 uuid、斷言只看自己的看板；但 `cdc/test_clickhouse_migrations.py` 的 `shared_clickhouse` 會在模組開始時 TRUNCATE `radar` 全部資料表，平行時會清掉種子資料，所以 dashboard 整合測試標 `@pytest.mark.xdist_group("shared_radar_db")`，與 cdc 測試固定在同一個 worker |
 | CI | `compose.ci.yaml` 把 `grafana` 的 port 綁 `127.0.0.1:${IT_GRAFANA_HOST_PORT}`，並讓它另接預設 network（只接 internal network 的容器無法發布 port）；CI 的 `up -d --wait` 加 `grafana`、`IT_GRAFANA_URL` 指向 localhost |
 | 離線檢查的限制 | CI 的 Grafana 有對外網路，CI 綠燈**不代表**離線啟動通過；離線只由 `run --rm test` 證明：worker 與 qa 交單時附這個指令跑 `test_grafana_infra.py` 的輸出。CI 仍會跑同一個測試檔（驗 plugin 載入、版本、health check），只是不構成離線證據 |
 

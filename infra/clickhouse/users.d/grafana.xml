@@ -5,6 +5,14 @@
       <readonly>1</readonly>
       <max_execution_time>60</max_execution_time>
       <max_memory_usage>2000000000</max_memory_usage>
+      <!-- NOTE: plugin 每次查詢都帶 max_execution_time，readonly=1 預設拒絕；只開放 1～60 秒 -->
+      <constraints>
+        <max_execution_time>
+          <min>1</min>
+          <max>60</max>
+          <changeable_in_readonly/>
+        </max_execution_time>
+      </constraints>
     </grafana_readonly>
   </profiles>
   <users>
