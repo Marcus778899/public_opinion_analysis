@@ -1,5 +1,6 @@
 import itertools
 import json
+import threading
 
 import pytest
 from confluent_kafka import KafkaError, KafkaException, TopicPartition
@@ -426,16 +427,45 @@ def test_commit_coordinator_error_is_retried_without_rerunning_handler():
     assert fake.commits == 1
 
 
-def test_commit_retry_beyond_limit_raises():
+def test_commit_retry_beyond_limit_raises_after_exactly_six_retries():
     consumer, fake, _ = build([[msg(1)]], lambda items: None)
-    fake.commit_errors = [
-        KafkaException(FakeError(KafkaError.COORDINATOR_NOT_AVAILABLE)) for _ in range(50)
-    ]
+    errors = [KafkaException(FakeError(KafkaError.COORDINATOR_NOT_AVAILABLE)) for _ in range(50)]
+    fake.commit_errors = errors
 
     with pytest.raises(KafkaException):
         consumer.run()
 
+    assert len(errors) == 43  # 第 1 次 commit 加 6 次重試，共用掉 7 個
     assert fake.commits == 0
+
+
+def test_commit_succeeds_on_last_allowed_retry():
+    consumer, fake, _ = build([[msg(1)]], lambda items: None)
+    fake.commit_errors = [
+        KafkaException(FakeError(KafkaError.COORDINATOR_NOT_AVAILABLE)) for _ in range(6)
+    ]
+
+    consumer.run()
+
+    assert fake.commits == 1
+
+
+def test_stop_during_commit_retry_wait_leaves_batch_uncommitted():
+    consumer, fake, _ = build([[msg(1)]], lambda items: None)
+
+    class StopOnWait(threading.Event):
+        def wait(self, timeout=None):
+            self.set()
+            return True
+
+    consumer._stop = StopOnWait()  # noqa: SLF001 - 模擬等待期間收到 SIGTERM
+    fake.on_exhausted = consumer.stop
+    fake.commit_errors = [KafkaException(FakeError(KafkaError.COORDINATOR_LOAD_IN_PROGRESS))]
+
+    consumer.run()
+
+    assert fake.commits == 0
+    assert fake.closed
 
 
 def test_commit_non_retriable_error_raises_immediately():
