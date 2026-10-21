@@ -82,10 +82,13 @@ def test_apply_updates_changed_retention_and_partitions(kafka_settings, wait_unt
 
     apply_plan(admin, plan_changes([changed], fetch_existing(admin, [spec.name])))
 
-    # NOTE: create_partitions 回來時 list_topics 仍可能是舊 metadata（#126），等到看見新數量
+    # NOTE: alter 回來時 list_topics／describe_configs 仍可能是舊值（#126），等到都看見新值
     wait_until(
-        lambda: fetch_existing(admin, [spec.name])[spec.name].partitions == changed.partitions,
-        "partition count not propagated",
+        lambda: (
+            fetch_existing(admin, [spec.name])[spec.name].partitions == changed.partitions
+            and fetch_existing(admin, [spec.name])[spec.name].config["retention.ms"] == "3600000"
+        ),
+        "partition count or retention.ms not propagated",
         30,
     )
     current = fetch_existing(admin, [spec.name])[spec.name]

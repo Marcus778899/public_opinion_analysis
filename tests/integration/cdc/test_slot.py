@@ -1,7 +1,7 @@
 """read_slot 對真實 PG 的查詢；需要 wal_level=logical 的容器才能建立 replication slot。"""
 
 import pytest
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import Connection, Engine, create_engine, text
 
 from radar.cdc.watchdog import read_slot
 
@@ -55,7 +55,7 @@ def confirmed_flush_lsn(engine: Engine, slot: str) -> int:
         )
 
 
-def current_wal(conn) -> int:
+def current_wal(conn: Connection) -> int:
     return int(
         conn.execute(text("SELECT pg_wal_lsn_diff(pg_current_wal_lsn(), '0/0')")).scalar_one()
     )

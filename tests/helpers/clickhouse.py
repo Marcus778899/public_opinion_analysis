@@ -131,6 +131,8 @@ def create_worker_database(settings: ClickHouseSettings) -> None:
         client.close()
 
 
+# NOTE: 依賴 Kafka engine 表命名為 `*_queue`，且 Kafka 物件只用 CREATE／DROP 變更；
+# migration 改用 RENAME／EXCHANGE 時要同步改 `kafka_objects`。
 _CREATE_RE = re.compile(
     r"^\s*CREATE\s+(TABLE|MATERIALIZED\s+VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(\w+)`?", re.I
 )
