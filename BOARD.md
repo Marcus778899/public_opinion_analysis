@@ -35,10 +35,11 @@
 | bot-allowlist-required | backend | done | 0 | PR #93 |
 | dashboard-test-align | architect | done | 0 | PR #94 |
 | test-infra-fast-waits | backend | done | 0 | PR #97 |
+| dashboard-grafana-infra | backend | blocked | 1 |  |
 
 ## 卡住／待甲方決定
 
-- （無）
+- dashboard-grafana-infra（PR #100）：CI Security 因 certifi 2026.7.22 弱點（PYSEC-2026-4320）失敗，非本 PR 造成；先合 certifi-security-bump，再 sync PR #100、重跑 qa
 
 ## 注意事項（踩過的坑）
 
