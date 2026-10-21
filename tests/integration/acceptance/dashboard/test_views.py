@@ -1,7 +1,8 @@
 """驗收 dashboard-views（開發規格 7.25「查詢來源」）：post_votes、post_sentiment_latest。
 
 種子資料放 radar DB（管理帳號寫入），以唯讀帳號查 view；看板名稱帶 uuid，斷言只看自己的看板，
-所以不需要 xdist_group。測試帳密與 compose.yaml 一致，不讀 .env。
+標 xdist_group("shared_radar_db")，避免被 cdc 模組 TRUNCATE 清掉（#111）。
+測試帳密與 compose.yaml 一致，不讀 .env。
 """
 
 import json
@@ -11,6 +12,8 @@ import urllib.request
 import uuid
 
 import pytest
+
+pytestmark = pytest.mark.xdist_group("shared_radar_db")
 
 RO_USER = os.environ.get("CLICKHOUSE_GRAFANA_USER", "grafana")
 RO_PASSWORD = os.environ.get("CLICKHOUSE_GRAFANA_PASSWORD", "it")

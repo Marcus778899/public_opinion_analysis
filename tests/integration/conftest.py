@@ -221,6 +221,12 @@ def postgres_url(worker: str) -> str:
 
 
 @pytest.fixture(scope="session")
+def wait_until():
+    """條件成立才繼續（逾時丟 TimeoutError）；取代固定 sleep，等 broker metadata 傳播用。"""
+    return _wait_until
+
+
+@pytest.fixture(scope="session")
 def kafka_settings() -> KafkaSettings:
     return KafkaSettings(bootstrap_servers=os.environ["IT_KAFKA_BOOTSTRAP"], client_id="it")
 
