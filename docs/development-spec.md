@@ -1045,12 +1045,12 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 
 - 表格的標題連到原文：只用 `posts_latest.url`，且限 `https://www.ptt.cc/` 開頭（否則留空）
 - 實作：`dashboard-panels`（2026-10-21，`infra/grafana/dashboards/radar.json`）。連結在 SQL 結果過濾（`url` 欄不是 `https://www.ptt.cc/` 開頭就為空字串），表格以 data link 套在標題欄並隱藏 `url`；情緒分布、情緒趨勢的類別為寬表欄（負面／中立／正面／不確定／尚無）；`min_score` 用 `toFloat64OrDefault(${min_score:sqlstring}, 0.5)` 轉型，輸入非數字時退回 0.5；警示面板不依看板變數過濾且以 `alert_id` 去重（Kafka 至少一次）；面板 6 的爭議度在推＋噓 < 10 時留空（同 7.23），情緒低於 `min_score` 顯示「不確定」、空白代表沒有推論；JOIN 右邊的 view／`posts_latest` 一律先以 `post_id IN (…)` 縮到左邊會用到的文章，避免整張表聚合
-- 面板 SQL 只用 ClickHouse plugin 的 `$__timeFilter_ms`（欄位都是 DateTime64；秒級的 `$__timeFilter` 展開方式各來源說法不一）、`$__timeInterval` 與上面兩個變數，驗收測試代換後直接在 ClickHouse 執行；`$__timeFilter_ms`、`$__timeInterval` 由 `dashboard-integration` 經 `/api/ds/query` 驗證；`$board`、`$min_score` 由 Grafana 前端代換，SQL 一律寫 `${board:sqlstring}`、`${min_score:sqlstring}`（sqlstring 自帶引號，不可再手寫 `'…'`；資安 L-5，未指定格式會原樣拼接）。sqlstring 只把 `'` 變 `''`、不處理反斜線，ClickHouse 卻把 `\'` 當跳脫的引號，所以 SQL 端擋不住含反斜線的值；防線是 `allowCustomValue: false`（變數值只能是選項之一）加唯讀帳號。威脅表見下，整合測試依假設的格式（多選展開成 `'a','b'`、單引號與反斜線跳脫、空清單展開為空字串）模擬，真正的前端展開（多選、All、含單引號的值、沒有看板）由階段收尾的 uat 以真畫面確認
+- 面板 SQL 只用 ClickHouse plugin 的 `$__timeFilter_ms`（欄位都是 DateTime64；秒級的 `$__timeFilter` 展開方式各來源說法不一）、`$__timeInterval` 與上面兩個變數，驗收測試代換後直接在 ClickHouse 執行；`$__timeFilter_ms`、`$__timeInterval` 由 `dashboard-integration` 經 `/api/ds/query` 驗證；`$board`、`$min_score` 由 Grafana 前端代換，SQL 一律寫 `${board:percentencode}`、`${min_score:percentencode}`，放在 SQL 單引號裡，由 ClickHouse 解碼：`has(splitByChar(',', trim(BOTH '{}' FROM decodeURLComponent('${board:percentencode}'))), board)`（多選值 Grafana 先包成 `{a,b}` 再整串編碼，所以解碼後去掉大括號再切）、`toFloat64OrDefault(decodeURLComponent('${min_score:percentencode}'), 0.5)`。percentencode 連 `'`、`\`、`(`、`)` 都編碼，使用者給的字串不會進入 SQL 結構（不用 sqlstring：它只跳脫 `'`，ClickHouse 卻把 `\'` 當跳脫的引號）。威脅表：，整合測試依假設的格式（多選展開成 `'a','b'`、單引號與反斜線跳脫、空清單展開為空字串）模擬，真正的前端展開（多選、All、含單引號的值、沒有看板）由階段收尾的 uat 以真畫面確認
 
 | 輸入 | 風險 | 對策 |
 |---|---|---|
-| 網址 `var-board`／`var-min_score` 帶單引號或 SQL 片段 | 改寫查詢（L-5） | `:sqlstring` 跳脫單引號；`allowCustomValue: false` 丟棄非選項的值；ClickHouse 用唯讀帳號，最壞是讀到本來就可讀的資料 |
-| 帶反斜線（`\') OR 1=1 --`） | sqlstring 不跳脫反斜線，可提早結束字串 | 同上，主要靠 `allowCustomValue: false`；整合測試只模擬展開，真畫面由 uat 確認 |
+| 網址 `var-board`／`var-min_score` 帶單引號、反斜線或 SQL 片段（L-5） | 改寫查詢 | 全部引用用 `:percentencode`，編碼後只剩 `A-Za-z0-9-_.~%`，不可能結束 SQL 字串；解碼在 ClickHouse 內，結果只當值比對；靜態測試要求每個引用都是此格式 |
+| 解碼後是非數字或不存在的看板 | 面板出錯或空 | `toFloat64OrDefault` 退回 0.5；看板比對不到就回空 |
 
 **部署與權限**
 
