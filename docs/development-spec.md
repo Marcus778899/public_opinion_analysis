@@ -307,7 +307,7 @@
 - **端到端環境**：
   - 爬蟲以 `CRAWLER_PTT_BASE_URL` 改打假伺服器（只換主機，資料中的網址仍是 `www.ptt.cc`），任何請求都不會打到真的 PTT
   - Scheduler 以 `SCHEDULER_TIME_SCALE=0.05` 縮短重爬間隔
-  - Postgres、Kafka、ClickHouse 與自寫服務的 log（`/app/log`）都改掛 e2e 專用的 volume，不碰開發資料。`make e2e-down` 用 `down -v` 刪除這些 volume；log 原本與開發環境共用 `app_logs`，2026-10-10 因此刪掉開發環境 10/07～10/09 的 log（#29）。單元測試檢查開發環境中掛 `app_logs` 的服務在 e2e 都改掛 `e2e_app_logs`
+  - Postgres、Kafka、ClickHouse、Grafana（`e2e_grafana_data`，UAT v0.7.0 F-1、#101）與自寫服務的 log（`/app/log`）都改掛 e2e 專用的 volume，不碰開發資料。`make e2e-down` 用 `down -v` 刪除這些 volume；log 原本與開發環境共用 `app_logs`，2026-10-10 因此刪掉開發環境 10/07～10/09 的 log（#29）。單元測試檢查開發環境中掛 `app_logs` 的服務在 e2e 都改掛 `e2e_app_logs`
   - 開發環境與 e2e 共用 compose 專案與容器名稱，不能同時運作。`make e2e-up` 先以 `down`（不加 `-v`）停掉開發環境，`make up`、`make up-app` 先以 `make e2e-down` 清掉 e2e 環境；跑 e2e 前要先停掉開發環境的長時間作業（例如驗收）
     - 只靠 compose 自己判斷會出錯：設定在兩邊相同的服務（Apicurio、Kafka UI）不會被重建，沿用的舊 Apicurio 連線池指向已被取代的 Postgres，Debezium 註冊 schema 失敗、task 一啟動就 `FAILED`（#41）
     - 判斷方式：`radar_fake_ptt` 容器存在 = e2e 環境
