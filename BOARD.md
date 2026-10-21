@@ -32,7 +32,7 @@
 
 ## 卡住／待甲方決定
 
-- v0.7.0 發版中：甲方驗收 PASS、security PASS 3fccb90；release.py open → CI 綠 → finish
+- （無）
 
 ## 注意事項（踩過的坑）
 
