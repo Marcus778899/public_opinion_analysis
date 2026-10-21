@@ -39,6 +39,17 @@ _LOST_ASSIGNMENT_CODES = frozenset(
 )
 
 
+# coordinator 重啟或搬移時的暫時性錯誤；commit 退避重試（開發規格 2.2）
+_RETRIABLE_COMMIT_CODES = frozenset(
+    {
+        KafkaError.COORDINATOR_LOAD_IN_PROGRESS,
+        KafkaError.COORDINATOR_NOT_AVAILABLE,
+        KafkaError.NOT_COORDINATOR,
+    }
+)
+_COMMIT_MAX_RETRIES = 6
+
+
 @dataclass(frozen=True)
 class Rejection:
     """handler 回報寫不進下游的訊息；index 是傳入 handler 的第幾筆（開發規格 7.13）。"""
@@ -213,14 +224,41 @@ class BatchConsumer[T: BaseModel]:
         consumer.pause(partitions)
 
     def _commit(self) -> None:
-        """同步 commit；失去 assignment 只記 warning（開發規格 2.2），其他錯誤照舊拋出。"""
-        try:
-            self._consumer.commit(asynchronous=False)
-        except KafkaException as e:
-            err = e.args[0] if e.args else None
-            if err is None or err.code() not in _LOST_ASSIGNMENT_CODES:
-                raise
-            log.warning("commit skipped, partitions reassigned (batch will be redone): %s", err)
+        """同步 commit；失去 assignment 只記 warning，暫時性錯誤退避重試，其他照舊拋出。"""
+        delays = self._backoff()
+        attempt = 0
+        while True:
+            try:
+                self._consumer.commit(asynchronous=False)
+                return
+            except KafkaException as e:
+                err = e.args[0] if e.args else None
+                if err is None:
+                    raise
+                if err.code() in _LOST_ASSIGNMENT_CODES:
+                    log.warning(
+                        "commit skipped, partitions reassigned (batch will be redone): %s", err
+                    )
+                    return
+                if err.code() not in _RETRIABLE_COMMIT_CODES or attempt >= _COMMIT_MAX_RETRIES:
+                    raise
+                attempt += 1
+                delay = next(delays)
+                if self._stop.is_set():
+                    log.warning("stopping during commit retry, batch left uncommitted: %s", err)
+                    return
+                log.warning(
+                    "commit failed code=%s, retry %d/%d in %.1fs: %s",
+                    err.code(),
+                    attempt,
+                    _COMMIT_MAX_RETRIES,
+                    delay,
+                    err,
+                )
+                self._stop.wait(delay)
+                if self._stop.is_set():
+                    log.warning("stopping during commit retry, batch left uncommitted: %s", err)
+                    return
 
     def _install_signal_handlers(self) -> dict[int, object]:
         # NOTE: signal 只能在主執行緒註冊；在其他執行緒跑時由呼叫端負責 stop()
