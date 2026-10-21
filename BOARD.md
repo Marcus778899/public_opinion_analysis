@@ -39,7 +39,7 @@
 | gitleaks-cleanup-archive-ignore | backend | done | 0 | PR #150 |
 | bert-design | architect | done | 1 | PR #154 |
 | gitleaks-archive-allowlist | backend | done | 0 | PR #153 |
-| bert-skeleton | architect | qa | 0 |  |
+| bert-skeleton | architect | done | 0 | PR #156 |
 
 ## 卡住／待甲方決定
 
