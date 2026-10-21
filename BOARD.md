@@ -6,8 +6,8 @@
 
 ## 目標與範圍
 
-- 本輪：（尚未設定）
-- 不做：（尚未設定）
+- 本輪：v0.8.0 階段 8 BERT 與 shadow 比較：S8-01 fine-tune 中文 BERT（D-019：agent 備 notebook／匯出，甲方跑訓練）、S8-02 新 model_version 並行推論、S8-03 ClickHouse 比較兩版（macro-F1、不一致文章、延遲）；驗收見開發規格階段 8；另：gitleaks 封存根治（D-018）
+- 不做：上雲（階段 9）；backlog 其餘 issue
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
@@ -24,6 +24,8 @@
 | 2026-10-20 | D-015 | CI 加速加 pytest-xdist，不用付費 runner |
 | 2026-10-20 | D-016 | qa 也可以跑 docker compose |
 | 2026-10-21 | D-017 | Dashboard 變數一律 percentencode 由 ClickHouse 解碼；驗收只做靜態＋正常值，不用攻擊字串 |
+| 2026-10-21 | D-018 | gitleaks 不掃 tasks/ 封存，改設定根治（不再逐筆加忽略） |
+| 2026-10-21 | D-019 | 階段 8：agent 準備 notebook／匯出／評估，甲方在 Colab 跑 fine-tune |
 
 ## 任務狀態
 

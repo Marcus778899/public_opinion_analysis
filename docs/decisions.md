@@ -103,3 +103,15 @@
 - 理由：寫攻擊字串測試的方向被安全機制擋下；改成從格式上保證不可能注入
 - 影響：開發規格 7.25、`dashboard-min-score-select` 驗收條件 2
 - 日期：2026-10-21
+
+### D-018 封存派工單反覆觸發 gitleaks 誤判
+- 決定：根治：gitleaks 不掃 `tasks/` 底下的封存（派工單、qa／review 報告），改 gitleaks 設定而非逐筆加忽略
+- 理由：v0.6.0、v0.7.0、backlog 清理三次封存都觸發誤判，且每次修正單的報告又成為下一次的誤判來源
+- 影響：gitleaks 設定（派工單 `gitleaks-archive-allowlist`）；`tasks/` 只放派工流程文件，不可放設定值或密鑰
+- 日期：2026-10-21
+
+### D-019 階段 8 BERT fine-tune 的分工
+- 決定：A. agent 準備 fine-tune notebook、模型匯出與評估流程；甲方在 Colab／Kaggle 執行訓練並交回模型檔
+- 理由：agent 無法操作 Colab／Kaggle
+- 影響：開發規格階段 8 S8-01、`bert-design`
+- 日期：2026-10-21
