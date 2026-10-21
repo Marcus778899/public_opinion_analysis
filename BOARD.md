@@ -37,6 +37,7 @@
 | it-helper-mv-filter | backend | done | 0 | PR #141 |
 | e2e-volume-regression | backend | done | 0 | PR #140 |
 | dashboard-var-test-hardening | backend | done | 1 | PR #143 |
+| kafka-commit-retry | backend | done | 0 | PR #145 |
 
 ## 卡住／待甲方決定
 
