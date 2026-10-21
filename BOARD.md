@@ -40,10 +40,11 @@
 | dashboard-views | backend | done | 0 | PR #105 |
 | dashboard-panels | backend | done | 0 | PR #107 |
 | dashboard-integration | backend | done | 1 | PR #109 |
+| e2e-grafana-volume | backend | todo | 0 |  |
 
 ## 卡住／待甲方決定
 
-- （無）
+- UAT v0.7.0 範圍 1、2（6 個面板截圖、變數與連結的真前端行為）未測：uat 讀不到 GRAFANA_ADMIN_PASSWORD，待甲方決定怎麼補測
 
 ## 注意事項（踩過的坑）
 

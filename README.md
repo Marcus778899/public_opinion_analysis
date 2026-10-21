@@ -4,7 +4,7 @@
 
 ## 快速開始
 
-1. 設定：`python3 scripts/check_env.py`，依提示在 `.env` 填入缺少的值（Telegram 需要 `TELEGRAM_BOT_TOKEN`，並在 `TELEGRAM_ALLOWED_CHAT_IDS` 填自己的 chat id——沒填 bot 會拒絕啟動，要開放所有人必須另設 `TELEGRAM_ALLOW_ALL=true`（D-010）；情緒推論需要 `INFERENCE_MODEL_VERSION` 與 `models/` 下的模型）
+1. 設定：在自己的終端機（不是 agent 的 sandbox）跑 `python3 scripts/check_env.py`，依提示在 `.env` 填入缺少的值（Telegram 需要 `TELEGRAM_BOT_TOKEN`，並在 `TELEGRAM_ALLOWED_CHAT_IDS` 填自己的 chat id——沒填 bot 會拒絕啟動，要開放所有人必須另設 `TELEGRAM_ALLOW_ALL=true`（D-010）；情緒推論需要 `INFERENCE_MODEL_VERSION` 與 `models/` 下的模型；Dashboard 需要自訂 `GRAFANA_ADMIN_PASSWORD` 與 `CLICKHOUSE_GRAFANA_PASSWORD`，不可用 `change-me`）
 2. 安裝：`make setup`（Python 3.12、[uv](https://docs.astral.sh/uv/)、Docker；`pre-commit install` 啟用 commit 前檢查）
 3. 啟動整套服務（會對真實 PTT 發請求；自動建表、topic 與 CDC connector）：
 
@@ -19,7 +19,7 @@
    ```
 
 4. 建立看板：`make seed`（api 已在上一步的容器裡，不需要另外 `make api`；Gossiping、Stock、Tech_Job，Scheduler 30 秒內開始爬取）；狀態：`curl localhost:8000/status`
-5. 在 Telegram 對 bot 傳 `/start`，用主選單按鈕訂閱看板、看現在熱門與看板概況
+5. 在 Telegram 對 bot 傳 `/start`，用主選單按鈕訂閱看板、看現在熱門與看板概況；Dashboard：瀏覽器開 `http://localhost:<GRAFANA_PORT>`，帳號 `admin`、密碼為 `GRAFANA_ADMIN_PASSWORD`，dashboard「radar」不需手動設定（第 3 步已一併啟動 Grafana）
 6. 停止（資料保留在 volume）：
 
    ```bash
@@ -55,7 +55,8 @@
 | 情緒標註與模型 | v0.6.0 | LLM 主標註、Claude 交叉比對、人工測試集、訓練與評估（Stock 重新標註待補，見開發規格第 6 章） |
 | 情緒推論 | v0.6.0 | 新文章即時推論情緒，結果寫 ClickHouse |
 | 熱度偵測與警示 | v0.6.0 | 依推文速度與平常的倍數發出文章、看板警示（3 天驗收待做，見開發規格第 6 章） |
-| Telegram bot | v0.6.0 | 按鈕操作訂閱、現在熱門、看板概況、通知設定；警示含推／噓／箭頭、爭議度與情緒 |
+| Telegram bot | v0.6.0 | 按鈕操作訂閱、現在熱門、看板概況、通知設定；警示含推／噓／箭頭、爭議度與情緒；v0.7.0 起沒設允許清單就拒絕啟動（D-010） |
+| Dashboard | v0.7.0 | Grafana 6 個面板：各看板推文量、情緒分布與趨勢、爭議度最高的文章、近 24 小時警示、熱門文章排行（D-014） |
 
 ## 架構
 
@@ -85,7 +86,8 @@
 | 版本 | 日期 | 內容 |
 |---|---|---|
 | `stage-1`、`stage-2` | 2026-10 | 爬取入庫、CDC → ClickHouse |
-| v0.6.0 | （發版中） | 階段 3～6：情緒標註與模型、推論、熱度警示、Telegram 互動 |
+| v0.6.0 | 2026-10-20 | 階段 3～6：情緒標註與模型、推論、熱度警示、Telegram 互動 |
+| v0.7.0 | （發版中） | 階段 7：Grafana Dashboard；整合測試改用 compose test 服務並平行執行（#78）；bot 允許清單 fail closed（D-010） |
 
 ## 授權
 
