@@ -410,3 +410,48 @@ def test_rejections_from_successful_retry_go_to_dlq():
     assert len(calls) == 2
     assert dlq_offsets(dlq_producer) == [7]
     assert fake.commits == 1
+
+
+# --- #144：commit 暫時性錯誤退避重試 ---
+
+
+def test_commit_coordinator_error_is_retried_without_rerunning_handler():
+    handled = []
+    consumer, fake, _ = build([[msg(1)]], handled.append)
+    fake.commit_errors = [KafkaException(FakeError(KafkaError.NOT_COORDINATOR))]
+
+    consumer.run()
+
+    assert len(handled) == 1
+    assert fake.commits == 1
+
+
+def test_commit_retry_beyond_limit_raises():
+    consumer, fake, _ = build([[msg(1)]], lambda items: None)
+    fake.commit_errors = [
+        KafkaException(FakeError(KafkaError.COORDINATOR_NOT_AVAILABLE)) for _ in range(50)
+    ]
+
+    with pytest.raises(KafkaException):
+        consumer.run()
+
+    assert fake.commits == 0
+
+
+def test_commit_non_retriable_error_raises_immediately():
+    consumer, fake, _ = build([[msg(1)]], lambda items: None)
+    errors = [KafkaException(FakeError(KafkaError._TRANSPORT)) for _ in range(3)]
+    fake.commit_errors = errors
+
+    with pytest.raises(KafkaException):
+        consumer.run()
+
+    assert len(errors) == 2
+
+
+def test_commit_exception_without_error_arg_raises():
+    consumer, fake, _ = build([[msg(1)]], lambda items: None)
+    fake.commit_errors = [KafkaException()]
+
+    with pytest.raises(KafkaException):
+        consumer.run()

@@ -135,7 +135,7 @@
 | 錯誤處理 | 暫時性錯誤（網路、DB 斷線）：指數退避重試，不 commit；資料錯誤（解析、驗證失敗，或 handler 回報寫不進下游的訊息）：寫入 `dlq` 後 commit（7.13） |
 | 重試期間 | `pause()` 已分配的 partition 並持續 `poll()`，維持 group 成員資格；重試不限時間，成功後 `resume()`（#11：只 sleep 不 poll 會超過 `max.poll.interval.ms` 被踢出 group） |
 | 重試上限 | 由各服務的 handler 決定，`BatchConsumer` 不設上限：爬蟲同一網址 5 次後略過；ingest 不設上限（PG 停機就等）；串流標註依服務商冷卻時間等待（`TransientError.retry_after_s`） |
-| commit 失敗 | 失去 assignment（`_ASSIGNMENT_LOST`、`UNKNOWN_MEMBER_ID`、`ILLEGAL_GENERATION`、`REBALANCE_IN_PROGRESS`）記 warning 後繼續，該批由下一個取得 partition 的成員重做（冪等）；其他錯誤照舊中止 |
+| commit 失敗 | 失去 assignment（`_ASSIGNMENT_LOST`、`UNKNOWN_MEMBER_ID`、`ILLEGAL_GENERATION`、`REBALANCE_IN_PROGRESS`）記 warning 後繼續，該批由下一個取得 partition 的成員重做（冪等）；暫時性錯誤（`COORDINATOR_LOAD_IN_PROGRESS`、`COORDINATOR_NOT_AVAILABLE`、`NOT_COORDINATOR`，Kafka 重啟時出現）用同一組退避重試最多 6 次，每次記 WARNING（錯誤碼、第幾次），期間收到停止訊號就結束、不 commit；超過上限或其他錯誤照舊中止（#144） |
 | 優雅關閉 | 收到 SIGTERM 先處理完當前批次、commit、再關閉；爬蟲一個列表任務可能需要 1 分鐘以上，compose 給 `stop_grace_period: 90s`，逾時被強制結束也只是該批重做 |
 
 ### 2.3 DLQ 訊息
