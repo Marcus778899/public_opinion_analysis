@@ -6,15 +6,38 @@ boards 只讀，寫入者仍是 API。
 from datetime import datetime
 from typing import Literal
 
-from sqlalchemy import and_, delete, exists, or_, select
+from sqlalchemy import and_, delete, exists, literal, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from radar.bot.views import ChatPrefs
 from radar.common.db.models import Board, ChatSettings, MutedPost, Subscription
+from radar.common.log import log
 from radar.common.schemas import Alert
 
 BOARD = "board"
+
+
+def filter_recipients(alert: Alert, rows: list[tuple[int, bool | None, bool]]) -> list[int]:
+    """rows: (chat_id, 該種警示開關；None = 沒有 chat_settings 列 = 開啟, 是否已設不再通知)。"""
+    kept: list[int] = []
+    for chat_id, enabled, muted in rows:
+        if enabled is False:
+            reason = "chat_settings disabled"
+        elif muted:
+            reason = "post muted"
+        else:
+            kept.append(chat_id)
+            continue
+        log.info(
+            "alert %s (%s %s) skipped for chat %s: %s",
+            alert.alert_id,
+            alert.unit_type,
+            alert.unit_key,
+            chat_id,
+            reason,
+        )
+    return kept
 
 
 class SubscriptionRepository:
@@ -116,23 +139,21 @@ class PreferenceRepository:
         enabled = (
             ChatSettings.post_alerts if alert.unit_type == "post" else ChatSettings.board_alerts
         )
-        stmt = (
-            select(Subscription.chat_id)
-            .outerjoin(ChatSettings, ChatSettings.chat_id == Subscription.chat_id)
-            .where(
-                Subscription.unit_type == BOARD,
-                Subscription.unit_key == alert.board,
-                # 沒有 chat_settings 列 = 全部開啟
-                or_(ChatSettings.chat_id.is_(None), enabled.is_(True)),
-            )
-            .order_by(Subscription.chat_id)
-        )
-        if alert.unit_type == "post":
-            muted = exists().where(
+        muted = (
+            exists().where(
                 and_(MutedPost.chat_id == Subscription.chat_id, MutedPost.post_id == alert.unit_key)
             )
-            stmt = stmt.where(~muted)
-        return list(self._session.scalars(stmt))
+            if alert.unit_type == "post"
+            else literal(False)
+        )
+        stmt = (
+            select(Subscription.chat_id, enabled, muted)
+            .outerjoin(ChatSettings, ChatSettings.chat_id == Subscription.chat_id)
+            .where(Subscription.unit_type == BOARD, Subscription.unit_key == alert.board)
+            .order_by(Subscription.chat_id)
+        )
+        rows = [(r[0], r[1], bool(r[2])) for r in self._session.execute(stmt)]
+        return filter_recipients(alert, rows)
 
     def forget(self, chat_id: int) -> None:
         """使用者封鎖 bot（403）：刪掉該 chat 的訂閱、設定與不再通知。"""
