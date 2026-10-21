@@ -16,3 +16,5 @@ e245c302c8020f4a4b10852a80f181c96f8e26c5:infra/docker-compose.yaml:generic-api-k
 95ef462c3de5f6cf78d4041b222c40ba3e457b36:.gitleaksignore:curl-auth-user:4
 482309a50911f7b57c35c7998c104352ee7b749d:tasks/v0.7.0/gitleaks-archive-ignore.review.md:generic-api-key:9
 482309a50911f7b57c35c7998c104352ee7b749d:tasks/v0.7.0/gitleaks-archive-ignore.qa.md:generic-api-key:9
+d452b141b0b2d00e80101ec3fe2fc79768a221ce:tasks/backlog-cleanup-2026-10/gitleaks-v070-archive-ignore.review.md:generic-api-key:9
+d452b141b0b2d00e80101ec3fe2fc79768a221ce:tasks/backlog-cleanup-2026-10/gitleaks-v070-archive-ignore.qa.md:generic-api-key:17
