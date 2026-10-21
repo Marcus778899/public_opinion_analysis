@@ -26,12 +26,19 @@
 | 2026-10-21 | D-017 | Dashboard 變數一律 percentencode 由 ClickHouse 解碼；驗收只做靜態＋正常值，不用攻擊字串 |
 | 2026-10-21 | D-018 | gitleaks 不掃 tasks/ 封存，改設定根治（不再逐筆加忽略） |
 | 2026-10-21 | D-019 | 階段 8：agent 準備 notebook／匯出／評估，甲方在 Colab 跑 fine-tune |
+| 2026-10-21 | D-020 | 推論套件 onnxruntime＋tokenizers |
+| 2026-10-21 | D-021 | 預訓練模型 ckiplab 與 hfl macbert 各訓一版比較（接受 GPL，不對外散布） |
+| 2026-10-21 | D-022 | Colab 端 torch、transformers、optimum |
+| 2026-10-21 | D-023 | shadow 上限 2 CPU、1.5g、INFERENCE_THREADS=2 |
+| 2026-10-21 | D-024 | 訓練資料只在 Colab 工作階段上傳 |
 
 ## 任務狀態
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
 | gitleaks-cleanup-archive-ignore | backend | done | 0 | PR #150 |
+| bert-design | architect | review | 1 |  |
+| gitleaks-archive-allowlist | backend | done | 0 | PR #153 |
 
 ## 卡住／待甲方決定
 
