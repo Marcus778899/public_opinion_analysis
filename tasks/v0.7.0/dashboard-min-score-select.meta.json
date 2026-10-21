@@ -1,0 +1,37 @@
+{
+  "task_id": "dashboard-min-score-select",
+  "kind": "feat",
+  "owner": "backend",
+  "lane": "full",
+  "title": "dashboard 的「情緒信心下限」（min_score）從文字框改成下拉選單並加說明文字；面板 SQL 的變數改用跳脫格式，修資安 L-5",
+  "issue": 123,
+  "branch": "feat/dashboard-min-score-select",
+  "worktree": ".worktrees/dashboard-min-score-select",
+  "pr": 124,
+  "qa": {
+    "result": "pass",
+    "sha": "c4fa7debbae751c2cadb977103a0487abb0d32ab",
+    "by": "qa",
+    "carried_from": "2698314c183537b2d87079d437914ce38147e40f"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "c4fa7debbae751c2cadb977103a0487abb0d32ab",
+    "by": "architect",
+    "carried_from": "2698314c183537b2d87079d437914ce38147e40f"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "730001afa90ba1ab54a0577d23205074f22d00a0",
+    "sha": "c4fa7debbae751c2cadb977103a0487abb0d32ab",
+    "carried_from": "2698314c183537b2d87079d437914ce38147e40f"
+  },
+  "qa_fails": 2,
+  "amend_sha": "2698314c183537b2d87079d437914ce38147e40f",
+  "rulings": 1,
+  "ruling": {
+    "result": "test_ok",
+    "sha": "2698314c183537b2d87079d437914ce38147e40f",
+    "after_fails": 2
+  }
+}

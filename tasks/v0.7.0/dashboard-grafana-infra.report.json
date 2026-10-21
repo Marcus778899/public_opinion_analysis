@@ -1,0 +1,31 @@
+{
+  "task_id": "dashboard-grafana-infra",
+  "status": "done",
+  "files_changed": [
+    ".env.example",
+    ".github/workflows/ci.yml",
+    "compose.ci.yaml",
+    "compose.yaml",
+    "docs/development-spec.md",
+    "docs/realtime-sentiment-radar-design.md",
+    "infra/clickhouse/users.d/grafana.xml",
+    "infra/docker-compose.yaml",
+    "infra/grafana/Dockerfile",
+    "infra/grafana/dashboards/.gitkeep",
+    "infra/grafana/provisioning/dashboards/radar.yaml",
+    "infra/grafana/provisioning/datasources/clickhouse.yaml",
+    "tests/integration/conftest.py"
+  ],
+  "verification": {
+    "command": "make check；docker compose --env-file .env --env-file <extra.env 含 GRAFANA_VERSION/PLUGIN_VERSION> -f .worktrees/dashboard-grafana-infra/compose.yaml run --rm test pytest tests/integration -n auto --dist loadgroup -q -v tests/integration/acceptance/dashboard/test_grafana_infra.py（之前先單跑 test_grafana_infra.py：22 passed）；跑完 down -v",
+    "exit_code": 0,
+    "tail": "make check: 1110 passed；run --rm test（全部整合測試，含 test_grafana_infra.py 22 項，Grafana 只接 internal network）: 172 passed in 43.71s；down -v 已執行；commit 59802f9；追加：7.26 做法 1 已改成現況（commit 見 git log），.gitkeep 已核可；review 退回修正後：make check 1110 passed，dev compose config -q 通過；測試 compose 未改，未重跑 run --rm test"
+  },
+  "open_questions": [
+    "主目錄 .env 缺新變數（GRAFANA_VERSION=13.0.2、GRAFANA_CLICKHOUSE_PLUGIN_VERSION=4.23.0、GRAFANA_PORT、GRAFANA_ADMIN_PASSWORD、CLICKHOUSE_GRAFANA_USER、CLICKHOUSE_GRAFANA_PASSWORD、IT_GRAFANA_HOST_PORT）；我讀不到 .env，驗證時用第二個 --env-file 補版本。請甲方依 .env.example 補進 .env，否則 run --rm test 與 make up 會因 ${:?} 直接失敗；dev 環境我沒有動（未重建容器），make up 時 clickhouse 會重建以載入 grafana.xml",
+    "datasource 必須用 native 協定（clickhouse:9000）：plugin 連線會帶 max_execution_time，readonly=1 只允許與目前相同的值；http 協定 health check 失敗。grafana.xml 的 max_execution_time 因此固定 60（已寫入開發規格 7.25）。dashboard-panels 單的查詢若被 plugin 另帶 settings，可能再撞 readonly，要留意",
+    "CLICKHOUSE_GRAFANA_USER 無法做到真正可設定：XML 的使用者名稱不能 from_env，固定為 grafana；.env.example 已註明須一致",
+    "Grafana 選 13.0.2＋plugin 4.23.0（相容性測試通過）；未試 13.2.4（Docker Hub 是否有該 tag 未查，hub.docker.com 在 sandbox 無法連）",
+    "PR 的 CI 綠燈尚未驗（未 push）；arm64 屬 S9-01 未測"
+  ]
+}

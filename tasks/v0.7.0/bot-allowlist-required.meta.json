@@ -1,0 +1,29 @@
+{
+  "task_id": "bot-allowlist-required",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "Telegram bot 的允許清單改成 fail closed：`TELEGRAM_ALLOWED_CHAT_IDS` 沒設（或空）就啟動失敗，要開放所有人必須明確設 `TELEGRAM_ALLOW_ALL=true`（D-010）",
+  "issue": 91,
+  "branch": "fix/bot-allowlist-required",
+  "worktree": ".worktrees/bot-allowlist-required",
+  "pr": 93,
+  "qa": {
+    "result": "pass",
+    "sha": "33dbfc3fd491e61291bfcb37bf1fb1bc9e18cc90",
+    "by": "qa",
+    "carried_from": "b9d4a61b5898008003f121c5237337d8fb54098c"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "33dbfc3fd491e61291bfcb37bf1fb1bc9e18cc90",
+    "by": "architect",
+    "carried_from": "b9d4a61b5898008003f121c5237337d8fb54098c"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "0cd5593826823bc27f8e94f59ae517774a7ea311",
+    "sha": "33dbfc3fd491e61291bfcb37bf1fb1bc9e18cc90",
+    "carried_from": "b9d4a61b5898008003f121c5237337d8fb54098c"
+  }
+}

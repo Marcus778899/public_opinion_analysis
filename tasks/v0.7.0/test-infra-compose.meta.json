@@ -1,0 +1,31 @@
+{
+  "task_id": "test-infra-compose",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "整合測試改用根目錄 `compose.yaml` 的 `test` 服務與 kafka／postgres／clickhouse，移除 testcontainers；CI 每個事件只跑一次整合測試、只改文件時跳過（開發規格 7.26 順序 1）",
+  "issue": 90,
+  "branch": "chore/test-infra-compose",
+  "worktree": ".worktrees/test-infra-compose",
+  "pr": 95,
+  "qa": {
+    "result": "pass",
+    "sha": "11613db8c5f835e70b8c7a9b3b4cfb0aeda4fbb6",
+    "by": "qa",
+    "carried_from": "b94a8522fa25736be17fcb3a30166266b21fac09"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "11613db8c5f835e70b8c7a9b3b4cfb0aeda4fbb6",
+    "by": "architect",
+    "carried_from": "b94a8522fa25736be17fcb3a30166266b21fac09"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "b766891bb473baf2e152f9edaf3181c46174e8e0",
+    "sha": "11613db8c5f835e70b8c7a9b3b4cfb0aeda4fbb6",
+    "carried_from": "b94a8522fa25736be17fcb3a30166266b21fac09"
+  },
+  "amend_sha": "efe68266019005d679df22ad99630c0e7ab41e87",
+  "qa_fails": 1
+}

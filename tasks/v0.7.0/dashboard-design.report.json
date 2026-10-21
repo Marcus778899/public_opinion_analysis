@@ -1,0 +1,20 @@
+{
+  "task_id": "dashboard-design",
+  "status": "done",
+  "files_changed": [
+    "docs/development-spec.md",
+    "docs/realtime-sentiment-radar-design.md"
+  ],
+  "verification": {
+    "command": "git diff --stat develop",
+    "exit_code": 0,
+    "tail": " docs/development-spec.md                | 98 ++++++++++++++++++++++++++++++++-\n docs/realtime-sentiment-radar-design.md |  3 +\n 2 files changed, 100 insertions(+), 1 deletion(-)"
+  },
+  "open_questions": [
+    "待決定（①範圍＋②新技術棧）：階段 7 採 A 全用 Grafana 面板（建議，S）或 B Grafana 只做監控＋自建 web 前端（M～L）；比較見開發規格 7.25。選 A 即同時核可新增 grafana/grafana-oss image 與 grafana-clickhouse-datasource plugin；選 B 另需決定前端框架、圖表套件、node 工具鏈與監控資料來源，並另出設計、派 designer",
+    "需調查：無。docs/research/dashboard-grafana.md 查不到的項目已改成實作單的驗收測試（開發規格 7.25）：Grafana＋plugin 與 ClickHouse 26.8 相容、離線重啟、唯讀帳號權限、from_env 列在 dashboard-grafana-infra 的 tests/integration/acceptance/dashboard/test_grafana_infra.py；$__timeFilter_ms 對 DateTime64(6) 的邊界列在 dashboard-integration；plugin arm64 併入 S9-01",
+    "自行決定（寫在 7.25「自行決定」表）：plugin 在建置 image 時裝（infra/grafana/Dockerfile，執行時不連網、不自動更新）；Grafana 與 plugin 都釘完整 patch 號，GRAFANA_VERSION 取 Docker Hub 拉得到的 tag（調查時 13.0.2），plugin 4.23.0，相容性測試不過就退到通過的最新版並回寫 7.25；唯讀帳號用 readonly profile＋allow_databases，不用 XML <grants>；時間巨集用 $__timeFilter_ms；查詢共用用 ClickHouse view；推文量用 commented_at；不開匿名檢視；排行前 20",
+    "新小節維持 7.25；與 test-infra-design 撞號時由後合併者處理",
+    "dashboard-grafana-infra 的負責檔案多了 infra/grafana/Dockerfile；它和 infra/docker-compose.yaml 都是受保護路徑，需要 architect review"
+  ]
+}
