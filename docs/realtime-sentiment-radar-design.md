@@ -711,7 +711,7 @@ Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、�
 | Kafka UI | ~0.3GB |
 | Grafana | ~0.1～0.2GB |
 | 自寫 Python 服務 | ~1～1.5GB |
-| shadow 推論（BERT，階段 8 比較期間） | 未實測；BERT-base fp32 權重推估約 0.44GB，實測與上限見開發規格 7.27 |
+| shadow 推論（BERT，階段 8 比較期間） | 上限 1.5GB、2 CPU（D-023）；BERT-base fp32 權重推估約 0.44GB，實測見開發規格 7.27 步驟 4 |
 | **合計** | **約 6～7GB** |
 
 ### 11.2 吞吐量

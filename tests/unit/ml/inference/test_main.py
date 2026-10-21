@@ -9,11 +9,13 @@ from sklearn.pipeline import Pipeline
 from radar.common.clickhouse import ClickHouseError
 from radar.common.enums import Polarity
 from radar.common.schemas import CdcPost, Prediction
+from radar.common.settings import InferenceRole
 from radar.ml.inference.main import (
     HashCache,
     Predictor,
     load_cache,
     predict,
+    require_primary,
     select_posts,
     should_predict,
     text_hash,
@@ -425,3 +427,12 @@ def test_predictor_publishes_text_hash_of_model_input():
 
     [p] = sink.published
     assert p.text_hash == text_hash(post_text("標題", "內文", MAX_CHARS))
+
+
+def test_require_primary_accepts_primary():
+    require_primary(InferenceRole.PRIMARY)
+
+
+def test_require_primary_rejects_shadow_until_implemented():
+    with pytest.raises(NotImplementedError):
+        require_primary(InferenceRole.SHADOW)

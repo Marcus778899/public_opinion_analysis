@@ -19,6 +19,7 @@ from radar.ml.labeling.cross_check import fetch_whole_post_labels, kappa
 from radar.ml.labeling.manual import MANUAL_LABELER
 from radar.ml.labeling.sampling import fetch_posts
 from radar.ml.labeling.testset import TESTSET_DIR, load_human_labels
+from radar.ml.training.classifier import Classifier
 from radar.ml.training.dataset import Example, post_text
 from radar.ml.training.train import load_model, write_card
 
@@ -42,6 +43,27 @@ class Agreement:
     n: int
     accuracy: float
     cohen_kappa: float
+
+
+@dataclass(frozen=True)
+class RuntimeStats:
+    """CPU 推論耗時與記憶體（開發規格 7.27 步驟 4）；寫進 evaluation.md 供選 fp32／int8。"""
+
+    threads: int
+    batch_size: int
+    per_post_p50_ms: float
+    per_post_p95_ms: float
+    # 每批 batch_size 篇的耗時；進 shadow 門檻見 7.27「自行決定」
+    per_batch_p50_s: float
+    per_batch_max_s: float
+    peak_rss_mb: float
+
+
+def measure_runtime(
+    classifier: Classifier, texts: list[str], *, batch_size: int, threads: int
+) -> RuntimeStats:
+    # TODO(bert-classifier): 計時用可注入的時鐘；記憶體峰值取程序的 max RSS
+    raise NotImplementedError  # pragma: no cover（骨架）
 
 
 def evaluate_model(pipeline: Pipeline, examples: list[Example]) -> ClassificationReport:
