@@ -30,10 +30,11 @@
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
 | ci-sync-branch-update | architect | done | 1 | PR #131 |
-| integration-flaky-tests | backend | in-progress | 0 |  |
+| integration-flaky-tests | backend | done | 0 | PR #138 |
 | bot-skip-alert-log | backend | done | 0 | PR #133 |
 | gitleaks-v070-archive-ignore | backend | done | 0 | PR #134 |
 | grafana-dockerfile-arg | backend | done | 0 | PR #136 |
+| it-helper-mv-filter | backend | in-progress | 0 |  |
 
 ## 卡住／待甲方決定
 
