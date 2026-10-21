@@ -39,10 +39,11 @@
 | gitleaks-cleanup-archive-ignore | backend | done | 0 | PR #150 |
 | bert-design | architect | done | 1 | PR #154 |
 | gitleaks-archive-allowlist | backend | done | 0 | PR #153 |
+| bert-skeleton | architect | qa | 0 |  |
 
 ## 卡住／待甲方決定
 
-- （無）
+- 待甲方決定 D-025（預訓練模型 pickle 權重載入方式；擋 bert-notebook）
 
 ## 注意事項（踩過的坑）
 
