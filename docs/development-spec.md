@@ -1262,7 +1262,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 
 - `model_version` = `bert-<BASE>-<UTC yyyymmddHHMM>`（`BASE` 為 `macbert`｜`ckip`），int8 版加 `-int8`，由 notebook 產生；`base_model` 記模型名稱與 revision
 - 匯出：notebook 用 `optimum-cli export onnx`（動態軸預設開）。`--dynamo` 與 opset 官方文件前後矛盾（調查 2），不靠文件判斷：匯出後在 notebook 內比對 PyTorch 與 ONNX 的 logits（驗證集抽樣，最大絕對差 < 1e-3）才打包，int8 版另比對驗證集 macro-F1
-- tokenizer：模型包的 `tokenizer.json` 由 notebook 以 `BertTokenizerFast` 載入後 `save_pretrained` 產生（ckiplab 沒有 `tokenizer.json`，從 `vocab.txt` 轉換；是否改用 Google 版 tokenizer 見需調查 2）。打包前以推論端的載入方式 `tokenizers.Tokenizer.from_file("tokenizer.json")` 重新編碼驗證集抽樣，`input_ids` 須與訓練用的 tokenizer 完全一致；上面的 PyTorch／ONNX logits 比對也用這組 ids，一併驗到推論端的 tokenizer
+- tokenizer：`macbert` 用自己 repo（釘選 revision）的 tokenizer；`ckip` 照 ckiplab README 用 `google-bert/bert-base-chinese` 的 tokenizer，同樣釘 revision（值見調查末節第 4 項）。兩者都以 `BertTokenizerFast` 載入後 `save_pretrained` 產生模型包的 `tokenizer.json`。打包前以推論端的載入方式 `tokenizers.Tokenizer.from_file("tokenizer.json")` 重新編碼驗證集抽樣，`input_ids` 須與訓練用的 tokenizer 完全一致；上面的 PyTorch／ONNX logits 比對也用這組 ids，一併驗到推論端的 tokenizer
 - 不接受 pickle 類格式（`.bin`、`.pt`、joblib）：ONNX 與 JSON 載入時不執行程式。`load_model` 的 joblib 只用於本機訓練的 baseline（現狀）
 
 **載入**：新增 `ml/training/classifier.py`，`Classifier` 介面 `predict_proba(texts) -> list[dict[Polarity, float]]`（三類齊全、總和為 1），`load_classifier(model_dir, *, threads)` 依 `model_card.kind` 回傳 `(Classifier, ModelCard)`（簽名見骨架）。`evaluate.py`、`inference/main.py` 改用它；`inference/main.py` 的 `predict()` 中「缺類補 0」的邏輯搬進 sklearn 實作。ONNX 實作以 `INFERENCE_THREADS` 限制 intra-op thread 數。
@@ -1308,7 +1308,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | 推論主機（載入模型的程序） | 模型包在下載或傳遞途中被換掉；pickle 格式載入即執行任意程式 | 只接受 ONNX、JSON；`import_model` 比對 `model_card.files` 的 SHA-256，甲方對照 notebook 最後一格印出的值；`model_card` 用 pydantic 驗證，`labels` 必須恰好是三個 `Polarity` |
 | 本機檔案系統 | 模型包的 zip slip、zip bomb；`model_version` 帶路徑字元 | 只解出白名單的三個檔名，不依 zip 內路徑；解壓總大小上限 2 GB；`model_version` 限 `^[a-z0-9][a-z0-9-]{0,63}$`；目標資料夾已存在就拒絕 |
 | 預訓練模型的授權 | `ckiplab/bert-base-chinese` 為 GPL-3.0，散布模型或相關程式要負擔 GPL 義務；GPL 是否及於權重查不到判定（調查 1） | 甲方接受，只在自己的機器與 VM 使用、不對外散布（D-021）；`models/` 不進 git、模型包不對外提供；日後要對外提供須重新評估 |
-| 預訓練模型的來源 | Hugging Face 上同名模型被改、含自訂程式；權重是 pickle 格式，載入即執行程式 | notebook 釘 `revision`（commit hash）、`trust_remote_code=False`；`base_model` 連同 revision 記進 card。原訂「只載 safetensors」做不到：兩個模型都只有 `pytorch_model.bin`（調查「模型 revision」節），pickle 權重怎麼載入見待決定 D-025；決定前 notebook 不寫載入權重的檢查 |
+| 預訓練模型的來源 | Hugging Face 上同名模型被改、含自訂程式；權重是 pickle 格式，載入即執行程式 | notebook 釘 `revision`（commit hash，含 `ckip` 用的 Google tokenizer repo）、`trust_remote_code=False`；`base_model` 連同 revision 記進 card，tokenizer 的來源與 revision 一併記入。原訂「只載 safetensors」做不到：兩個模型都只有 `pytorch_model.bin`（調查「模型 revision」節），pickle 權重怎麼載入見待決定 D-025；決定前 notebook 不寫載入權重的檢查 |
 | 訓練資料（PTT 文字、標註） | 上傳到第三方平台後外流 | 只上傳步驟 1 的檔（無作者、推文帳號）；只在 Colab 工作階段上傳、不放 Drive（D-024）；人工測試集不上傳 |
 | 平台 token | 寫進 notebook 進 git | 公開模型不需要 token；需要時用平台的 secrets；notebook 不帶輸出進 git |
 | 使用者看到的情緒 | shadow 結果混入 Telegram、Dashboard | 分開 topic 與表；整合測試確認 `predictions` 沒有 shadow 的版本 |
@@ -1364,7 +1364,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | 兩個預訓練模型選哪個（D-021） | 各自選出 fp32／int8 後，取人工測試集 macro-F1 較高者；差距小於 0.01 時取 `macbert`（Apache-2.0，授權風險較低） |
 | notebook 選預訓練模型的方式 | 第一格參數 `BASE`，一次執行訓練一個；不在同一次執行裡連訓兩個（Colab 12 小時上限） |
 | `model_version` 帶預訓練模型簡稱 | `bert-<BASE>-<時間>`，四個模型包一看就分得出來；仍符合 `model_version` 的格式限制 |
-| 模型包 tokenizer 的產生與驗證 | `BertTokenizerFast` 載入後 `save_pretrained` 產生 `tokenizer.json`；打包前以 `tokenizers.Tokenizer.from_file` 重新編碼驗證集抽樣，ids 須與訓練時完全一致，logits 比對共用這組 ids（見「匯出」） |
+| 模型包 tokenizer 的來源、產生與驗證 | `macbert` 用自己 repo 的 tokenizer；`ckip` 用 `google-bert/bert-base-chinese` 的 tokenizer（ckiplab README 指定；詞表相同，但斷詞的行為設定如 `do_lower_case` 不在 `vocab.txt`，只載 `vocab.txt` 會吃到預設值）；都以 `BertTokenizerFast` 載入後 `save_pretrained`，打包前以 `tokenizers.Tokenizer.from_file` 重新編碼驗證集抽樣，ids 須與訓練時完全一致，logits 比對共用這組 ids（見「匯出」） |
 | 角色對照表的位置 | `ml/inference/roles.py`；`compare` 讀表名也用它，不另寫字串 |
 | 進 shadow 的門檻 | 步驟 4 每批 `INFERENCE_BATCH_SIZE` 篇的耗時 < 30 秒（新文章每分鐘不到 10 篇，留足餘裕）；不到就重跑 notebook 改 `max_len` 256 |
 | Colab 12 小時上限 | 預估時間超過 10 小時就停；同一工作階段內從 epoch checkpoint 續跑 |
@@ -1379,15 +1379,15 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | D-023 | shadow 限 2 CPU、1.5g 記憶體、`INFERENCE_THREADS=2` | shadow 表 |
 | D-024 | 訓練資料只在 Colab 工作階段上傳、不放 Drive | 步驟 2；威脅表 |
 
-**待決定**（決策分級④，D-025，見 `docs/decisions.md`）：預訓練模型只有 pickle 權重時 notebook 的載入方式。A：在拋棄式 Colab VM 內載 `.bin`，第一格釘 `torch>=2.6`（`weights_only=True` 預設；舊版有 CVE-2025-32434）；B：revision 改釘 HF 的 safetensors 轉換 PR commit（第三方 bot 產生，需調查 1）；C：換有 safetensors 的模型（推翻 D-021）。architect 建議有 B 用 B，沒有用 A；本機與 VM 仍只載 ONNX／JSON，不受影響。
+pickle 權重的載入方式：待決定 D-025（選項與建議見 `docs/decisions.md`）；本機與 VM 只載 ONNX／JSON，不受影響。
 
 仍查不到結論、甲方已知悉的風險：GPL 是否及於模型權重（需法務意見，對外提供前確認）；Colab 條款未明文規範上傳爬取的論壇內容。
 
-**需調查**（結果見調查末節，7.27 只引用）
+**已調查**（結果見調查「模型 revision」與末節「safetensors 與 ckiplab tokenizer」，7.27 只引用、不重抄 hash）
 
-- revision：兩個模型的 commit hash 已查到，值以調查「模型 revision」節為準（本節不重抄），由 `bert-notebook` 填進 notebook 第一格；甲方第一次執行時以 HF API 再核對一次（調查為 WebFetch 摘要）。hash 填錯時下載直接失敗，不會悄悄載入別的版本；仍是佔位字串時 notebook 停止
-- 需調查 1：兩個模型在 HF 上是否有 safetensors 轉換的 PR（`refs/pr/*`）與其 commit hash（D-025 的選項依據）
-- 需調查 2：ckiplab 是否要求 tokenizer 改用 `BertTokenizerFast.from_pretrained("bert-base-chinese")`（Google 版）；若是，其 `vocab.txt` 是否與 `google-bert/bert-base-chinese` 相同，不同就要另釘 Google tokenizer 的 revision
+- revision：兩個預訓練模型與 `ckip` 用的 Google tokenizer（末節第 4 項）的 commit hash 以調查為準，由 `bert-notebook` 填進 notebook 第一格；甲方第一次執行時以 HF API 再核對（調查為 WebFetch 摘要）。hash 填錯時下載直接失敗，不會悄悄載入別的版本；仍是佔位字串時 notebook 停止
+- safetensors 轉換 PR：macbert 沒有；ckiplab 有 SFconvertbot 開的 `refs/pr/1`，尚未合併（末節第 1 項）；是 D-025 選項 B 的依據
+- ckiplab 的 tokenizer：已依調查定案，用 Google 版（見「匯出」的 tokenizer）
 - 其餘原本的調查項目已由調查回答或改成實測：CPU 延遲與記憶體在步驟 4、6 實測；`tokenizers` 在 3.12 arm64 的安裝已在骨架驗證；`optimum` 的 opset 與 dynamo 由 logits 比對把關
 
 **風險**
