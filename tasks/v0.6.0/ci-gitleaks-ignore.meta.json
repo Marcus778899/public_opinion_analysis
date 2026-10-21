@@ -1,0 +1,22 @@
+{
+  "task_id": "ci-gitleaks-ignore",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "把資安報告裡引用的 PTT 文章 ID 加進 gitleaks 誤判清單，讓 CI 的 Security 恢復綠燈",
+  "issue": 76,
+  "branch": "chore/ci-gitleaks-ignore",
+  "worktree": ".worktrees/ci-gitleaks-ignore",
+  "pr": 77,
+  "qa": {
+    "result": "pass",
+    "sha": "0feb0d3cb9967bce219338c0e36b5aa230ae5069",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "0feb0d3cb9967bce219338c0e36b5aa230ae5069",
+    "by": "architect"
+  },
+  "merged": true
+}

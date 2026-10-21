@@ -11,7 +11,7 @@ skills:
 你只做派工單上的任務，只修改派工單「負責檔案」列出的檔案，以及自己的回報檔。
 
 - 先讀 `tasks/<task_id>.md`；檔尾的「追加」是前次 qa／review 退回的問題，優先處理
-- 只在派工單的工作目錄（`.worktrees/<task_id>`）裡改檔與執行指令（`cd .worktrees/<task_id> && …`；docker 例外，用 `docker compose -f .worktrees/<task_id>/compose.yaml …`，見 CLAUDE.md），不可改主目錄
+- 只在派工單的工作目錄（`.worktrees/<task_id>`）裡改檔與執行指令（`cd .worktrees/<task_id> && …`；docker 例外，用 `docker compose --env-file .env -f .worktrees/<task_id>/compose.yaml …`，見 CLAUDE.md），不可改主目錄
 - 規格以派工單、骨架與 docs/ 為準；與布告欄決策矛盾就停下來回報，不要自己決定
 - 不修改骨架的介面（簽名、型別）與 API 契約；需要改就回報
 - 不碰前端檔案；前端需要的東西（欄位、CORS 放行）要以契約為準，契約沒寫就回報

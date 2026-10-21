@@ -1,0 +1,158 @@
+# 整合測試用的服務（開發規格 7.26）；與 infra/ 的開發、e2e 環境無關
+# 專案名稱取自本檔所在目錄（每個 worktree 一套）；不設 name、container_name、對外 port
+# 用法：docker compose --env-file .env -f compose.yaml run --rm test [pytest 參數]
+
+services:
+  kafka:
+    image: apache/kafka:${KAFKA_VERSION:?KAFKA_VERSION 未設定，請加 --env-file .env}
+    hostname: kafka_1
+    environment:
+      # NOTE: 刻意不同於 .env.example 的開發環境；tests/integration/conftest.py 重置前比對
+      CLUSTER_ID: 'hw222Z37TDqnGKEUUPeTpA'
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka_1:9093'
+      KAFKA_LISTENERS: 'INTERNAL://:29092,CONTROLLER://:9093'
+      KAFKA_ADVERTISED_LISTENERS: 'INTERNAL://kafka_1:29092'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'INTERNAL'
+      KAFKA_HEAP_OPTS: '-Xms256m -Xmx512m'
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+      KAFKA_LOG_DIRS: '/tmp/kafka-data'
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # NOTE: 預設 3 秒；每個測試加入 consumer group 都要多等這段時間
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    tmpfs:
+      - /tmp/kafka-data
+    networks:
+      default:
+        # NOTE: infra/clickhouse/config.d/named_collections.xml 的 broker 清單是三個節點
+        aliases: [kafka_1, kafka_2, kafka_3]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29092 > /dev/null"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  postgres:
+    image: postgres:${POSTGRES_VERSION:?POSTGRES_VERSION 未設定，請加 --env-file .env}
+    # NOTE: 測試只連 radar_it；重置前以 DB 名稱防呆（tests/integration/conftest.py）
+    command: ["postgres", "-c", "wal_level=logical", "-c", "fsync=off"]
+    environment:
+      POSTGRES_USER: radar
+      POSTGRES_DB: radar_it
+      POSTGRES_HOST_AUTH_METHOD: trust
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U radar -d radar_it"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:${CLICKHOUSE_VERSION:?CLICKHOUSE_VERSION 未設定，請加 --env-file .env}
+    environment:
+      CLICKHOUSE_USER: radar
+      CLICKHOUSE_PASSWORD: it
+      CLICKHOUSE_DB: radar
+      # 測試用固定值，不讀 .env（開發規格 7.25）；grafana.xml 以 from_env 讀
+      CLICKHOUSE_GRAFANA_USER: grafana
+      CLICKHOUSE_GRAFANA_PASSWORD: it
+    # NOTE: 只掛單一檔案；整個目錄覆蓋會蓋掉 image 的 listen 設定與 entrypoint 要寫入的使用者檔
+    volumes:
+      - ./infra/clickhouse/config.d/named_collections.xml:/etc/clickhouse-server/config.d/named_collections.xml:ro
+      - ./infra/clickhouse/users.d/radar.xml:/etc/clickhouse-server/users.d/radar.xml:ro
+      - ./infra/clickhouse/users.d/grafana.xml:/etc/clickhouse-server/users.d/grafana.xml:ro
+    tmpfs:
+      - /var/lib/clickhouse
+    networks: [default, grafana_offline]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8123/ping"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  # NOTE: 只接 internal network，每次啟動都沒有對外網路（離線啟動，開發規格 7.25）；不開 port
+  grafana:
+    build:
+      context: ./infra/grafana
+      args:
+        GRAFANA_VERSION: ${GRAFANA_VERSION:?GRAFANA_VERSION 未設定，請加 --env-file .env}
+        GRAFANA_CLICKHOUSE_PLUGIN_VERSION: ${GRAFANA_CLICKHOUSE_PLUGIN_VERSION:?GRAFANA_CLICKHOUSE_PLUGIN_VERSION 未設定，請加 --env-file .env}
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: it
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      # NOTE: 僅測試環境；錯誤密碼測試會鎖住 admin，同堆疊連跑時其他測試會 401。開發環境不關
+      GF_SECURITY_DISABLE_BRUTE_FORCE_LOGIN_PROTECTION: 'true'
+      CLICKHOUSE_DB: radar
+      CLICKHOUSE_GRAFANA_USER: grafana
+      CLICKHOUSE_GRAFANA_PASSWORD: it
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/etc/grafana/dashboards:ro
+    # NOTE: tmpfs 預設只有 root 能寫，Grafana 以 uid 472 執行
+    tmpfs:
+      - /var/lib/grafana:mode=1777
+    networks: [grafana_offline]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/api/health"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  test:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    working_dir: /workspace
+    # NOTE: worktree 唯讀掛入，容器改不到主機檔案；venv 與快取放 named volume
+    volumes:
+      - .:/workspace:ro
+      - test_venv:/venv
+      - test_uv_cache:/uv-cache
+    environment:
+      UV_PROJECT_ENVIRONMENT: /venv
+      UV_CACHE_DIR: /uv-cache
+      UV_LINK_MODE: copy
+      UV_PYTHON_DOWNLOADS: never
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTEST_ADDOPTS: '-p no:cacheprovider'
+      LOG_DIR: /tmp/log
+      IT_KAFKA_BOOTSTRAP: kafka_1:29092
+      IT_POSTGRES_HOST: postgres
+      IT_POSTGRES_PORT: '5432'
+      IT_CLICKHOUSE_URL: http://clickhouse:8123
+      IT_GRAFANA_URL: http://grafana:3000
+      GRAFANA_VERSION: ${GRAFANA_VERSION:?GRAFANA_VERSION 未設定，請加 --env-file .env}
+      GRAFANA_CLICKHOUSE_PLUGIN_VERSION: ${GRAFANA_CLICKHOUSE_PLUGIN_VERSION:?GRAFANA_CLICKHOUSE_PLUGIN_VERSION 未設定，請加 --env-file .env}
+      GRAFANA_ADMIN_PASSWORD: it
+      CLICKHOUSE_GRAFANA_USER: grafana
+      CLICKHOUSE_GRAFANA_PASSWORD: it
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      grafana:
+        condition: service_healthy
+    networks: [default, grafana_offline]
+    entrypoint: ["sh", "-c", "uv sync --frozen && exec uv run --no-sync \"$$@\"", "sh"]
+    command: pytest tests/integration -n auto --dist loadgroup --durations=15
+
+networks:
+  grafana_offline:
+    internal: true
+
+volumes:
+  test_venv:
+  test_uv_cache:

@@ -21,7 +21,9 @@ maxTurns: 100
 
 ## B. 驗證（實作後）
 
-只能讀與執行，不改任何檔案；唯一要寫的是證據檔 `reports/<task_id>.qa.md`：
+只能讀與執行，不改任何檔案；唯一要寫的是證據檔 `reports/<task_id>.qa.md`。
+
+docker 只能單獨下一行 `docker compose …`，在主目錄下、用 `-f .worktrees/<task_id>/compose.yaml` 指定，例：`docker compose --env-file .env -f .worktrees/<task_id>/compose.yaml run --rm test`。不要 `cd`、`&&`、`|`、`>`、`2>&1`，也不要包進 make 或 script：那樣會留在 sandbox 而失敗（hook 會先擋下）。輸出會直接回給你，要存證據就貼進證據檔。
 
 1. 讀 `tasks/<task_id>.md`（含檔尾追加）與 `reports/<task_id>.json`，對照驗收條件逐條檢查
 2. 自己實際執行測試與 lint，貼出原始輸出；不可引用回報裡的 `verification.tail` 當證據

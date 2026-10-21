@@ -22,7 +22,7 @@ COPIES = {
     TEMPLATES / "github" / "workflows" / "sync_branch.yml": ROOT / ".github" / "workflows" / "sync_branch.yml",
     TEMPLATES / "decisions.md": ROOT / "docs" / "decisions.md",
 }
-GITIGNORE = (".env", ".worktrees/", "tasks/", "reports/", ".hooklog/", ".venv/", "node_modules/", "__pycache__/", "coverage-reports/")
+GITIGNORE = (".env", ".worktrees/", "tasks/", "reports/", ".hooklog/", ".venv", "node_modules", "__pycache__/", "coverage-reports/")
 EXTRA_LABELS = {"uat": "d93f0b", "backlog": "c5def5", "decision": "fbca04"}
 
 
@@ -43,6 +43,8 @@ def ensure_files() -> None:
 def ensure_git() -> None:
     if not (ROOT / ".git").exists():
         run("git", "init", "-b", RELEASE_BRANCH)
+    # task.py 用 sparse-checkout 開 worktree；sandbox 內可能寫不了 .git/config，這裡（sandbox 外）先設好
+    run("git", "config", "extensions.worktreeConfig", "true")
     has_commit = run("git", "rev-parse", "--verify", "HEAD", check=False) != ""
     run("git", "add", "-A")
     if run("git", "status", "--porcelain"):

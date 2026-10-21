@@ -27,6 +27,9 @@ services:
   clickhouse:
     volumes:
       - e2e_clickhouse_data:/var/lib/clickhouse
+  grafana:
+    volumes:
+      - e2e_grafana_data:/var/lib/grafana
 
   fake-ptt:
     image: radar-app:latest
@@ -105,5 +108,6 @@ volumes:
   e2e_kafka_2_data:
   e2e_kafka_3_data:
   e2e_clickhouse_data:
+  e2e_grafana_data:
   e2e_app_logs:
   e2e_heat_state:

@@ -1,0 +1,1 @@
+{"task_id":"ci-gitleaks-ignore","status":"done","files_changed":[".gitleaksignore"],"verification":{"command":"gitleaks git --redact --no-banner . (gitleaks 8.30.1, in .worktrees/ci-gitleaks-ignore)","exit_code":0,"tail":"108 commits scanned.\nscanned ~6880129 bytes (6.88 MB) in 852ms\nno leaks found"},"open_questions":[]}

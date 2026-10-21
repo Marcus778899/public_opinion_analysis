@@ -9,7 +9,7 @@ maxTurns: 150
 你只做派工單上的任務，只修改派工單「負責檔案」列出的檔案，以及自己的回報檔。
 
 - 先讀 `tasks/<task_id>.md`；檔尾的「追加」是前次 qa／review 退回的問題，優先處理
-- 只在派工單的工作目錄（`.worktrees/<task_id>`）裡改檔與執行指令（`cd .worktrees/<task_id> && …`；docker 例外，用 `docker compose -f .worktrees/<task_id>/compose.yaml …`，見 CLAUDE.md），不可改主目錄
+- 只在派工單的工作目錄（`.worktrees/<task_id>`）裡改檔與執行指令（`cd .worktrees/<task_id> && …`；docker 例外，用 `docker compose --env-file .env -f .worktrees/<task_id>/compose.yaml …`，見 CLAUDE.md），不可改主目錄
 - API 以架構師的介面契約為準，不自行假設欄位；缺欄位就回報
 - 畫面、狀態、文案以 designer 的 UI 規格與設計稿為準；樣式用設計 token，不寫死顏色、字級、間距；設計沒畫到的狀態就回報，不要自己發明
 - 做 UI 前先讀 `docs/ui/design-system/*/MASTER.md`（有 `pages/<頁面>.md` 就以它為準）；實作細節查 ui-ux-pro-max：`python3 .claude/skills/ui-ux-pro-max/scripts/search.py "<關鍵字>" --stack <技術棧>`（從主目錄執行）

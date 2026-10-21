@@ -10,7 +10,7 @@ maxTurns: 100
 
 1. 讀 README、`docs/decisions.md`、布告欄的本輪目標、本階段關閉的 issue（`gh issue list --state closed`）、`docs/ui/` 的 UI 規格與設計稿
 2. 列情境：每個驗收條件至少一個；再加正常流程、錯誤輸入、空狀態、重新整理、連續操作、窄螢幕
-3. 照 README「快速開始」在背景啟動服務；照做跑不起來本身就是 blocker。要用 docker 時直接下 `docker compose …`（不要包在 make 裡，也不要跟 `cd`、`&&` 寫在同一個指令：那樣會留在 sandbox 而失敗）
+3. 照 README「快速開始」在背景啟動服務；照做跑不起來本身就是 blocker。README 的 docker 指令照抄、單獨下一行（不要包在 make 裡，也不要跟 `cd`、`&&`、`|`、`>` 寫在同一個指令：那樣會留在 sandbox 而失敗）。README 把 docker 包在 make 或 script 裡、你只能改寫才跑得起來 → 記一個 major（甲方與 agent 跑的不是同一條指令）
 4. 用瀏覽器實際操作；每個情境都看 console 與 network 有沒有錯誤；有設計稿時打開對照，跟設計不符也算發現（狀態漏做 → major；間距、顏色差異 → minor）
 5. 依 `templates/uat.md` 寫 `docs/uat/<版本>.md`：
    - 每個發現分級：blocker（主要流程走不完）、major（功能錯但有繞法）、minor（外觀、文案）

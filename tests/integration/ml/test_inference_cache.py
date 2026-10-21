@@ -4,20 +4,15 @@
 migration 0004 本身（queue、MV）的測試在 tests/integration/cdc/test_clickhouse_migrations.py。
 """
 
-import time
 from pathlib import Path
 
-import httpx2
 import pytest
 from alembic import command
 from alembic.config import Config
-from pydantic import SecretStr
 from sqlalchemy import text
-from testcontainers.core.container import DockerContainer
 
-from radar.common.clickhouse import ClickHouseClient, apply_pending, load_migrations
+from radar.common.clickhouse import ClickHouseClient
 from radar.common.db.session import make_engine
-from radar.common.settings import ClickHouseSettings
 from radar.ml.inference.backfill_hash import (
     apply_updates,
     build_updates,
@@ -28,51 +23,15 @@ from radar.ml.inference.main import HashCache, load_cache, text_hash
 from radar.ml.training.dataset import post_text
 
 REPO = Path(__file__).resolve().parents[3]
-CH_DIR = REPO / "infra/clickhouse"
 ALEMBIC_INI = REPO / "alembic.ini"
 MV = "tfidf-lr-1"
 MAX_CHARS = 2000
 H_OLD, H_NEW = "1" * 64, "2" * 64
 
 
-@pytest.fixture(scope="module")
-def ch():
-    container = (
-        DockerContainer("clickhouse/clickhouse-server:26.8")
-        .with_env("CLICKHOUSE_USER", "radar")
-        .with_env("CLICKHOUSE_PASSWORD", "it")
-        .with_env("CLICKHOUSE_DB", "radar")
-        .with_volume_mapping(
-            str(CH_DIR / "config.d/named_collections.xml"),
-            "/etc/clickhouse-server/config.d/named_collections.xml",
-        )
-        .with_volume_mapping(
-            str(CH_DIR / "users.d/radar.xml"), "/etc/clickhouse-server/users.d/radar.xml"
-        )
-        .with_exposed_ports(8123)
-    )
-    with container:
-        url = f"http://{container.get_container_host_ip()}:{container.get_exposed_port(8123)}"
-        deadline = time.monotonic() + 60
-        while True:
-            try:
-                if httpx2.get(f"{url}/ping").status_code == 200:
-                    break
-            except httpx2.TransportError:
-                pass
-            if time.monotonic() > deadline:
-                raise TimeoutError("clickhouse not ready")
-            time.sleep(1)
-        client = ClickHouseClient(
-            ClickHouseSettings(url=url, db="radar", user="radar", password=SecretStr("it"))
-        )
-        apply_pending(client, load_migrations(CH_DIR / "migrations"))
-        yield client
-        client.close()
-
-
 @pytest.fixture
-def predictions(ch):
+def predictions(clickhouse):
+    ch = clickhouse
     ch.execute("TRUNCATE TABLE predictions")
     return ch
 

@@ -2,10 +2,12 @@
 
 <!-- 只放目前這一階段；只有 manager 透過 scripts/board.py 修改；階段完成時整份封存到 tasks/<tag>.md -->
 
+> 上一階段：`tasks/v0.6.0.md`（派工單在 `tasks/v0.6.0/`）
+
 ## 目標與範圍
 
-- 本輪：發版 v0.6.0（階段 1～6 develop → main：security 審查、uat、甲方驗收）；之後開始階段 7 Dashboard
-- 不做：階段 3 Stock 重新標註、階段 5 的 3 天驗收（照開發規格第 6 章之後再做）
+- 本輪：v0.7.0 階段 7：呈現方式（Grafana 面板，或 Grafana 只做監控＋web 前端，待 architect 評估與甲方決定）、compose test 服務＋CI 加速（#78）、bot 允許清單 fail closed（D-010）
+- 不做：Stock 重新標註、階段 5 的 3 天驗收（第 6 章之後再做）；其餘 backlog（#65～#71、#79～#82）
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
@@ -17,20 +19,35 @@
 | 2026-10-20 | D-008 | 修上游範本：check_env 戳記取代讀 .env；修好前甲方代開單 |
 | 2026-10-20 | D-010 | bot 允許清單沒設就啟動失敗，開放所有人須 TELEGRAM_ALLOW_ALL=true（v0.7.0） |
 | 2026-10-20 | D-012 | 本機 .git/info/exclude 加 .venv；上游範本 .gitignore 不加斜線 |
+| 2026-10-20 | D-013 | worktree 用 sparse-checkout 排除 .claude/、.mcp.json、.vscode/（上游範本已修） |
+| 2026-10-20 | D-014 | 階段 7 全用 Grafana；自建 web 前端延到階段 9 |
+| 2026-10-20 | D-015 | CI 加速加 pytest-xdist，不用付費 runner |
+| 2026-10-20 | D-016 | qa 也可以跑 docker compose |
+| 2026-10-21 | D-017 | Dashboard 變數一律 percentencode 由 ClickHouse 解碼；驗收只做靜態＋正常值，不用攻擊字串 |
 
 ## 任務狀態
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
-| v060-security | security | done | 0 | docs/security/v0.6.0.md PASS bd11330（H-1 已修；M ×3、L ×4 皆已處置：D-010、D-011、#68～#71、#79） |
-| v060-uat | uat | done | 0 | docs/uat/v0.6.0.md 甲方驗收：PASS（23 項全勾）；警示重放紀錄；minor #65～#67、#80～#82 |
-| spec-release-order | architect | done | 0 | PR #74 |
-| bot-forbidden-crash | backend | done | 0 | PR #75 |
-| ci-gitleaks-ignore | backend | done | 0 | PR #77 |
+| dashboard-design | architect | done | 0 | PR #86 |
+| test-infra-design | architect | done | 0 | PR #87 |
+| gitleaks-archive-ignore | backend | done | 0 | PR #89 |
+| test-infra-compose | backend | done | 1 | PR #95 |
+| bot-allowlist-required | backend | done | 0 | PR #93 |
+| dashboard-test-align | architect | done | 0 | PR #94 |
+| test-infra-fast-waits | backend | done | 0 | PR #97 |
+| dashboard-grafana-infra | backend | done | 1 | PR #100 |
+| certifi-security-bump | backend | done | 0 | PR #103 |
+| dashboard-views | backend | done | 0 | PR #105 |
+| dashboard-panels | backend | done | 0 | PR #107 |
+| dashboard-integration | backend | done | 1 | PR #109 |
+| e2e-grafana-volume | backend | done | 1 | PR #114 |
+| gitleaks-uat-ignore | backend | done | 1 | PR #116 |
+| dashboard-min-score-select | backend | done | 2 | PR #124 |
 
 ## 卡住／待甲方決定
 
-- （無）
+- v0.7.0 發版中：甲方驗收 PASS、security PASS 3fccb90；release.py open → CI 綠 → finish
 
 ## 注意事項（踩過的坑）
 

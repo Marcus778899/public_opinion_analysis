@@ -24,6 +24,13 @@ def alembic_cfg(postgres_env) -> Config:
 @pytest.fixture
 def engine(postgres_env, alembic_cfg) -> Engine:
     eng = make_engine(postgres_env)
+    # NOTE: 同一個 worker 的 DB 會留下前面模組的資料；這裡的斷言假設資料表是空的
+    with eng.begin() as conn:
+        tables = conn.execute(
+            text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+        ).scalars()
+        names = [f'"{t}"' for t in tables if t != "alembic_version"]
+        conn.execute(text(f"TRUNCATE {', '.join(names)} CASCADE"))
     yield eng
     eng.dispose()
 

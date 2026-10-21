@@ -6,9 +6,9 @@
 
 ## 快速開始
 
-1. 設定：`python3 scripts/check_env.py`，依提示在 `.env` 填入缺少的值
+1. 設定：在自己的終端機（不是 agent 的 sandbox）跑 `python3 scripts/check_env.py`，依提示在 `.env` 填入缺少的值，填完再跑一次；之後 `.env.example` 有變也要重跑
 2. 安裝：
-3. 啟動：（用到 docker 的寫成單獨一行 `docker compose …`，agent 才能照著跑）
+3. 啟動：（用到 docker 的每個指令都寫成單獨一行 `docker compose …`，不包進 make 或 script、不跟 `cd`、`&&` 寫在一起：agent 的 sandbox 只認這個形式，甲方與 uat 才會跑同一條指令）
 4. 檢查：`make check`
 
 ## 功能

@@ -447,6 +447,8 @@ ClickHouse 的 `AvroConfluent` 格式能直接讀 Apicurio 序列化的訊息，
 | `labels` | `MergeTree` | `labels` | 標註結果；一則訊息的 `sentiments` 以 `ARRAY JOIN` 攤成一列一個 (target, polarity)（15.3） |
 | `predictions` | `MergeTree` | `predictions` | 推論結果（含 `model_version`） |
 | `alerts` | `MergeTree` | `alerts` | 警示紀錄 |
+| `post_votes`（view） | 一般 view | `comments_latest` | 每篇文章的 `post_id`、`board`、`push`、`boo`、`arrow`（`FINAL`、不含已刪除推文）；dashboard 用（開發規格 7.25） |
+| `post_sentiment_latest`（view） | 一般 view | `predictions` | 每篇最新一筆推論的 `post_id`、`model_version`、`polarity`、`score`（三類最高分，`argMax(…, predicted_at)`）；沒有推論的文章不出現 |
 
 - `posts_latest` 的 version 用 `__source_lsn`：同一列的後續變更 LSN 一定較大；`ts_ms` 是毫秒，同一毫秒內多次變更會分不出先後
 - 查詢 `posts_latest`、`comments_latest` 加 `FINAL` 或用 `argMax`
@@ -579,6 +581,9 @@ Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED
 
 Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、情緒分布與趨勢、爭議度、近 24 小時警示、熱門文章排行。長時間的趨勢看 Dashboard；即時通知與快速查詢在 Telegram。
 
+- 呈現方式已定案：全用 Grafana 面板，自建 web 前端延到階段 9（D-014）；設計見開發規格 7.25
+- 唯讀：Grafana 以專用的 ClickHouse 唯讀帳號查詢，只綁本機並需登入
+
 ### 9.2 Telegram bot
 
 主要介面。MVP（階段 5）只有文字指令；階段 6 改成按鈕選單（15.7），文字指令保留。
@@ -595,7 +600,7 @@ Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、�
   - 📈 看板概況：選看板後顯示近 24 小時的文章數、推文量、情緒比例（負面／中立／正面）、爭議度最高的文章、今天的警示數
   - ⚙️ 通知設定：文章警示、看板警示分別開關；「不再通知」的文章清單（可恢復）
 - 使用 long polling，不需要對外開放 HTTP；以 `httpx2` 直接呼叫 Bot API（含 inline keyboard、callback query），不加 SDK
-- 只回應允許清單內的 chat（`TELEGRAM_ALLOWED_CHAT_IDS`），按鈕回呼同樣檢查
+- 只回應允許清單內的 chat（`TELEGRAM_ALLOWED_CHAT_IDS`），按鈕回呼同樣檢查；清單沒設就啟動失敗，要開放所有人須明確設 `TELEGRAM_ALLOW_ALL=true`（D-010，細節見開發規格 7.21）
 - 之後：`/subscribe 台積電`（實體，15.2 進階 1）；Mini App（14.3，上雲、有 HTTPS 之後）
 - 細節見開發規格 7.21（MVP 文字指令）、7.23（按鈕選單與情緒呈現）
 - 每日摘要：APScheduler cron trigger，每天 08:00 用 LLM 摘要前一天的熱門話題（S5-08，非 MVP）
@@ -664,6 +669,7 @@ Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、�
 | `label-stream` | `labeling` | 串流抽樣標註，會持續呼叫 LLM API，`make up-labeling` 才啟動 |
 | `inference` | `inference` | 情緒推論（8.2），需要先訓練好模型；`make up-inference` 才啟動，以唯讀方式掛載 `models/` |
 | `heat`、`bot` | `alerting` | 熱度偵測（8.3）與 Telegram bot（9.2）；bot 需要 `TELEGRAM_BOT_TOKEN`，`make up-alerting` 才啟動；heat 的 RocksDB 掛 volume `heat_state` |
+| `grafana` | （預設） | Dashboard（開發規格 7.25）：只綁 `127.0.0.1:${GRAFANA_PORT}`、需登入，以唯讀帳號查 ClickHouse；`infra/grafana/Dockerfile` 建置時裝好 ClickHouse plugin，datasource 與 dashboard 以 provisioning 載入，資料放 volume `grafana_data` |
 | `kafka-ui` | （預設） | 開發期間預設啟動（http://localhost:8089，只綁本機），部署前移除（S9-06） |
 | `init` | `app` | 一次性：Alembic、建立 topic、ClickHouse migration、註冊 connector（皆冪等）；唯一負責建置 `radar-app` image 的服務 |
 | `api` | `app` | 只綁 `127.0.0.1:8000` |
@@ -695,6 +701,7 @@ Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、�
 | ClickHouse | ~1GB+（spike 實測閒置約 0.3GB，26.8 版） |
 | PostgreSQL | ~0.3GB |
 | Kafka UI | ~0.3GB |
+| Grafana | ~0.1～0.2GB |
 | 自寫 Python 服務 | ~1～1.5GB |
 | **合計** | **約 6～7GB** |
 
