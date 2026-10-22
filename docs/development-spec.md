@@ -1267,6 +1267,11 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 
 **載入**：新增 `ml/training/classifier.py`，`Classifier` 介面 `predict_proba(texts) -> list[dict[Polarity, float]]`（三類齊全、總和為 1），`load_classifier(model_dir, *, threads)` 依 `model_card.kind` 回傳 `(Classifier, ModelCard)`（簽名見骨架）。`evaluate.py`、`inference/main.py` 改用它；`inference/main.py` 的 `predict()` 中「缺類補 0」的邏輯搬進 sklearn 實作。ONNX 實作以 `INFERENCE_THREADS` 限制 intra-op thread 數。
 
+- ONNX 實作：padding 用 tokenizer 的 `[PAD]` id（找不到用 0），truncation 用 `card.max_len`；`max_len` 為 `None` 時拒絕載入
+- `evaluate_model`、`evaluate_by_board` 改吃 `Classifier`，預測類別用 `top_class`
+- `measure_runtime`：第一批先暖機不計時，再逐批計時；每篇耗時 = 該批耗時 ÷ 該批篇數，百分位用 nearest-rank；峰值記憶體取 `ru_maxrss`（已換算單位）；時鐘與 RSS 讀取是模組層 `_clock`、`_peak_rss_mb`（簽名固定，測試以 monkeypatch 替換）
+- `render_markdown` 的選填參數 `runtime` 有值時，結尾加「## CPU 推論耗時與記憶體」節：一行「INFERENCE_THREADS = N，每批 M 篇。」與表格（每篇 p50／p95 ms、每批 p50／最大 s、記憶體峰值 RSS MB）；`main()` 的 threads、batch_size 讀 `INFERENCE_THREADS`、`INFERENCE_BATCH_SIZE`
+
 **shadow 並行**（設計文件 8.4）
 
 | 項目 | 現行（primary） | shadow |
