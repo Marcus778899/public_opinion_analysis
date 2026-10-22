@@ -5,12 +5,17 @@
 """
 
 import argparse
+import hashlib
+import json
 import re
+import shutil
+import tempfile
+import zipfile
 from pathlib import Path
 
 from radar.common.log import log, setup_logging
 from radar.ml.training.classifier import ONNX_MODEL_FILE, TOKENIZER_FILE
-from radar.ml.training.train import CARD_FILE, MODELS_DIR
+from radar.ml.training.train import CARD_FILE, MODELS_DIR, ModelCard
 
 ALLOWED_FILES = frozenset({ONNX_MODEL_FILE, TOKENIZER_FILE, CARD_FILE})
 # 解壓後的總大小上限（zip bomb）；以 zip 內實際讀出的位元組計，不信任標頭宣稱的大小
@@ -26,10 +31,62 @@ class ModelExistsError(FileExistsError):
     """models/<model_version>/ 已存在；不覆寫。"""
 
 
+def _read_members(zip_path: Path) -> dict[str, bytes]:
+    try:
+        zf = zipfile.ZipFile(zip_path)
+    except zipfile.BadZipFile as exc:
+        raise ModelPackageError("not a valid zip file") from exc
+    with zf:
+        names = [info.filename for info in zf.infolist()]
+        # 檔名必須逐字等於白名單：路徑、多餘、重複、缺少都拒絕
+        if len(names) != len(set(names)) or set(names) != ALLOWED_FILES:
+            raise ModelPackageError(f"zip members must be exactly {sorted(ALLOWED_FILES)}")
+        members: dict[str, bytes] = {}
+        total = 0
+        for name in sorted(ALLOWED_FILES):
+            with zf.open(name) as fh:
+                data = fh.read(MAX_TOTAL_BYTES - total + 1)
+            total += len(data)
+            if total > MAX_TOTAL_BYTES:
+                raise ModelPackageError("uncompressed size exceeds limit")
+            members[name] = data
+    return members
+
+
+def _parse_card(raw: bytes) -> ModelCard:
+    try:
+        version = json.loads(raw).get("model_version")
+    except (json.JSONDecodeError, UnicodeDecodeError, AttributeError) as exc:
+        raise ModelPackageError("model_card.json is not a JSON object") from exc
+    if not isinstance(version, str) or not MODEL_VERSION_RE.fullmatch(version):
+        raise ModelPackageError("invalid model_version")
+    try:
+        return ModelCard.model_validate_json(raw)
+    except ValueError as exc:
+        raise ModelPackageError("invalid model_card.json") from exc
+
+
 def import_model(zip_path: Path, models_dir: Path) -> Path:
     """驗證通過才寫入 models_dir/<model_version>/ 並回傳該路徑；失敗時不留下半成品。"""
-    # TODO(bert-model-import)
-    raise NotImplementedError  # pragma: no cover（骨架）
+    members = _read_members(zip_path)
+    card = _parse_card(members[CARD_FILE])
+    for name in (ONNX_MODEL_FILE, TOKENIZER_FILE):
+        expected = card.files.get(name)
+        if expected is None or hashlib.sha256(members[name]).hexdigest() != expected.lower():
+            raise ModelPackageError(f"sha256 mismatch for {name}")
+    target = models_dir / card.model_version
+    if target.exists():
+        raise ModelExistsError(str(target))
+    models_dir.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".import-", dir=models_dir))
+    try:
+        for name, data in members.items():
+            (staging / name).write_bytes(data)
+        staging.rename(target)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return target
 
 
 @log.catch(level="CRITICAL")
