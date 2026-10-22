@@ -5,12 +5,6 @@
 
 ## 待決定
 
-### D-025 預訓練模型只有 pickle 權重（`pytorch_model.bin`），notebook 怎麼載入
-- 背景：7.27 原訂「只載 safetensors」做不到。調查（docs/research/bert-stage8.md 末兩節）：hfl/chinese-macbert-base 沒有 safetensors；ckiplab/bert-base-chinese 有 SFconvertbot 在 2023 年開的 safetensors 轉換 PR（refs/pr/1，未合併，第三方 bot 產生）。pickle 載入時理論上可執行夾帶的程式；torch 2.5.1 以下的 weights_only 有 RCE 漏洞（CVE-2025-32434）
-- 選項：A. 兩個模型都在 Colab 載 `.bin`，notebook 第一格要求 `torch>=2.6`（預設 weights_only）、釘 revision、`trust_remote_code=False`／B. ckiplab 改釘 safetensors 轉換 PR 的 commit，macbert 照 A／C. 換成有 safetensors 的模型（推翻 D-021）
-- 建議：B（architect：有 safetensors 就用）；ckiplab 的 bot commit 只轉換格式、不是作者發布，若甲方不想信任第三方 commit 就選 A。不論哪個，pickle 只在用完即丟的 Colab VM 解開，本機與 VM 仍只載 ONNX／JSON
-- 提出：architect（bert-skeleton review）
-
 <!-- 範本：
 ### D-001 一句話問題
 - 背景：為什麼要決定（1–2 行）
@@ -149,3 +143,9 @@
 - 理由：Kaggle 條款只取得摘要（非商用）、預設可見度查不到；甲方知悉兩平台條款皆未明文規範論壇內容
 - 影響：`bert-notebook`
 - 日期：2026-10-21
+
+### D-025 預訓練模型只有 pickle 權重（`pytorch_model.bin`），notebook 怎麼載入
+- 決定：B. ckiplab/bert-base-chinese 釘 SFconvertbot 的 safetensors 轉換 PR（`refs/pr/1`，commit `d3e55b839fccbf1bba9e194b8626b18b30fcc5f3`）只載 safetensors；hfl/chinese-macbert-base 沒有 safetensors，在 Colab 載 `.bin`，notebook 第一格要求 `torch>=2.6`（weights_only 預設）、釘 revision、`trust_remote_code=False`
+- 理由：有 safetensors 就用；pickle 只在用完即丟的 Colab VM 解開，本機與 VM 仍只載 ONNX／JSON
+- 影響：開發規格 7.27「威脅與對策」預訓練模型來源列、7.27 派工順序第 2 步；`bert-notebook`
+- 日期：2026-10-22
