@@ -44,8 +44,8 @@
 | bert-classifier | backend | done | 0 | PR #161 |
 | bert-model-import | backend | done | 0 | PR #160 |
 | bert-shadow-inference | backend | blocked | 0 |  |
-| bert-notebook | backend | qa-fail | 0 |  |
-| bert-compare | backend | in-progress | 0 |  |
+| bert-notebook | backend | blocked | 0 |  |
+| bert-compare | backend | blocked | 0 |  |
 
 ## 卡住／待甲方決定
 
