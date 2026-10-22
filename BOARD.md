@@ -43,12 +43,13 @@
 | bert-skeleton | architect | done | 0 | PR #156 |
 | bert-classifier | backend | done | 0 | PR #161 |
 | bert-model-import | backend | done | 0 | PR #160 |
-| bert-shadow-inference | backend | in-progress | 0 |  |
-| bert-notebook | backend | in-progress | 0 |  |
+| bert-shadow-inference | backend | blocked | 0 |  |
+| bert-notebook | backend | qa-fail | 0 |  |
+| bert-compare | backend | in-progress | 0 |  |
 
 ## 卡住／待甲方決定
 
-- （無）
+- 待甲方決定 D-026（gitleaks 誤判模型版本號；擋所有 PR 合併）
 
 ## 注意事項（踩過的坑）
 
