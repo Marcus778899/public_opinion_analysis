@@ -1373,6 +1373,9 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | 角色對照表的位置 | `ml/inference/roles.py`；`compare` 讀表名也用它，不另寫字串 |
 | 進 shadow 的門檻 | 步驟 4 每批 `INFERENCE_BATCH_SIZE` 篇的耗時 < 30 秒（新文章每分鐘不到 10 篇，留足餘裕）；不到就重跑 notebook 改 `max_len` 256 |
 | Colab 12 小時上限 | 預估時間超過 10 小時就停；同一工作階段內從 epoch checkpoint 續跑 |
+| notebook 訓練設定 | 3 個 epoch、learning rate 2e-5、有效 batch 16（8 × 累積 2）、class weight balanced（與 baseline 同義）、fp16、warmup 6%、weight decay 0.01；驗證集為分層 10%、seed 42；依驗證集 macro-F1 選最佳 epoch |
+| Colab 套件版本 | `torch==2.7.1`、`transformers==4.53.3`、`optimum[onnxruntime]==1.27.0`（第一格釘版本）；**未在 sandbox 驗證**，甲方第一次執行時確認，不相容就調整第一格 |
+| int8 品質 | 兩個包都照常產生；int8 驗證集 macro-F1 比 fp32 低超過 0.03 時 notebook 印出警告，差值記進 int8 card 的 `params.val_f1_drop_vs_fp32`；是否採用 int8 由步驟 4 的人工測試集評估決定 |
 
 **已定案**（細節見 `docs/decisions.md`）
 
