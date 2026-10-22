@@ -225,3 +225,25 @@ def test_render_markdown_without_runtime_has_no_runtime_section(examples):
     md = render_markdown("v", report, [], board_reports={}, board_agreements={})
 
     assert "CPU 推論耗時" not in md
+
+
+def test_evaluate_model_predicts_in_batches_of_batch_size(examples):
+    fake = FakeClassifier()
+
+    report = evaluate_model(fake, examples, batch_size=10)
+
+    assert report.n == 36
+    assert [len(c) for c in fake.calls] == [10, 10, 10, 6]
+
+
+def test_evaluate_by_board_passes_batch_size_through(examples):
+    fake = FakeClassifier()
+
+    evaluate_by_board(fake, two_boards(examples), batch_size=7)
+
+    assert fake.calls and all(0 < len(c) <= 7 for c in fake.calls)
+
+
+def test_evaluate_model_rejects_bad_batch_size(examples):
+    with pytest.raises(ValueError, match="batch_size"):
+        evaluate_model(FakeClassifier(), examples, batch_size=0)

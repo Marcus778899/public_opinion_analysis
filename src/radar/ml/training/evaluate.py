@@ -30,6 +30,8 @@ from radar.ml.training.train import write_card
 REPORT_FILE = "evaluation.md"
 # 看板樣本數低於此值時在輸出註明 F1 只供參考
 SMALL_BOARD_N = 50
+# 與 InferenceSettings.batch_size 的預設相同
+DEFAULT_BATCH_SIZE = 100
 BYTES_PER_MB = 1024 * 1024
 # NOTE: 測試替換這兩個來源，耗時與 RSS 才不依賴機器
 _clock: Callable[[], float] = time.perf_counter
@@ -109,12 +111,27 @@ def measure_runtime(
     )
 
 
-def evaluate_model(classifier: Classifier, examples: list[Example]) -> ClassificationReport:
+def _predict_in_batches(
+    classifier: Classifier, texts: list[str], batch_size: int
+) -> list[dict[Polarity, float]]:
+    """依 batch_size 分批推論，記憶體峰值才對應 shadow 的 INFERENCE_BATCH_SIZE。"""
+    if batch_size < 1:
+        raise ValueError("batch_size must be >= 1")
+    scores: list[dict[Polarity, float]] = []
+    for i in range(0, len(texts), batch_size):
+        scores.extend(classifier.predict_proba(texts[i : i + batch_size]))
+    return scores
+
+
+def evaluate_model(
+    classifier: Classifier, examples: list[Example], *, batch_size: int = DEFAULT_BATCH_SIZE
+) -> ClassificationReport:
     if not examples:
         raise ValueError("testset is empty")
     labels = [p.value for p in Polarity]
     y_true = [e.polarity.value for e in examples]
-    y_pred = [top_class(s).value for s in classifier.predict_proba([e.text for e in examples])]
+    predictions = _predict_in_batches(classifier, [e.text for e in examples], batch_size)
+    y_pred = [top_class(s).value for s in predictions]
     per_class = f1_score(y_true, y_pred, labels=labels, average=None, zero_division=0)
     matrix = confusion_matrix(y_true, y_pred, labels=labels)
     return ClassificationReport(
@@ -142,13 +159,16 @@ def llm_vs_human(labeler: str, llm: dict[str, Polarity], human: dict[str, Polari
 
 
 def evaluate_by_board(
-    classifier: Classifier, examples: list[Example]
+    classifier: Classifier, examples: list[Example], *, batch_size: int = DEFAULT_BATCH_SIZE
 ) -> dict[str, ClassificationReport]:
     """依 Example.board 分組各自評估；依看板名稱排序。"""
     groups: dict[str, list[Example]] = {}
     for e in examples:
         groups.setdefault(e.board, []).append(e)
-    return {board: evaluate_model(classifier, groups[board]) for board in sorted(groups)}
+    return {
+        board: evaluate_model(classifier, groups[board], batch_size=batch_size)
+        for board in sorted(groups)
+    }
 
 
 def agreements_by_board(
@@ -278,8 +298,8 @@ def main() -> None:
         for pid, pol in human.items()
         if pid in posts
     ]
-    report = evaluate_model(classifier, examples)
-    board_reports = evaluate_by_board(classifier, examples)
+    report = evaluate_model(classifier, examples, batch_size=settings.batch_size)
+    board_reports = evaluate_by_board(classifier, examples, batch_size=settings.batch_size)
     agreements = [llm_vs_human(name, labels, human) for name, labels in llm_labels.items()]
     boards = {pid: post.board for pid, post in posts.items()}
     board_agreements = agreements_by_board(llm_labels, human, boards)
