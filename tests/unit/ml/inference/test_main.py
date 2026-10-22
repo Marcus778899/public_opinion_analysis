@@ -12,7 +12,6 @@ from radar.ml.inference.main import (
     select_posts,
     should_predict,
     text_hash,
-    top_class,
 )
 from radar.ml.training.dataset import post_text
 from radar.ml.training.train import ModelCard
@@ -210,25 +209,6 @@ def test_select_posts_text_matches_training_post_text():
     selection = select_posts([event(title=" 標題 ", content="內文" * 20)], HashCache(10), MAX_CHARS)
 
     assert selection.to_predict[0].text == post_text(" 標題 ", "內文" * 20, MAX_CHARS)
-
-
-# --- top_class ---
-
-
-def test_top_class_returns_highest_score():
-    scores = {Polarity.POSITIVE: 0.1, Polarity.NEGATIVE: 0.6, Polarity.NEUTRAL: 0.3}
-
-    assert top_class(scores) is Polarity.NEGATIVE
-
-
-def test_top_class_tie_takes_first_declared_polarity():
-    scores = dict.fromkeys(Polarity, 0.5)
-
-    assert top_class(scores) is next(iter(Polarity))
-
-
-def test_top_class_missing_class_counts_as_zero():
-    assert top_class({Polarity.NEUTRAL: 0.2}) is Polarity.NEUTRAL
 
 
 # --- Predictor ---

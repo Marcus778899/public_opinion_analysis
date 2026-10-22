@@ -13,7 +13,6 @@ from datetime import UTC, datetime
 from confluent_kafka.schema_registry import SchemaRegistryClient
 
 from radar.common.clickhouse import ClickHouseClient
-from radar.common.enums import Polarity
 from radar.common.kafka import names
 from radar.common.kafka.avro import make_avro_decoder
 from radar.common.kafka.consumer import BatchConsumer
@@ -28,7 +27,7 @@ from radar.common.settings import (
     get_kafka_settings,
 )
 from radar.ml.inference.roles import ROLE_TARGETS, consumer_group
-from radar.ml.training.classifier import Classifier, load_classifier
+from radar.ml.training.classifier import Classifier, load_classifier, top_class
 from radar.ml.training.dataset import post_text
 from radar.ml.training.train import ModelCard
 
@@ -132,11 +131,6 @@ def select_posts(events: list[CdcPost], cache: HashCache, max_chars: int) -> Sel
         if should_predict(op, cache.get(post_id), digest):
             to_predict.append(PendingPost(post_id, text, digest))
     return Selection(to_predict, seen)
-
-
-def top_class(scores: dict[Polarity, float]) -> Polarity:
-    """最高分的類別；同分時取 Polarity 宣告順序的第一個。"""
-    return max(Polarity, key=lambda c: scores.get(c, 0.0))
 
 
 class Predictor:
