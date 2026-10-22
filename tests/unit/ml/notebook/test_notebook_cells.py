@@ -69,3 +69,18 @@ def test_check_time_budget_over_limit_raises_and_suggests_max_len_256() -> None:
     check = _load_function("check_time_budget", {})
     with pytest.raises(RuntimeError, match="MAX_LEN"):
         check(10 * 3600 + 1)
+
+
+def test_first_cell_pins_torchvision_and_torchaudio_with_torch() -> None:
+    first = _cells()[0]
+    assert "torch==" in first
+    assert "torchvision==" in first
+    assert "torchaudio==" in first
+
+
+def test_checkpoint_dirs_depend_on_base_and_max_len() -> None:
+    source = "\n".join(_cells())
+    assert 'RUN_NAME = f"{BASE}-len{MAX_LEN}"' in source
+    for name in ("CKPT_DIR", "FINAL_DIR"):
+        line = next(ln for ln in source.splitlines() if ln.startswith(f"{name} = "))
+        assert "{RUN_NAME}" in line
