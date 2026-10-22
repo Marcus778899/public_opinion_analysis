@@ -54,8 +54,8 @@ PG_DB = "radar_it"
 PG_WORKER_PREFIX = "radar_it_"
 # NOTE: 與 compose.yaml 的 kafka CLUSTER_ID 一致，且刻意不同於 .env.example 的開發環境
 KAFKA_TEST_CLUSTER_ID = "hw222Z37TDqnGKEUUPeTpA"
-# 這三個 topic 由 ClickHouse 的 Kafka engine 表訂閱，migration 前要先存在
-CLICKHOUSE_TOPICS = (names.LABELS, names.PREDICTIONS, names.ALERTS)
+# 這四個 topic 由 ClickHouse 的 Kafka engine 表訂閱，migration 前要先存在
+CLICKHOUSE_TOPICS = (names.LABELS, names.PREDICTIONS, names.PREDICTIONS_SHADOW, names.ALERTS)
 RESET_TIMEOUT_S = 60.0
 # 被刪掉的 Kafka engine consumer 不一定會離開 group，broker 等 session 逾時（預設 45 秒）才踢掉
 GROUP_LEAVE_TIMEOUT_S = 120.0

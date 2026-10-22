@@ -1,27 +1,22 @@
 from datetime import UTC, datetime
 
-import numpy as np
 import pytest
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
 
 from radar.common.clickhouse import ClickHouseError
 from radar.common.enums import Polarity
 from radar.common.schemas import CdcPost, Prediction
-from radar.common.settings import InferenceRole
 from radar.ml.inference.main import (
     HashCache,
     Predictor,
     load_cache,
-    predict,
-    require_primary,
     select_posts,
     should_predict,
     text_hash,
+    top_class,
 )
 from radar.ml.training.dataset import post_text
 from radar.ml.training.train import ModelCard
+from tests.unit.ml.fakes import FakeClassifier
 
 NOW = datetime(2026, 10, 16, 3, 0, tzinfo=UTC)
 PID = "Stock.M.1792000000.A.ABC"
@@ -46,19 +41,6 @@ def card(max_chars: int = MAX_CHARS) -> ModelCard:
     )
 
 
-class FakePipeline:
-    """predict_proba 回傳固定分數；記錄呼叫次數與輸入。"""
-
-    def __init__(self, classes=("negative", "neutral", "positive"), row=(0.7, 0.2, 0.1)):
-        self.classes_ = np.array(classes)
-        self._row = row
-        self.calls: list[list[str]] = []
-
-    def predict_proba(self, texts):
-        self.calls.append(list(texts))
-        return np.array([self._row for _ in texts])
-
-
 class Sink:
     def __init__(self, fail_flush: bool = False) -> None:
         self.published: list[Prediction] = []
@@ -74,11 +56,11 @@ class Sink:
         self.flushed += 1
 
 
-def predictor(pipeline=None, sink=None, cache=None) -> tuple[Predictor, Sink, HashCache]:
+def predictor(classifier=None, sink=None, cache=None) -> tuple[Predictor, Sink, HashCache]:
     sink = sink or Sink()
     cache = cache or HashCache(100)
     handler = Predictor(
-        pipeline or FakePipeline(), card(), cache, sink.publish, sink.flush, lambda: NOW
+        classifier or FakeClassifier(), card(), cache, sink.publish, sink.flush, lambda: NOW
     )
     return handler, sink, cache
 
@@ -230,47 +212,23 @@ def test_select_posts_text_matches_training_post_text():
     assert selection.to_predict[0].text == post_text(" 標題 ", "內文" * 20, MAX_CHARS)
 
 
-# --- predict ---
+# --- top_class ---
 
 
-def test_predict_maps_classes_to_polarity_scores():
-    pipeline = FakePipeline(classes=("positive", "negative", "neutral"), row=(0.1, 0.6, 0.3))
+def test_top_class_returns_highest_score():
+    scores = {Polarity.POSITIVE: 0.1, Polarity.NEGATIVE: 0.6, Polarity.NEUTRAL: 0.3}
 
-    [(polarity, scores)] = predict(pipeline, ["x"])
-
-    assert scores == {Polarity.POSITIVE: 0.1, Polarity.NEGATIVE: 0.6, Polarity.NEUTRAL: 0.3}
-    assert polarity is Polarity.NEGATIVE
+    assert top_class(scores) is Polarity.NEGATIVE
 
 
-def test_predict_polarity_is_highest_score_with_real_model():
-    texts = ["好棒 讚", "超讚 推", "爛 垃圾", "糟糕 爛", "今天 下雨", "明天 開會"]
-    labels = ["positive", "positive", "negative", "negative", "neutral", "neutral"]
-    pipeline = Pipeline(
-        [("tfidf", TfidfVectorizer(analyzer="char", ngram_range=(1, 2))),
-         ("lr", LogisticRegression())]
-    ).fit(texts, labels)  # fmt: skip
+def test_top_class_tie_takes_first_declared_polarity():
+    scores = dict.fromkeys(Polarity, 0.5)
 
-    results = predict(pipeline, ["好棒 讚", "爛 垃圾"])
-
-    for polarity, scores in results:
-        assert set(scores) == set(Polarity)
-        assert scores[polarity] == max(scores.values())
-        assert abs(sum(scores.values()) - 1) < 1e-9
+    assert top_class(scores) is next(iter(Polarity))
 
 
-def test_predict_missing_class_scores_zero():
-    pipeline = FakePipeline(classes=("negative", "neutral"), row=(0.8, 0.2))
-
-    [(_, scores)] = predict(pipeline, ["x"])
-
-    assert scores[Polarity.POSITIVE] == 0.0
-
-
-def test_predict_empty_texts_returns_empty_without_calling_model():
-    pipeline = FakePipeline()
-
-    assert predict(pipeline, []) == []
-    assert pipeline.calls == []
+def test_top_class_missing_class_counts_as_zero():
+    assert top_class({Polarity.NEUTRAL: 0.2}) is Polarity.NEUTRAL
 
 
 # --- Predictor ---
@@ -315,22 +273,22 @@ def test_predictor_updates_cache_only_after_flush_succeeds():
 
 
 def test_predictor_batch_without_posts_to_predict_does_not_call_model():
-    pipeline = FakePipeline()
-    handler, sink, cache = predictor(pipeline=pipeline)
+    classifier = FakeClassifier()
+    handler, sink, cache = predictor(classifier=classifier)
 
     handler([event(op="u")])
 
-    assert pipeline.calls == []
+    assert classifier.calls == []
     assert sink.flushed == 0
     assert cache.get(PID) is not None  # 記下 hash，之後的內文編輯才偵測得到
 
 
 def test_predictor_model_error_propagates():
-    class Broken(FakePipeline):
+    class Broken(FakeClassifier):
         def predict_proba(self, texts):
             raise ValueError("bad model")
 
-    handler, _, _ = predictor(pipeline=Broken())
+    handler, _, _ = predictor(classifier=Broken())
 
     with pytest.raises(ValueError):
         handler([event(op="c")])
@@ -429,10 +387,26 @@ def test_predictor_publishes_text_hash_of_model_input():
     assert p.text_hash == text_hash(post_text("標題", "內文", MAX_CHARS))
 
 
-def test_require_primary_accepts_primary():
-    require_primary(InferenceRole.PRIMARY)
+def test_load_cache_default_table_is_predictions():
+    ch = FakeClickHouse()
+
+    load_cache(ch, "v", HashCache(10))
+
+    assert "FROM predictions\n" in ch.calls[0][0]
 
 
-def test_require_primary_rejects_shadow_until_implemented():
-    with pytest.raises(NotImplementedError):
-        require_primary(InferenceRole.SHADOW)
+def test_load_cache_shadow_table_queries_predictions_shadow():
+    ch = FakeClickHouse()
+
+    load_cache(ch, "v", HashCache(10), "predictions_shadow")
+
+    assert "FROM predictions_shadow\n" in ch.calls[0][0]
+
+
+def test_load_cache_unknown_table_is_rejected():
+    ch = FakeClickHouse()
+
+    with pytest.raises(ValueError):
+        load_cache(ch, "v", HashCache(10), "posts; DROP TABLE x")
+
+    assert ch.calls == []
