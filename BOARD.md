@@ -31,6 +31,7 @@
 | 2026-10-21 | D-022 | Colab 端 torch、transformers、optimum |
 | 2026-10-21 | D-023 | shadow 上限 2 CPU、1.5g、INFERENCE_THREADS=2 |
 | 2026-10-21 | D-024 | 訓練資料只在 Colab 工作階段上傳 |
+| 2026-10-22 | D-025 | ckiplab 釘 safetensors 轉換 PR；macbert 載 .bin 要求 torch>=2.6、釘 revision |
 
 ## 任務狀態
 
@@ -40,10 +41,13 @@
 | bert-design | architect | done | 1 | PR #154 |
 | gitleaks-archive-allowlist | backend | done | 0 | PR #153 |
 | bert-skeleton | architect | done | 0 | PR #156 |
+| bert-classifier | backend | review | 0 |  |
+| bert-model-import | backend | done | 0 | PR #160 |
+| bert-shadow-inference | backend | in-progress | 0 |  |
 
 ## 卡住／待甲方決定
 
-- 待甲方決定 D-025（預訓練模型 pickle 權重載入方式；擋 bert-notebook）
+- （無）
 
 ## 注意事項（踩過的坑）
 
