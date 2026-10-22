@@ -32,7 +32,10 @@ def _leftovers(models_dir: Path) -> list[str]:
 
 
 def _members_with_version(tmp_path: Path, version: str) -> dict[str, bytes]:
-    members = package_members(tmp_path / "work", model_version=version)
+    members = package_members(tmp_path / "work")
+    card = json.loads(members[CARD_FILE])
+    card["model_version"] = version
+    members[CARD_FILE] = json.dumps(card).encode()
     return members
 
 
