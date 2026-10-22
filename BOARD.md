@@ -41,9 +41,10 @@
 | bert-design | architect | done | 1 | PR #154 |
 | gitleaks-archive-allowlist | backend | done | 0 | PR #153 |
 | bert-skeleton | architect | done | 0 | PR #156 |
-| bert-classifier | backend | review | 0 |  |
+| bert-classifier | backend | done | 0 | PR #161 |
 | bert-model-import | backend | done | 0 | PR #160 |
 | bert-shadow-inference | backend | in-progress | 0 |  |
+| bert-notebook | backend | in-progress | 0 |  |
 
 ## 卡住／待甲方決定
 
