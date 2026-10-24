@@ -1,4 +1,4 @@
-"""[常駐] 情緒推論（S4-01～S4-03，設計文件 8.2）：消費 cdc.public.posts，推論後寫入 predictions。
+"""[常駐] 情緒推論（S4-01～S4-03，設計文件 8.2）：消費 cdc.public.posts，推論後寫入角色的 topic。
 
 是否推論只看模型輸入文字的 hash，大部分只更新推噓數的事件不會重複推論（開發規格 7.18）；
 啟動時從 ClickHouse 載入 hash，重啟後被編輯的文章照常推論（開發規格 7.19）。
@@ -11,10 +11,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from confluent_kafka.schema_registry import SchemaRegistryClient
-from sklearn.pipeline import Pipeline
 
 from radar.common.clickhouse import ClickHouseClient
-from radar.common.enums import Polarity
 from radar.common.kafka import names
 from radar.common.kafka.avro import make_avro_decoder
 from radar.common.kafka.consumer import BatchConsumer
@@ -24,15 +22,15 @@ from radar.common.log import log, setup_logging
 from radar.common.schemas import CdcPost, Prediction
 from radar.common.settings import (
     ClickHouseSettings,
-    InferenceRole,
     InferenceSettings,
     SchemaRegistrySettings,
     get_kafka_settings,
 )
+from radar.ml.inference.roles import ROLE_TARGETS, consumer_group
+from radar.ml.training.classifier import Classifier, load_classifier, top_class
 from radar.ml.training.dataset import post_text
-from radar.ml.training.train import ModelCard, load_model
+from radar.ml.training.train import ModelCard
 
-GROUP_ID = "inference"
 CREATE = "c"
 # PG 端刪除列時 __deleted 為 "true"（設計文件 6.1）
 PG_ROW_DELETED = "true"
@@ -40,7 +38,7 @@ PG_ROW_DELETED = "true"
 # NOTE: 別名不可與欄位同名，否則 WHERE 的 text_hash 會指到 argMax(...)
 CACHE_QUERY = """
 SELECT post_id, argMax(text_hash, predicted_at) AS latest_hash, max(predicted_at) AS latest_at
-FROM predictions
+FROM {table}
 WHERE model_version = {model_version:String} AND text_hash != ''
 GROUP BY post_id
 ORDER BY latest_at
@@ -74,10 +72,16 @@ class HashCache:
         return len(self._data)
 
 
-def load_cache(client: ClickHouseClient, model_version: str, cache: HashCache) -> int:
+def load_cache(
+    client: ClickHouseClient, model_version: str, cache: HashCache, table: str = "predictions"
+) -> int:
     """把同一個模型版本每篇最新推論的 text_hash 放進快取；回傳載入的篇數。"""
     # NOTE: ClickHouse 的錯誤直接往上拋：服務停止、由 docker 重啟，不以空快取開始消費
-    rows = client.query_rows(CACHE_QUERY, {"model_version": model_version})
+    # NOTE: 表名只接受 roles 對照表裡的值，避免拼進 SQL 的字串來自外部
+    if table not in {t.table for t in ROLE_TARGETS.values()}:
+        raise ValueError(f"unknown inference table: {table}")
+    sql = CACHE_QUERY.replace("{table}", table)
+    rows = client.query_rows(sql, {"model_version": model_version})
     for row in rows:
         cache.put(str(row["post_id"]), str(row["latest_hash"]))
     return len(rows)
@@ -129,40 +133,19 @@ def select_posts(events: list[CdcPost], cache: HashCache, max_chars: int) -> Sel
     return Selection(to_predict, seen)
 
 
-def predict(pipeline: Pipeline, texts: list[str]) -> list[tuple[Polarity, dict[Polarity, float]]]:
-    """predict_proba 的結果依 pipeline.classes_ 轉成 (最高分類別, 三類分數)。"""
-    if not texts:
-        return []
-    classes = [Polarity(c) for c in pipeline.classes_]
-    results: list[tuple[Polarity, dict[Polarity, float]]] = []
-    for row in pipeline.predict_proba(texts):
-        # NOTE: 訓練資料缺某一類時模型沒有該類，分數記 0，訊息仍帶齊三類（開發規格 3.5）
-        scores = dict.fromkeys(Polarity, 0.0)
-        scores.update({c: float(p) for c, p in zip(classes, row, strict=True)})
-        results.append((max(scores, key=lambda c: scores[c]), scores))
-    return results
-
-
-def require_primary(role: InferenceRole) -> None:
-    """shadow 尚未實作：拒絕啟動，避免 shadow 結果寫進 predictions（開發規格 7.27）。"""
-    # TODO(bert-shadow-inference): 改用 roles.ROLE_TARGETS 決定 group、topic、表後移除
-    if role is not InferenceRole.PRIMARY:
-        raise NotImplementedError(f"INFERENCE_ROLE={role} is not supported yet")
-
-
 class Predictor:
     """BatchConsumer 的 handler：選文章 → 批次推論 → 送出並 flush → 更新快取。"""
 
     def __init__(
         self,
-        pipeline: Pipeline,
+        classifier: Classifier,
         card: ModelCard,
         cache: HashCache,
         publish: Callable[[Prediction], None],
         flush: Callable[[], None],
         now: Callable[[], datetime],
     ) -> None:
-        self._pipeline = pipeline
+        self._classifier = classifier
         self._card = card
         self._cache = cache
         self._publish = publish
@@ -173,15 +156,15 @@ class Predictor:
         selection = select_posts(events, self._cache, self._card.max_chars)
         pending = selection.to_predict
         if pending:
-            results = predict(self._pipeline, [p.text for p in pending])
+            results = self._classifier.predict_proba([p.text for p in pending])
             predicted_at = self._now()
-            for post, (polarity, scores) in zip(pending, results, strict=True):
+            for post, scores in zip(pending, results, strict=True):
                 self._publish(
                     Prediction(
                         post_id=post.post_id,
                         model_version=self._card.model_version,
                         predicted_at=predicted_at,
-                        polarity=polarity,
+                        polarity=top_class(scores),
                         scores=scores,
                         text_hash=post.digest,
                     )
@@ -196,36 +179,42 @@ class Predictor:
 def main() -> None:
     setup_logging("inference")
     settings = InferenceSettings()
-    require_primary(settings.role)
-    pipeline, card = load_model(settings.model_dir)
+    targets = ROLE_TARGETS[settings.role]
+    classifier, card = load_classifier(settings.model_dir, threads=settings.threads)
+    group_id = consumer_group(settings.role, card.model_version)
     cache = HashCache(settings.cache_size)
     ch = ClickHouseClient(ClickHouseSettings())
     try:
-        loaded = load_cache(ch, card.model_version, cache)
+        loaded = load_cache(ch, card.model_version, cache, targets.table)
     finally:
         ch.close()
     log.info("loaded %d post hashes from clickhouse", loaded)
     producer = JsonProducer(get_kafka_settings())
     registry = SchemaRegistryClient.new_client({"url": SchemaRegistrySettings().url})
     handler = Predictor(
-        pipeline,
+        classifier,
         card,
         cache,
-        publish=lambda p: producer.send(names.PREDICTIONS, p.post_id, p),
+        publish=lambda p: producer.send(targets.topic, p.post_id, p),
         flush=producer.flush,
         now=lambda: datetime.now(UTC),
     )
     consumer = BatchConsumer(
         get_kafka_settings(),
-        group_id=GROUP_ID,
+        group_id=group_id,
         topics=[names.CDC_POSTS],
         model=CdcPost,
         handler=handler,
-        dlq=DlqPublisher(producer, GROUP_ID),
+        dlq=DlqPublisher(producer, group_id),
         batch_size=settings.batch_size,
         decode=make_avro_decoder(CdcPost, registry),
     )
-    log.info("inference with %s (trained on %s)", card.model_version, card.label_version)
+    log.info(
+        "inference %s with %s (trained on %s)",
+        settings.role.value,
+        card.model_version,
+        card.label_version,
+    )
     try:
         consumer.run()
     finally:
