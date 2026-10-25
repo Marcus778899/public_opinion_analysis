@@ -5,12 +5,6 @@
 
 ## 待決定
 
-### D-026 gitleaks 把 Hugging Face 的模型版本號（40 位 hex）誤判成密鑰，所有分支的 CI 都卡住
-- 背景：`bert-notebook` 驗收測試裡 `GOOGLE_TOKENIZER_REV = "<40 位 hex>"` 因變數名含 token 被 `generic-api-key` 規則判定（調查：reports/bert-shadow-inference.gitleaks.md）。CI 掃全部分支歷史，該 commit 推上 origin 後，develop 與所有 PR 的 Security 都會失敗；歷史不能改（不可 force push）
-- 選項：A. `.gitleaks.toml` 只對 `generic-api-key` 加一條規則：變數名含 rev／revision／commit／sha **且**值是 40 位小寫 hex 才放行（已驗：repo 變成無誤判，`API_KEY = <40 hex>` 仍會被抓）／B. `.gitleaksignore` 逐筆加這一筆的 fingerprint（D-018 不要的做法，之後每次新 revision 都要再加）
-- 建議：A，依類別根治、範圍窄；開 chore 單 `gitleaks-revision-allowlist`，只改 `.gitleaks.toml`，合併後各 PR sync 即恢復
-- 提出：architect（PR #165 CI 調查）
-
 <!-- 範本：
 ### D-001 一句話問題
 - 背景：為什麼要決定（1–2 行）
@@ -155,3 +149,9 @@
 - 理由：有 safetensors 就用；pickle 只在用完即丟的 Colab VM 解開，本機與 VM 仍只載 ONNX／JSON
 - 影響：開發規格 7.27「威脅與對策」預訓練模型來源列、7.27 派工順序第 2 步；`bert-notebook`
 - 日期：2026-10-22
+
+### D-026 gitleaks 把 Hugging Face 的模型版本號（40 位 hex）誤判成密鑰，所有分支的 CI 都卡住
+- 決定：A. `.gitleaks.toml` 只對 `generic-api-key` 加一條放行規則：變數名含 rev／revision／commit／sha **且**值是 40 位小寫 hex 才放行；不逐筆加 `.gitleaksignore`
+- 理由：依類別根治、範圍窄，延續 D-018；之後新的 revision 不會再擋 CI
+- 影響：`.gitleaks.toml`；chore 單 `gitleaks-revision-allowlist`（調查見 reports/bert-shadow-inference.gitleaks.md）；合併後 PR #165、#166、#167 sync
+- 日期：2026-10-25
