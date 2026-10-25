@@ -32,6 +32,7 @@
 | 2026-10-21 | D-023 | shadow 上限 2 CPU、1.5g、INFERENCE_THREADS=2 |
 | 2026-10-21 | D-024 | 訓練資料只在 Colab 工作階段上傳 |
 | 2026-10-22 | D-025 | ckiplab 釘 safetensors 轉換 PR；macbert 載 .bin 要求 torch>=2.6、釘 revision |
+| 2026-10-25 | D-026 | gitleaks 對 generic-api-key 放行 rev/sha 變數名＋40 位小寫 hex（不逐筆忽略） |
 
 ## 任務狀態
 
@@ -44,12 +45,12 @@
 | bert-classifier | backend | done | 0 | PR #161 |
 | bert-model-import | backend | done | 0 | PR #160 |
 | bert-shadow-inference | backend | blocked | 0 |  |
-| bert-notebook | backend | qa-fail | 0 |  |
-| bert-compare | backend | in-progress | 0 |  |
+| bert-notebook | backend | blocked | 0 |  |
+| bert-compare | backend | blocked | 0 |  |
 
 ## 卡住／待甲方決定
 
-- 待甲方決定 D-026（gitleaks 誤判模型版本號；擋所有 PR 合併）
+- （無）
 
 ## 注意事項（踩過的坑）
 
