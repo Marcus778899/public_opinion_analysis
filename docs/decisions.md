@@ -149,3 +149,9 @@
 - 理由：有 safetensors 就用；pickle 只在用完即丟的 Colab VM 解開，本機與 VM 仍只載 ONNX／JSON
 - 影響：開發規格 7.27「威脅與對策」預訓練模型來源列、7.27 派工順序第 2 步；`bert-notebook`
 - 日期：2026-10-22
+
+### D-026 gitleaks 把 Hugging Face 的模型版本號（40 位 hex）誤判成密鑰，所有分支的 CI 都卡住
+- 決定：A. `.gitleaks.toml` 只對 `generic-api-key` 加一條放行規則：變數名含 rev／revision／commit／sha **且**值是 40 位小寫 hex 才放行；不逐筆加 `.gitleaksignore`
+- 理由：依類別根治、範圍窄，延續 D-018；之後新的 revision 不會再擋 CI
+- 影響：`.gitleaks.toml`；chore 單 `gitleaks-revision-allowlist`（調查見 reports/bert-shadow-inference.gitleaks.md）；合併後 PR #165、#166、#167 sync
+- 日期：2026-10-25
