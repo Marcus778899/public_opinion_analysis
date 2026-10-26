@@ -1297,6 +1297,13 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | 推論延遲 | 每版每篇第一次 `predicted_at` − `posts_history` 中該篇 `op = 'c'` 的 `changed_at`（PG commit 時間，同階段 4 驗收），只算 `changed_at >= since`；p50、p95、最大 |
 | 信心分布 | 各版最高分低於 0.4／0.5／0.6／0.7 的比例，以及各門檻以上對 LLM 標註的準確率；重新決定 `TELEGRAM_SENTIMENT_MIN_SCORE` 用（15.8） |
 
+實作細節（`bert-compare` 的決定）：
+
+- 對 LLM 的 macro-F1 與篇數由 `render_llm_section(a, b, pairs)` 產生，`main` 附在 `render_markdown` 輸出之後；`render_markdown` 簽名不變
+- Cohen's kappa 在 `compare.py` 用整數混淆矩陣計算（最後一步才相除），不用 sklearn（浮點誤差）；兩版全為同一類別時視為 1.0
+- 延遲 p50／p95 在 Python 以線性內插計算；不一致 CSV 欄位為 `post_id, board, title, polarity_a, score_a, polarity_b, score_b, llm`（無標註時 `llm` 為空）
+- `main` 的標註者由 `LABEL_PRIMARY` 加 `build_labeler` 推出；報告一致率用百分比，kappa、macro-F1 用三位小數
+
 **測試**
 
 - 骨架（`bert-skeleton`）的驗收：`uv lock` 後在 arm64 主機以 `docker compose -f infra/docker-compose.yaml --env-file .env --profile app build init` 建 image（`radar-app` 只由 `init` 建置），再以 `--profile app run --rm --no-deps inference python -c "import onnxruntime, tokenizers"` 檢查（worktree 沒有 `.env`，`run` 用主目錄的 compose 檔，image 相同），容器內 `import onnxruntime, tokenizers` 成功；`tokenizers` 只有 `cp310-abi3` wheel、沒有 cp312 專屬的（調查 3），要實際裝過才算數。x86_64 由 CI 驗證
