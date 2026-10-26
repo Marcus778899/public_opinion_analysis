@@ -8,9 +8,6 @@ from datetime import UTC, datetime
 import pytest
 from confluent_kafka import Consumer
 from confluent_kafka.admin import AdminClient, NewTopic
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
 
 from radar.common.kafka.config import admin_config, consumer_config
 from radar.common.kafka.consumer import BatchConsumer
@@ -19,19 +16,14 @@ from radar.common.kafka.producer import JsonProducer
 from radar.common.schemas import CdcPost, DlqRecord, Prediction
 from radar.ml.inference.main import HashCache, Predictor
 from radar.ml.training.train import ModelCard
+from tests.unit.ml.fakes import FakeClassifier
 
 TIMEOUT_S = 30
 SENTINEL = "Stock.M.1792999999.A.END"
 
 
 @pytest.fixture(scope="module")
-def model() -> tuple[Pipeline, ModelCard]:
-    texts = ["好棒 讚", "超讚 推", "爛 垃圾", "糟糕 爛", "今天 下雨", "明天 開會"]
-    labels = ["positive", "positive", "negative", "negative", "neutral", "neutral"]
-    pipeline = Pipeline(
-        [("tfidf", TfidfVectorizer(analyzer="char", ngram_range=(1, 2))),
-         ("lr", LogisticRegression())]
-    ).fit(texts, labels)  # fmt: skip
+def model() -> tuple[FakeClassifier, ModelCard]:
     card = ModelCard(
         model_version="tfidf-lr-it",
         created_at=datetime.now(UTC),
@@ -39,11 +31,11 @@ def model() -> tuple[Pipeline, ModelCard]:
         labeler="groq:q",
         label_version="prompt-v6",
         max_chars=2000,
-        n_train=len(texts),
+        n_train=6,
         class_counts={"positive": 2, "negative": 2, "neutral": 2},
         params={},
     )
-    return pipeline, card
+    return FakeClassifier(), card
 
 
 @pytest.fixture
@@ -67,12 +59,12 @@ def produce_event(producer: JsonProducer, topic: str, post_id: str, op: str, con
 
 def run_inference(kafka_settings, model, cdc: str, out: str, group: str) -> None:
     """跑 consumer 直到處理到 SENTINEL 這篇新文章。"""
-    pipeline, card = model
+    classifier, card = model
     producer = JsonProducer(kafka_settings)
     produce_event(producer, cdc, SENTINEL, "c", "結束")
     producer.flush()
     predictor = Predictor(
-        pipeline,
+        classifier,
         card,
         HashCache(100),
         publish=lambda p: producer.send(out, p.post_id, p),
