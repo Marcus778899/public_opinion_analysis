@@ -5,12 +5,6 @@
 
 ## 待決定
 
-### D-027 v0.8.0 要不要等甲方訓練模型、shadow 跑滿 3 天才發版
-- 背景：程式、uat（blocker／major 0）、資安（PASS）都完成；但開發規格階段 8 的驗收有一半要真模型：Colab fine-tune、匯入評估、shadow ≥ 3 天且重疊 ≥ 500 篇、compare（docs/uat/v0.8.0.md S15–S18），agent 做不到
-- 選項：A. 現在發版，甲方只驗 README 與流程能看懂；模型相關驗收改成追蹤 issue，跑完後補 `docs/reports/model-evaluation.md`（比照 D-003 不等驗收合進 main）／B. 等甲方跑完 Colab、shadow 3 天與 compare 再驗收發版（至少 3～4 天，期間 develop 不進 main）
-- 建議：A，程式已驗完；模型好壞是資料結果，不影響這版程式能不能發
-- 提出：manager（v0.8.0 收尾）
-
 <!-- 範本：
 ### D-001 一句話問題
 - 背景：為什麼要決定（1–2 行）
@@ -161,3 +155,9 @@
 - 理由：依類別根治、範圍窄，延續 D-018；之後新的 revision 不會再擋 CI
 - 影響：`.gitleaks.toml`；chore 單 `gitleaks-revision-allowlist`（調查見 reports/bert-shadow-inference.gitleaks.md）；合併後 PR #165、#166、#167 sync
 - 日期：2026-10-25
+
+### D-027 v0.8.0 要不要等甲方訓練模型、shadow 跑滿 3 天才發版
+- 決定：A. 現在發版；甲方只驗 README 與流程能看懂，模型相關驗收（docs/uat/v0.8.0.md S15–S18、甲方驗收清單第 2～7 項）改由 #178 追蹤，跑完補 `docs/reports/model-evaluation.md`
+- 理由：程式、uat、資安都已驗完；模型好壞是資料結果，不影響這版程式能不能發（比照 D-003）
+- 影響：v0.8.0 甲方驗收範圍；#178
+- 日期：2026-10-26

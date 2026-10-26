@@ -33,6 +33,7 @@
 | 2026-10-21 | D-024 | 訓練資料只在 Colab 工作階段上傳 |
 | 2026-10-22 | D-025 | ckiplab 釘 safetensors 轉換 PR；macbert 載 .bin 要求 torch>=2.6、釘 revision |
 | 2026-10-25 | D-026 | gitleaks 對 generic-api-key 放行 rev/sha 變數名＋40 位小寫 hex（不逐筆忽略） |
+| 2026-10-26 | D-027 | v0.8.0 先發版；模型驗收（Colab、shadow 3 天、compare）改由 #178 追蹤 |
 
 ## 任務狀態
 
@@ -51,7 +52,7 @@
 
 ## 卡住／待甲方決定
 
-- 待甲方決定 D-027（v0.8.0 是否等模型驗收才發版）
+- v0.8.0 待甲方驗收：README 階段 8 小節，docs/uat/v0.8.0.md 勾第 1 項並寫 甲方驗收：PASS
 
 ## 注意事項（踩過的坑）
 
