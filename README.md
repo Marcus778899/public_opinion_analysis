@@ -23,10 +23,14 @@
 6. 停止（資料保留在 volume）：
 
    ```bash
-   docker compose -f infra/docker-compose.yaml --env-file .env --profile app --profile labeling --profile inference --profile alerting down --remove-orphans
+   docker compose -f infra/docker-compose.yaml --env-file .env --profile app --profile labeling --profile inference --profile shadow --profile alerting down --remove-orphans
    ```
 
-7. 檢查：`make check`（lint + 單元測試；整合測試 `make test-int` 需要 Docker）
+7. 檢查：`make check`（lint + 單元測試）；整合測試需要 Docker：
+
+   ```bash
+   docker compose -f compose.yaml --env-file .env run --rm test
+   ```
 
 端到端測試用假 PTT、獨立 volume，不碰開發資料（開發與 e2e 共用容器名稱，不能同時運作，#41）：
 
@@ -37,7 +41,7 @@
    docker compose -f infra/docker-compose.yaml -f infra/docker-compose.e2e.yaml --env-file .env --profile app up -d --build --wait
    ```
 
-3. 跑測試：`make e2e`
+3. 跑測試：`uv run --env-file .env pytest tests/e2e -m e2e`
 4. 停止並刪除 e2e 專用的 volume（不碰開發資料）：
 
    ```bash
@@ -45,6 +49,23 @@
    ```
 
 標註與訓練（階段 3）的指令見[開發規格](docs/development-spec.md)第 6 章與 [docs/labeling-guideline.md](docs/labeling-guideline.md)。
+
+### BERT 與 shadow 比較（階段 8）
+
+新模型先以 shadow 和現行模型並行推論，結果只寫 ClickHouse `predictions_shadow`，Telegram 與 Dashboard 仍只用現行模型。以下指令都在主目錄、自己的終端機執行；`python -m` 指令要帶 `uv run --env-file .env`，不然會缺 ClickHouse 帳密。細節與門檻見開發規格 7.27。
+
+1. 匯出訓練資料：`uv run --env-file .env python -m radar.ml.training.export`，得到 `data/datasets/` 下的 `.jsonl` 與同名 meta 檔
+2. fine-tune：在 Colab 開 `notebooks/bert_finetune.ipynb`，上傳第 1 步的兩個檔，第一格 `BASE` 設 `macbert`、`ckip` 各跑一次，共下載 4 個模型包（fp32 與 int8），記下最後一格印出的 SHA-256（D-019、D-021、D-024）
+3. 匯入：每個包跑一次 `uv run --env-file .env python -m radar.ml.training.import_model --zip <模型包路徑>`，會放到 `models/<模型版本>/`，SHA-256 要與 notebook 一致；同版本已存在不會覆寫
+4. 評估：`uv run --env-file .env python -m radar.ml.training.evaluate --model models/<模型版本>`，結果在該資料夾的 `evaluation.md`；依開發規格 7.27「自行決定」挑一個進 shadow
+5. 啟動 shadow：`.env` 設 `INFERENCE_SHADOW_MODEL_VERSION`（`models/` 下的資料夾名稱；沒設容器會不斷重啟），再執行：
+
+   ```bash
+   docker compose -f infra/docker-compose.yaml --env-file .env --profile app --profile shadow up -d --wait inference-shadow
+   ```
+
+6. 比較：shadow 運作至少 3 天、兩版重疊 ≥ 500 篇後，`uv run --env-file .env python -m radar.ml.training.compare --a <現行版本> --b <shadow 版本> --since <shadow 開始時間，例 2026-10-26T00:00:00+00:00>`，輸出 `models/<shadow 版本>/comparison.md` 與 `data/review/disagreements-<a>-vs-<b>.csv`
+7. 依比較結果決定是否切換預設模型與 `TELEGRAM_SENTIMENT_MIN_SCORE`
 
 ## 功能
 
@@ -57,6 +78,7 @@
 | 熱度偵測與警示 | v0.6.0 | 依推文速度與平常的倍數發出文章、看板警示（3 天驗收待做，見開發規格第 6 章） |
 | Telegram bot | v0.6.0 | 按鈕操作訂閱、現在熱門、看板概況、通知設定；警示含推／噓／箭頭、爭議度與情緒；v0.7.0 起沒設允許清單就拒絕啟動（D-010） |
 | Dashboard | v0.7.0 | Grafana 6 個面板：各看板推文量、情緒分布與趨勢、爭議度最高的文章、近 24 小時警示、熱門文章排行（D-014） |
+| BERT 與 shadow 比較 | v0.8.0 | Colab fine-tune 中文 BERT、匯入 ONNX 模型包、shadow 並行推論、ClickHouse 比較兩版（見上方「BERT 與 shadow 比較」） |
 
 ## 架構
 
@@ -70,6 +92,7 @@
 | `src/radar/bot/` | Telegram bot |
 | `src/radar/api/` | 管理 API |
 | `src/radar/common/` | 設定、log、Kafka、DB 共用元件 |
+| `notebooks/` | Colab fine-tune notebook（甲方執行） |
 | `infra/` | docker-compose、Kafka、PG、ClickHouse、Debezium 設定 |
 | `tools/` | 營運腳本：建 topic、ClickHouse migration、註冊 connector、seed（D-006） |
 | `scripts/` | agent 團隊流程腳本 |
@@ -88,6 +111,7 @@
 | `stage-1`、`stage-2` | 2026-10 | 爬取入庫、CDC → ClickHouse |
 | v0.6.0 | 2026-10-20 | 階段 3～6：情緒標註與模型、推論、熱度警示、Telegram 互動 |
 | v0.7.0 | 2026-10-21 | 階段 7：Grafana Dashboard（情緒信心下限為下拉選單）；整合測試改用 compose test 服務並平行執行（#78）；bot 允許清單 fail closed（D-010） |
+| v0.8.0 | 2026-10-26 | 階段 8：BERT fine-tune notebook、ONNX 模型包匯入、shadow 並行推論、兩版比較；gitleaks 誤判根治（D-018、D-026） |
 
 ## 授權
 
