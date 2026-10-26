@@ -56,7 +56,7 @@
 
 1. 匯出訓練資料：`uv run --env-file .env python -m radar.ml.training.export`，得到 `data/datasets/` 下的 `.jsonl` 與同名 meta 檔
 2. fine-tune：在 Colab 開 `notebooks/bert_finetune.ipynb`，上傳第 1 步的兩個檔，第一格 `BASE` 設 `macbert`、`ckip` 各跑一次，共下載 4 個模型包（fp32 與 int8），記下最後一格印出的 SHA-256（D-019、D-021、D-024）
-3. 匯入：每個包跑一次 `uv run --env-file .env python -m radar.ml.training.import_model --zip <模型包路徑>`，會放到 `models/<模型版本>/`，SHA-256 要與 notebook 一致；同版本已存在不會覆寫
+3. 匯入：先用 `shasum -a 256 <模型包路徑>` 對照 notebook 印出的 SHA-256（`import_model` 只檢查包內檔案有沒有損毀，擋不住整包被換掉），一致再跑 `uv run --env-file .env python -m radar.ml.training.import_model --zip <模型包路徑>`，會放到 `models/<模型版本>/`；同版本已存在不會覆寫
 4. 評估：`uv run --env-file .env python -m radar.ml.training.evaluate --model models/<模型版本>`，結果在該資料夾的 `evaluation.md`；依開發規格 7.27「自行決定」挑一個進 shadow
 5. 啟動 shadow：`.env` 設 `INFERENCE_SHADOW_MODEL_VERSION`（`models/` 下的資料夾名稱；沒設容器會不斷重啟），再執行：
 
