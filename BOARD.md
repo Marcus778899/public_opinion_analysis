@@ -44,9 +44,10 @@
 | bert-skeleton | architect | done | 0 | PR #156 |
 | bert-classifier | backend | done | 0 | PR #161 |
 | bert-model-import | backend | done | 0 | PR #160 |
-| bert-shadow-inference | backend | blocked | 0 |  |
-| bert-notebook | backend | blocked | 0 |  |
-| bert-compare | backend | blocked | 0 |  |
+| bert-shadow-inference | backend | done | 0 | PR #165 |
+| bert-notebook | backend | done | 0 | PR #166 |
+| bert-compare | backend | done | 0 | PR #167 |
+| gitleaks-revision-allowlist | backend | done | 1 | PR #170 |
 
 ## 卡住／待甲方決定
 
