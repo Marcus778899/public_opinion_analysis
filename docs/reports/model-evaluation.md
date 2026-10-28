@@ -186,3 +186,63 @@ LLM 標註者在人工測試集上只標過 **prompt-v5**。升 v6 時已決定�
 | 推噓比實驗結論 | ✅ 不採用（`docs/reports/s3-05-push-ratio.md`） |
 
 Stock 補到 400 篇後，要重新訓練並在這份報告新增一節。
+
+---
+
+## 階段 8 BERT：Colab fine-tune 紀錄
+
+> 執行：2026-10-28（甲方）；來源：notebook 輸出，原樣照錄；追蹤 #178。人工測試集分數**待 evaluate**，本節不下切換模型的結論。
+
+注意：下表的 F1 是訓練資料切出的 10% 驗證集分數，不是人工測試集。選模型以人工測試集為準（開發規格 7.27）。
+
+### macbert（`BASE = "macbert"`）
+
+| 項目 | 內容 |
+|---|---|
+| 環境 | Colab T4 GPU、Python 3.13；notebook 為合併 #183、#187 後的版本 |
+| 資料 | `groq-qwen-qwen3.8-27b-prompt-v6-202610280709`，3,268 筆，驗證集分層取 10% |
+| 訓練設定 | 照開發規格 7.27，不在此重述 |
+| 訓練時間 | 552 步，5 分 01 秒（前 50 步 19 秒） |
+| 選用 | epoch 3（最佳）；PyTorch 驗證集 macro-F1 0.6007 |
+
+| epoch | 驗證 loss | 驗證 macro-F1 |
+|---|---|---|
+| 1 | 0.986442 | 0.500538 |
+| 2 | 0.875128 | 0.576880 |
+| 3 | 0.937084 | 0.600676 |
+
+epoch 3 的 training loss 為 0.7747。
+
+### 匯出驗證
+
+| 檢查 | 結果 | 門檻 |
+|---|---|---|
+| tokenizer ids | 一致 | 一致 |
+| GPU PyTorch 對 CPU PyTorch 最大差（診斷） | 1.80e-03 | 不擋 |
+| CPU PyTorch 對 ONNX 最大差 | 1.55e-06 | < 1e-3 |
+| 預測類別不一致 | 0 篇 | 只印出 |
+| fp32 ONNX 驗證集 macro-F1 | 0.6007 | 與 PyTorch 相同 |
+
+GPU 對 CPU 的差 1.80e-03，與先前 GPU PyTorch 對 CPU ONNX 的 2.17e-3 同量級，而同為 CPU 的 PyTorch 對 ONNX 只差 1.55e-06：證實 #187 的推測，差異來自裝置間 fp32 運算，不是匯出錯誤。
+
+### int8
+
+驗證集 macro-F1 0.5251，比 fp32 低 0.0755，超過 notebook 的 0.03 警告線。依 7.27，是否採用 int8 由人工測試集決定：int8 的 macro-F1 要比 fp32 低不超過 0.02，且每批耗時較短才用。以驗證集的掉幅看，採用的機會不大，仍待 evaluate 確認。
+
+### 模型包
+
+| 檔名 | 大小（bytes） | SHA-256 |
+|---|---|---|
+| `bert-macbert-202610280830.zip` | 379935103 | `c93e69fa45a3bc121c92b1034f566b18ae544e3ad34efd5bd09be4d56bda43ed` |
+| `bert-macbert-202610280830-int8.zip` | 59999755 | `a6c6f42c0f4a0460323534601e1de5ffe970bc368db522b003e852cfd2bd28df` |
+
+### ckip（對照，待補）
+
+先前用 #187 之前的舊 notebook 跑過，沒有打包：驗證集 macro-F1 0.6806（epoch 2）。舊版流程與數字不能直接和 macbert 這次比較，要用新版重跑後補在本節。
+
+### 待辦
+
+1. ckip 用新版 notebook 重跑（`BASE = "ckip"`），結果補在本節
+2. 四個模型包各自 `import_model`
+3. 四個模型包各自對人工測試集跑 `evaluate`，補上人工測試集分數、耗時與記憶體
+4. 依 7.27 的「自行決定」選 fp32／int8 與 macbert／ckip（需要時由甲方決定是否切換）
