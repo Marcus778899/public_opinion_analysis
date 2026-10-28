@@ -6,17 +6,25 @@
 
 1. 設定：在自己的終端機（不是 agent 的 sandbox）跑 `python3 scripts/check_env.py`，依提示在 `.env` 填入缺少的值（Telegram 需要 `TELEGRAM_BOT_TOKEN`，並在 `TELEGRAM_ALLOWED_CHAT_IDS` 填自己的 chat id——沒填 bot 會拒絕啟動，要開放所有人必須另設 `TELEGRAM_ALLOW_ALL=true`（D-010）；情緒推論需要 `INFERENCE_MODEL_VERSION` 與 `models/` 下的模型；Dashboard 需要自訂 `GRAFANA_ADMIN_PASSWORD` 與 `CLICKHOUSE_GRAFANA_PASSWORD`，不可用 `change-me`）
 2. 安裝：`make setup`（Python 3.12、[uv](https://docs.astral.sh/uv/)、Docker；`pre-commit install` 啟用 commit 前檢查）
-3. 啟動整套服務（會對真實 PTT 發請求；自動建表、topic 與 CDC connector）：
+3. 全部啟動（爬蟲、入庫、CDC、watchdog、API、Grafana、熱度警示、Telegram bot、情緒推論；會對真實 PTT 發請求，自動建表、topic 與 CDC connector）：
 
    ```bash
-   docker compose -f infra/docker-compose.yaml --env-file .env --profile app --profile alerting up -d --build --wait
+   docker compose -f infra/docker-compose.yaml --env-file .env --profile app --profile alerting --profile inference up -d --build --wait
    ```
 
-   要情緒推論再加這一行：
+   指令結束後所有容器都應該是 `running`／`healthy`（`radar_init`、`radar_apicurio_db_init` 是一次性工作，`exited (0)` 是正常的）。
 
-   ```bash
-   docker compose -f infra/docker-compose.yaml --env-file .env --profile app --profile inference up -d --wait inference
-   ```
+   > **選擇性啟動**：上面的 `--profile` 決定開哪些服務，拿掉就不開。Kafka、PostgreSQL、ClickHouse、Debezium、Grafana、Kafka UI 不分 profile 一律啟動。
+   >
+   > | profile | 服務 | 什麼時候拿掉／加上 |
+   > |---|---|---|
+   > | `app` | init、api、scheduler、crawler ×3、ingest、cdc-watchdog | 核心，一定要有 |
+   > | `alerting` | heat、bot | 不要 Telegram 通知時拿掉 |
+   > | `inference` | inference | `.env` 沒設 `INFERENCE_MODEL_VERSION` 時拿掉 |
+   > | `shadow` | inference-shadow | 預設不開；匯入 BERT 模型、設好 `INFERENCE_SHADOW_MODEL_VERSION` 後才加（見下方階段 8 第 5 步） |
+   > | `labeling` | label-stream | 預設不開；會持續呼叫 LLM API（花額度），要串流標註時才加 |
+   >
+   > 注意：指令最後**不要**接服務名稱（例如 `… up -d inference`），接了就只會啟動那個服務和它依賴的基礎設施，其他服務（Grafana、watchdog、api、爬蟲、bot…）都不會起來。
 
 4. 建立看板：`make seed`（api 已在上一步的容器裡，不需要另外 `make api`；Gossiping、Stock、Tech_Job，Scheduler 30 秒內開始爬取）；狀態：`curl localhost:8000/status`
 5. 在 Telegram 對 bot 傳 `/start`，用主選單按鈕訂閱看板、看現在熱門與看板概況；Dashboard：瀏覽器開 `http://localhost:<GRAFANA_PORT>`，帳號 `admin`、密碼為 `GRAFANA_ADMIN_PASSWORD`，dashboard「radar」不需手動設定（第 3 步已一併啟動 Grafana）
@@ -55,8 +63,17 @@
 新模型先以 shadow 和現行模型並行推論，結果只寫 ClickHouse `predictions_shadow`，Telegram 與 Dashboard 仍只用現行模型。以下指令都在主目錄、自己的終端機執行；`python -m` 指令要帶 `uv run --env-file .env`，不然會缺 ClickHouse 帳密。細節與門檻見開發規格 7.27。
 
 1. 匯出訓練資料：`uv run --env-file .env python -m radar.ml.training.export`，得到 `data/datasets/` 下的 `.jsonl` 與同名 meta 檔
-2. fine-tune：在 Colab 開 `notebooks/bert_finetune.ipynb`，上傳第 1 步的兩個檔，第一格 `BASE` 設 `macbert`、`ckip` 各跑一次，共下載 4 個模型包（fp32 與 int8），記下最後一格印出的 SHA-256（D-019、D-021、D-024）
-3. 匯入：先用 `shasum -a 256 <模型包路徑>` 對照 notebook 印出的 SHA-256（`import_model` 只檢查包內檔案有沒有損毀，擋不住整包被換掉），一致再跑 `uv run --env-file .env python -m radar.ml.training.import_model --zip <模型包路徑>`，會放到 `models/<模型版本>/`；同版本已存在不會覆寫
+2. fine-tune（Colab，免費版即可；D-019、D-021、D-024）。要跑兩次：第一次 `macbert`、第二次 `ckip`，每次下載 2 個模型包（一般版與 `-int8` 版），共 4 個：
+   1. 瀏覽器開 <https://colab.research.google.com>，用 Google 帳號登入；跳出「開啟筆記本」視窗就選「上傳」，選這個 repo 的 `notebooks/bert_finetune.ipynb`（沒跳視窗就用選單「檔案 → 上傳筆記本」）
+   2. 開 GPU：選單「執行階段 → 變更執行階段類型」，硬體加速器選 **T4 GPU** → 儲存。沒開的話第 3 部分會停下來說「沒有 GPU」
+   3. 第一次跑：程式格維持 `BASE = "macbert"`（第一個灰底程式格裡，不用改）。按選單「執行階段 → 全部執行」，notebook 會從上往下自動跑
+   4. 第一格在裝套件，約 1～3 分鐘。如果跳出「需要重新啟動工作階段」的提示，按「重新啟動」，再按一次「執行階段 → 全部執行」（這是正常的，第二次就不會再跳）
+   5. 跑到「2. 上傳訓練資料」會出現「選擇檔案」按鈕，同時選第 1 步產出的兩個檔：`data/datasets/` 裡檔名相同的 `.jsonl` 與 `.meta.json`（按住 ⌘ 複選；有好幾組就選時間最新的那組）。上傳完會印出筆數與各類別數量
+   6. 「3. fine-tune」是訓練，最久：跑 50 步後會印「預估總時間 X 小時」，目前資料量（約 3,300 筆）預估在 1 小時內。這段時間**不要關分頁、電腦不要睡眠**，免費版閒置太久會斷線，斷線後檔案全部消失要從頭來
+   7. 最後一格會印出兩行 `bert-macbert-<時間>.zip  size=…  sha256=…`，把這兩行複製存起來（第 3 步匯入要對照），瀏覽器會自動下載這兩個 zip 到「下載」資料夾（瀏覽器問「允許下載多個檔案」請按允許；沒下載到就從左側資料夾圖示進 `/content/packages/` 右鍵下載）
+   8. 第二次跑：把第一格的 `BASE = "macbert"` 改成 `BASE = "ckip"`，再「執行階段 → 全部執行」，到上傳那格要**重新選一次**同樣兩個檔，其餘同 4～7，得到 `bert-ckip-<時間>.zip` 與 `-int8.zip`
+   9. 中途出錯：紅字最後一行會說原因（例如沒開 GPU、上傳的檔不對、預估超過 10 小時要把 `MAX_LEN = 512` 改成 `256`），照著改完再「全部執行」；看不懂就把紅字貼給我
+3. 匯入（4 個 zip 各做一次）：先跑 `shasum -a 256 ~/Downloads/bert-*.zip`，每個檔的值要和第 2 步存下來的 `sha256=…` 一樣（`import_model` 只檢查包內檔案有沒有損毀，擋不住整包被換掉）；一致再跑 `uv run --env-file .env python -m radar.ml.training.import_model --zip ~/Downloads/<檔名>.zip`，會放到 `models/<檔名去掉 .zip>/`；同版本已存在不會覆寫
 4. 評估：`uv run --env-file .env python -m radar.ml.training.evaluate --model models/<模型版本>`，結果在該資料夾的 `evaluation.md`；依開發規格 7.27「自行決定」挑一個進 shadow
 5. 啟動 shadow：`.env` 設 `INFERENCE_SHADOW_MODEL_VERSION`（`models/` 下的資料夾名稱；沒設容器會不斷重啟），再執行：
 
