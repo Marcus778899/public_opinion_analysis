@@ -57,6 +57,7 @@
 | bert-colab-record-ckip | backend | done | 0 | PR #191 |
 | bert-shadow-fit-design | architect | done | 1 | PR #193 |
 | bert-evaluate-report-fix | backend | done | 0 | PR #195 |
+| bert-onnx-length-batching | backend | qa-fail | 0 |  |
 
 ## 卡住／待甲方決定
 
