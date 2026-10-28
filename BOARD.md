@@ -6,8 +6,8 @@
 
 ## 目標與範圍
 
-- 本輪：（尚未設定）
-- 不做：（尚未設定）
+- 本輪：BERT 進 shadow：開發規格 7.27「評估結果與進 shadow 的調整」順序 3～6（候選 ckip fp32，#178）
+- 不做：上雲（階段 9）；backlog 其餘 issue
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
@@ -45,6 +45,7 @@
 
 - v0.8.0 待甲方驗收（README 階段 8 小節）
 - BERT 進 shadow 順序 1、2 已合併（#195、#197）；待甲方重跑 ckip fp32 evaluate（順序 3）
+- 待甲方重跑 ckip fp32 evaluate（7.27 順序 3）
 
 ## 注意事項（踩過的坑）
 
