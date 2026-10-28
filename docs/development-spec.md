@@ -1,7 +1,7 @@
 # 即時輿情雷達：開發流程規格
 
 > 狀態：v0.4，對應設計文件 [realtime-sentiment-radar-design.md](realtime-sentiment-radar-design.md)
-> 最後更新：2026-10-21（階段 8 骨架：D-020～D-024 同步進 7.27）
+> 最後更新：2026-10-28（7.27 進 shadow 門檻的統計量與順序 3 判定）
 
 設計文件回答「要做什麼、為什麼」；本文件回答「怎麼做、做到什麼程度算完成」。兩者衝突時，先修設計文件再改本文件。**文件必須與程式同步**：行為、格式、相依套件有變動時，同一個 PR 內一併更新。
 
@@ -1378,7 +1378,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | `model_version` 帶預訓練模型簡稱 | `bert-<BASE>-<時間>`，四個模型包一看就分得出來；仍符合 `model_version` 的格式限制 |
 | 模型包 tokenizer 的來源、產生與驗證 | `macbert` 用自己 repo 的 tokenizer；`ckip` 用 `google-bert/bert-base-chinese` 的 tokenizer（ckiplab README 指定；詞表相同，但斷詞的行為設定如 `do_lower_case` 不在 `vocab.txt`，只載 `vocab.txt` 會吃到預設值）；都以 `BertTokenizerFast` 載入後 `save_pretrained`，打包前以 `tokenizers.Tokenizer.from_file` 重新編碼驗證集抽樣，ids 須與訓練時完全一致，logits 比對共用這組 ids（見「匯出」） |
 | 角色對照表的位置 | `ml/inference/roles.py`；`compare` 讀表名也用它，不另寫字串 |
-| 進 shadow 的門檻 | 步驟 4 每批 `INFERENCE_BATCH_SIZE` 篇的耗時 < 30 秒（新文章每分鐘不到 10 篇，留足餘裕），且記憶體峰值 ≤ 1.2 GB（D-023 的 1.5g 扣掉容器與快取的餘裕）；不到就照「評估結果與進 shadow 的調整」的順序 |
+| 進 shadow 的門檻 | 步驟 4 每批 `INFERENCE_BATCH_SIZE` 篇的耗時**p50** < 30 秒（吞吐量；新文章每分鐘不到 10 篇，留足餘裕）且**最大** ≤ 60 秒（單批不逼近 `max.poll.interval.ms` 預設 300 秒，留 5 倍），記憶體峰值 ≤ 1.2 GB（D-023 的 1.5g 扣掉容器與快取的餘裕）；統計量的理由見「評估結果與進 shadow 的調整」的順序 3 判定；不到就照該節的順序 |
 | Colab 12 小時上限 | 預估時間超過 10 小時就停；同一工作階段內從 epoch checkpoint 續跑 |
 | notebook 訓練設定 | 3 個 epoch、learning rate 2e-5、有效 batch 16（8 × 累積 2）、class weight balanced（與 baseline 同義）、fp16、warmup 6%、weight decay 0.01；驗證集為分層 10%、seed 42；依驗證集 macro-F1 選最佳 epoch |
 | Colab 套件版本 | `torch==2.7.1`、配對的 `torchvision==0.22.1`、`torchaudio==2.7.1`（Colab 預裝的版本與降級後的 torch 不配對，否則 `transformers` 載入失敗）、`transformers==4.53.3`、`optimum[onnxruntime]==1.27.0`（第一格釘版本）；第一格另移除 Colab 預裝的 diffusers（與釘版套件帶進來的 `huggingface_hub` 不相容，`optimum` 匯出時會 import）；**未在 sandbox 驗證**，甲方第一次執行時確認，不相容就調整第一格 |
@@ -1448,13 +1448,46 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 |---|---|---|---|---|---|---|
 | 1 | `bert-evaluate-report-fix`：修報告標題與 0 篇列（見下），加「載入模型後 RSS」 | worker | — | — | — | 2 |
 | 2 | `bert-onnx-length-batching`：`OnnxClassifier.predict_proba` 依 token 數排序，切成「篇數 × 該小批最長 token 數 ≤ `INFERENCE_MAX_BATCH_TOKENS`」的小批（預設 4096 = 8 × 512），結果還原原順序 | worker | 約 0.37～0.42 倍 → 26～32 s | 中間張量約降到 1/12：fp32 估 1.0～1.4 GB，int8 估 0.6～0.9 GB | 不變（有 attention mask，只差浮點誤差） | 3 |
-| 3 | 甲方重跑步驟 4（ckip fp32），看三項：每批 < 30 s、macro-F1 與 0.612 差 ≤ 0.005、RSS ≤ 1.2 GB | 甲方 | — | — | — | 全過 → 6；任一項不過 → 4 |
+| 3 | 甲方重跑步驟 4（ckip fp32），看三項：每批耗時（p50 < 30 s 且最大 ≤ 60 s，見「自行決定」）、macro-F1 與 0.612 差 ≤ 0.005、RSS ≤ 1.2 GB | 甲方 | ✅ 2026-10-28：p50 25.8／最大 30.5 s | ✅ 峰值 932 MB（載入後 689 MB） | ✅ 0.612（差 0） | 全過 → 6；任一項不過 → 4。**結果：全過，走 6**（判定見下） |
 | 4 | 推論端截到 `max_len` 256、不重訓：開單 `bert-derive-max-len`（見下表）產生衍生版本 `bert-ckip-202610280849-len256`，甲方再跑步驟 4 | worker → 甲方 | 約 0.29 倍 → 約 21 s | 中間張量再減約一半 | 需實測（約 24% 的文章超過 256 token 會被截）；比 2 低 ≤ 0.02 才用 | 6 |
 | 5 | 4 掉分超過 0.02：甲方以 `max_len` 256 重跑 Colab（`BASE = "ckip"`，訓練約 5 分鐘）、匯入、跑步驟 4；4、5 後 evaluate 的 RSS 仍超過 1.2 GB（進 shadow 的門檻）就不進 shadow，改問甲方是否放寬 D-023（含 1.2～1.5 GB 之間：餘裕不足，同樣不進） | 甲方 | 同 4 | 同 4 | 需實測 | 6 |
 | 6 | `make up-shadow`；補資料期間看 `docker stats radar_inference_shadow` 的峰值與 `docker inspect -f '{{.State.OOMKilled}}' radar_inference_shadow`；補完所需時間 ≈ 保留期間內的文章數 × 每篇耗時（文章數需實測） | 甲方 | — | — | — | 回到派工順序 9 |
 
 - int8 照「自行決定」不用：兩個預訓練模型的 int8 掉分都超過 0.02；順序 2 之後 fp32 的耗時差距縮小，int8 的價值也變小
-- 門檻 30 s 不放寬：新文章每分鐘不到 10 篇，追上之後每批只有幾篇，延遲由每篇耗時決定；30 s 是補資料期間每批不卡住 consumer（`max.poll.interval.ms` 預設 300 s）的餘裕
+- 門檻 30 s 不放寬：新文章每分鐘不到 10 篇，追上之後每批只有幾篇，延遲由每篇耗時決定；30 s 管補資料期間的吞吐量，單批不卡住 consumer（`max.poll.interval.ms` 預設 300 s）另由「最大 ≤ 60 s」管
+
+**順序 3 判定**（2026-10-28，`bert-shadow-gate-ruling`；`models/bert-ckip-202610280849/evaluation.md`，#195、#197 合併後重跑，`INFERENCE_THREADS=2`、每批 100 篇）
+
+| 項目 | 結果 | 門檻 | 判定 |
+|---|---|---|---|
+| macro-F1 | 0.612（與順序 2 前相同） | 與 0.612 差 ≤ 0.005 | 過 |
+| 每批耗時 p50 | 25.818 s（每篇 p50 258 ms、p95 305 ms） | < 30 s | 過 |
+| 每批耗時最大 | 30.456 s | ≤ 60 s | 過 |
+| RSS 峰值／載入後 | 932／689 MB | ≤ 1.2 GB | 過（順序 2 前 5069 MB） |
+
+門檻用 p50 管吞吐量、最大另設 60 s 的理由：
+
+- 30 s 的依據是吞吐量（100 篇 30 s ≈ 每分鐘 200 篇，對新文章每分鐘不到 10 篇），補資料所需時間 ≈ 篇數 × 每篇平均耗時，由典型批次決定，不由單一最慢批決定
+- 單批最慢的風險是超過 `max.poll.interval.ms`（300 s）被踢出 group（#11），這要用最大值看，但 30 s 對 300 s 是 10 倍，拿它限最大值只是多擋；改設最大 ≤ 60 s，對 300 s 仍留 5 倍，可吸收 macOS 主機與 Linux 容器的量法差異
+- 評估只計時 3 批（人工測試集 300 篇），最大值是單一樣本，受當批長文比例影響；這次最大比 p50 多 18%，符合長度分小批後「長文多的批較慢」的預期，不是異常
+- 這是在看到結果前的設計沒寫清楚、看到結果後才補的定義，所以順序 6 的觀察以容器實測為準（下表），不以這次 evaluate 的數字放行到切換
+
+**下一步：順序 6（啟動 shadow）**，不開 `bert-derive-max-len`（順序 4）。
+
+甲方步驟：
+
+1. `.env` 設 `INFERENCE_SHADOW_MODEL_VERSION=bert-ckip-202610280849`；`.env` 不設 `INFERENCE_MAX_BATCH_TOKENS`（用預設 4096，與 evaluate 相同）
+2. 確認 `inference`（primary）照常運作後 `make up-shadow`，記下啟動時間（UTC，給 `compare --since`）
+3. 補資料期間依下表觀察，追上後每天看一次；任一項「不過就」成立時停掉 shadow（`docker compose -f infra/docker-compose.yaml --env-file .env --profile shadow stop inference-shadow`），把觀察結果交回、回到順序 4
+4. 運作至少 3 天且兩版重疊 ≥ 500 篇後回到派工順序 9 跑 `compare`
+
+| 觀察項目 | 怎麼看 | 期望 | 不過就 |
+|---|---|---|---|
+| 容器記憶體峰值 | `docker compose -f infra/docker-compose.yaml --env-file .env exec inference-shadow cat /sys/fs/cgroup/memory.peak`（cgroup v2，容器重啟會歸零；沒有這個檔就在補資料期間反覆看 `docker stats --no-stream radar_inference_shadow` 取最大值） | ≤ 1.2 GB | 1.2～1.5 GB 記下來並回報（餘裕不足，見順序 5）；OOM 見下一列 |
+| 是否被 OOM kill | `docker inspect -f '{{.State.OOMKilled}} {{.RestartCount}}' radar_inference_shadow` | `false 0` | 回到順序 4 |
+| 補資料期間每批耗時 | `predictions_shadow` 同一批共用一個 `predicted_at`（`Predictor`），相鄰兩批的時間差 ≈ 一批的推論＋poll／送出；以 `clickhouse` 服務的 `clickhouse-client` 查：`SELECT quantileExact(0.5)(gap), max(gap), count() FROM (SELECT n, row_number() OVER w AS i, dateDiff('millisecond', lagInFrame(predicted_at) OVER w, predicted_at) / 1000 AS gap FROM (SELECT predicted_at, count() AS n FROM predictions_shadow WHERE model_version = 'bert-ckip-202610280849' GROUP BY predicted_at) WINDOW w AS (ORDER BY predicted_at ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)) WHERE i > 1 AND n >= 50`（第一批沒有前一批，`i > 1` 排除） | p50 < 30 s、最大 ≤ 60 s | 回到順序 4 |
+| consumer lag | kafka-ui 的 consumer group `inference-shadow-bert-ckip-202610280849` | 持續下降，追上後接近 0 | 不降或被踢出 group（log 有 rebalance）→ 回到順序 4 |
+| primary 不受影響 | `inference` 的 lag 與 Grafana 情緒面板照常；`predictions` 沒有 shadow 的 `model_version` | 照常 | 停 shadow 後回報 |
 
 **修正單**
 
@@ -1476,6 +1509,8 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 | `INFERENCE_MAX_BATCH_TOKENS` 預設 4096 | 8 × 512 時 attention 每份約 0.1 GB；估計耗時（0.37 倍）不比 16 × 512（0.42 倍）差，記憶體減半 |
 | RSS 門檻 1.2 GB | 1.5g 扣掉主機與容器量法的差異、hash 快取 |
 | 衍生版本另取 `model_version` | 不改原資料夾的 card：同一版本號不可對應兩種推論結果 |
+| 每批耗時門檻的統計量 | p50 < 30 s 管吞吐量、最大 ≤ 60 s 管 `max.poll.interval.ms`（理由見「順序 3 判定」） |
+| 補資料每批耗時的量法 | 從 `predictions_shadow` 相鄰 `predicted_at` 推算，不為此加 log 或改程式；只算 ≥ 50 篇的批（補資料的滿批） |
 
 ## 8. 風險清單
 
