@@ -10,7 +10,7 @@ import resource
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from sklearn.metrics import confusion_matrix, f1_score
@@ -66,6 +66,8 @@ class RuntimeStats:
     per_batch_p50_s: float
     per_batch_max_s: float
     peak_rss_mb: float
+    # 載入模型後、推論前的 RSS；None 表示沒量
+    load_rss_mb: float | None = None
 
 
 def _peak_rss_mb() -> float:
@@ -195,6 +197,7 @@ def render_markdown(
     board_reports: dict[str, ClassificationReport],
     board_agreements: dict[str, list[Agreement]],
     runtime: RuntimeStats | None = None,
+    label_version: str = "",
 ) -> str:
     """寫入 models/<model_version>/evaluation.md；手寫評估報告的數字來源（開發規格 7.11）。"""
     labels = list(Polarity)
@@ -203,7 +206,7 @@ def render_markdown(
         "",
         f"人工測試集 {model.n} 篇（整篇情緒）。",
         "",
-        "## Baseline",
+        "## 模型分數",
         "",
         "| 範圍 | 篇數 | macro-F1 | " + " | ".join(f"{p.value} F1" for p in labels) + " |",
         "|---" * (len(labels) + 3) + "|",
@@ -223,13 +226,19 @@ def render_markdown(
         "",
         "| 標註者 | 範圍 | 篇數 | 一致率 | Cohen's kappa |",
         "|---|---|---|---|---|",
-        *(_agreement_row(a, "整體") for a in agreements),
+        *(_agreement_row(a, "整體") for a in agreements if a.n > 0),
         *(
             _agreement_row(a, _board_name(board, a.n))
             for board, board_rows in board_agreements.items()
             for a in board_rows
+            if a.n > 0
         ),
         "",
+        *(
+            f"`{a.labeler}` 在人工測試集沒有 `{label_version}` 的標註。"
+            for a in agreements
+            if a.n == 0
+        ),
     ]
     if runtime is not None:
         lines += _runtime_section(runtime)
@@ -248,6 +257,7 @@ def _runtime_section(r: RuntimeStats) -> list[str]:
         f"| 每篇 p95 | {r.per_post_p95_ms:.2f} ms |",
         f"| 每批 p50 | {r.per_batch_p50_s:.3f} s |",
         f"| 每批最大 | {r.per_batch_max_s:.3f} s |",
+        *([f"| 載入模型後 RSS | {r.load_rss_mb:.0f} MB |"] if r.load_rss_mb is not None else []),
         f"| 記憶體峰值（RSS） | {r.peak_rss_mb:.0f} MB |",
         "",
     ]
@@ -274,6 +284,7 @@ def main() -> None:
     args = parser.parse_args()
     settings = InferenceSettings(model_dir=args.model)
     classifier, card = load_classifier(args.model, threads=settings.threads)
+    load_rss_mb = _peak_rss_mb()
     human_labels = load_human_labels(TESTSET_DIR)
     human = {
         pid: next(s.polarity for s in lbl.sentiments if s.target is None)
@@ -304,11 +315,14 @@ def main() -> None:
     boards = {pid: post.board for pid, post in posts.items()}
     board_agreements = agreements_by_board(llm_labels, human, boards)
 
-    runtime = measure_runtime(
-        classifier,
-        [e.text for e in examples],
-        batch_size=settings.batch_size,
-        threads=settings.threads,
+    runtime = replace(
+        measure_runtime(
+            classifier,
+            [e.text for e in examples],
+            batch_size=settings.batch_size,
+            threads=settings.threads,
+        ),
+        load_rss_mb=load_rss_mb,
     )
     card.metrics = {
         "testset_n": float(report.n),
@@ -324,6 +338,7 @@ def main() -> None:
         board_reports=board_reports,
         board_agreements=board_agreements,
         runtime=runtime,
+        label_version=card.label_version,
     )
     (args.model / REPORT_FILE).write_text(markdown)
     log.info(
