@@ -23,7 +23,7 @@ from radar.common.kafka.consumer import BatchConsumer
 from radar.common.kafka.dlq import DLQ_TOPIC
 from radar.common.kafka.producer import JsonProducer
 from radar.common.schemas import DlqRecord, Prediction
-from radar.common.settings import InferenceRole, get_kafka_settings
+from radar.common.settings import InferenceRole, InferenceSettings, get_kafka_settings
 from radar.ml.inference import main as inference_main
 from radar.ml.inference.main import text_hash
 from radar.ml.inference.roles import ROLE_TARGETS, RoleTargets
@@ -103,7 +103,7 @@ def env(monkeypatch, tmp_path: Path, kafka_settings, worker_clickhouse_settings,
     monkeypatch.setattr(
         inference_main,
         "load_classifier",
-        lambda model_dir, *, threads: (e.classifier, card),
+        lambda model_dir, *, threads, max_batch_tokens: (e.classifier, card),
         raising=False,
     )
     # CdcPost 以 JSON 送出：None 代表 BatchConsumer 的預設 JSON 解碼
@@ -216,18 +216,22 @@ def test_primary_role_still_writes_only_primary_topic(monkeypatch, kafka_setting
 
 def test_shadow_role_uses_classifier_with_inference_threads(monkeypatch, kafka_settings, env):
     seen: list[int] = []
+    seen_tokens: list[int] = []
     card = make_card(env.model_version)
 
-    def load(model_dir, *, threads):
+    def load(model_dir, *, threads, max_batch_tokens):
         seen.append(threads)
+        seen_tokens.append(max_batch_tokens)
         return env.classifier, card
 
     monkeypatch.setattr(inference_main, "load_classifier", load, raising=False)
     monkeypatch.setenv("INFERENCE_THREADS", "3")
+    monkeypatch.setenv("INFERENCE_MAX_BATCH_TOKENS", "3000")
 
     run_service(monkeypatch, InferenceRole.SHADOW, kafka_settings, env)
 
     assert seen == [3]
+    assert seen_tokens == [InferenceSettings().max_batch_tokens] == [3000]
     assert env.classifier.calls  # 推論走 Classifier.predict_proba
 
 
