@@ -50,13 +50,13 @@
 | bert-notebook | backend | done | 0 | PR #166 |
 | bert-compare | backend | done | 0 | PR #167 |
 | gitleaks-revision-allowlist | backend | done | 1 | PR #170 |
-| notebook-onnx-export-fix | backend | review | 0 |  |
+| notebook-onnx-export-fix | backend | done | 0 | PR #183 |
+| deps-authlib-upgrade | backend | done | 0 | PR #185 |
 
 ## 卡住／待甲方決定
 
 - v0.8.0 待甲方驗收（README 階段 8 小節）
 - Colab：diffusers 修正（#183）實測有效；ckip fp32 ONNX 與 PyTorch logits 差 2.17e-3 超過門檻 1e-3（7.27），#183 合併後開單處理
-- CI Security 失敗：authlib 1.8.0（confluent-kafka[avro] 間接相依）7 個漏洞（1 critical、2 high），擋所有 PR 與發版
 
 ## 注意事項（踩過的坑）
 
