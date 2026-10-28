@@ -1367,7 +1367,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | shadow 隔離方式 | 分開 topic `predictions.shadow` 與表 `predictions_shadow`，不在 `predictions` 加欄位（理由見上） |
 | shadow consumer group | 每個模型版本一個 group，從頭消費，順便補保留期間內的新文章 |
 | 人工測試集 F1 | 離線 `evaluate`，不把人工標註放進 ClickHouse 或 Kafka |
-| `max_len` | notebook 預設 512（BERT 上限）；調查的 CPU 延遲過高時改 256，記在 card |
+| `max_len` | notebook 預設 512（BERT 上限）；CPU 太慢時先在推論端截到 256（衍生版本，不重訓），掉分才重訓，見「評估結果與進 shadow 的調整」 |
 | 驗證集 | notebook 由訓練資料分層抽 10%（seed 42）選最佳 epoch；人工測試集不上傳、不參與選模型 |
 | 比較期間 | shadow 至少 3 天且兩版重疊 ≥ 500 篇才跑最終的 `compare` |
 | 模型包上限 | 解壓總大小 2 GB |
@@ -1378,7 +1378,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | `model_version` 帶預訓練模型簡稱 | `bert-<BASE>-<時間>`，四個模型包一看就分得出來；仍符合 `model_version` 的格式限制 |
 | 模型包 tokenizer 的來源、產生與驗證 | `macbert` 用自己 repo 的 tokenizer；`ckip` 用 `google-bert/bert-base-chinese` 的 tokenizer（ckiplab README 指定；詞表相同，但斷詞的行為設定如 `do_lower_case` 不在 `vocab.txt`，只載 `vocab.txt` 會吃到預設值）；都以 `BertTokenizerFast` 載入後 `save_pretrained`，打包前以 `tokenizers.Tokenizer.from_file` 重新編碼驗證集抽樣，ids 須與訓練時完全一致，logits 比對共用這組 ids（見「匯出」） |
 | 角色對照表的位置 | `ml/inference/roles.py`；`compare` 讀表名也用它，不另寫字串 |
-| 進 shadow 的門檻 | 步驟 4 每批 `INFERENCE_BATCH_SIZE` 篇的耗時 < 30 秒（新文章每分鐘不到 10 篇，留足餘裕）；不到就重跑 notebook 改 `max_len` 256 |
+| 進 shadow 的門檻 | 步驟 4 每批 `INFERENCE_BATCH_SIZE` 篇的耗時 < 30 秒（新文章每分鐘不到 10 篇，留足餘裕），且記憶體峰值 ≤ 1.2 GB（D-023 的 1.5g 扣掉容器與快取的餘裕）；不到就照「評估結果與進 shadow 的調整」的順序 |
 | Colab 12 小時上限 | 預估時間超過 10 小時就停；同一工作階段內從 epoch checkpoint 續跑 |
 | notebook 訓練設定 | 3 個 epoch、learning rate 2e-5、有效 batch 16（8 × 累積 2）、class weight balanced（與 baseline 同義）、fp16、warmup 6%、weight decay 0.01；驗證集為分層 10%、seed 42；依驗證集 macro-F1 選最佳 epoch |
 | Colab 套件版本 | `torch==2.7.1`、配對的 `torchvision==0.22.1`、`torchaudio==2.7.1`（Colab 預裝的版本與降級後的 torch 不配對，否則 `transformers` 載入失敗）、`transformers==4.53.3`、`optimum[onnxruntime]==1.27.0`（第一格釘版本）；第一格另移除 Colab 預裝的 diffusers（與釘版套件帶進來的 `huggingface_hub` 不相容，`optimum` 匯出時會 import）；**未在 sandbox 驗證**，甲方第一次執行時確認，不相容就調整第一格 |
@@ -1412,9 +1412,70 @@ pickle 權重只在 Colab 載入（D-025）；本機與推論主機只載 ONNX�
 |---|---|
 | 老師（Groq）本身 macro-F1 只有 0.653，positive F1 約 0.4，BERT 的上限受限 | 報告與 baseline、Groq 並列；不以「超過 Groq」為切換條件 |
 | Stock 標註仍不足 400 篇（階段 3 未收尾） | 不阻擋階段 8；報告註明訓練資料版本，補標後可再訓一版走同一流程 |
-| CPU 推論太慢，shadow 積壓 | 量 consumer lag 與延遲 p95；切換條件含 p95 < 1 分鐘（同階段 4 驗收）；依調查改小模型、`max_len` 256 或量化 |
+| CPU 推論太慢，shadow 積壓 | 量 consumer lag 與延遲 p95；切換條件含 p95 < 1 分鐘（同階段 4 驗收）；依長度排序分小批、`max_len` 256（見「評估結果與進 shadow 的調整」） |
 | notebook 在 Colab 的套件版本漂移，甲方執行失敗 | notebook 第一格釘版本；失敗訊息回報後開修正單 |
 | Colab 免費 GPU 額度不公開（調查 4），可能排不到 GPU 或中途斷線 | 預估時間與 checkpoint（見上）；排不到時改天再跑，不改流程 |
+
+**評估結果與進 shadow 的調整**（2026-10-28，`bert-shadow-fit-design`）
+
+步驟 4 的結果（`models/<model_version>/evaluation.md`；`INFERENCE_THREADS=2`、每批 100 篇、`max_len` 512）：
+
+| 模型 | 人工測試集 macro-F1 | 每批 p50／最大 | RSS 峰值 | 依「自行決定」 |
+|---|---|---|---|---|
+| `bert-ckip-202610280849` | **0.612** | 69.5／72.3 s | 5069 MB | 候選：兩模型中最高（差 macbert 0.041 > 0.01） |
+| `bert-ckip-202610280849-int8` | 0.572 | 23.2／25.4 s | 5973 MB | 不用：比 fp32 低 0.040 > 0.02 |
+| `bert-macbert-202610280830` | 0.571 | 70.7／76.4 s | 6285 MB | 不用：低於 ckip |
+| `bert-macbert-202610280830-int8` | 0.464 | 23.1／23.4 s | 6134 MB | 不用：比 fp32 低 0.107 |
+
+baseline 為 0.504。候選 ckip fp32 的耗時（< 30 s）與記憶體（D-023 的 1.5g）都不過門檻，下面先找原因再定順序。
+
+RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
+
+| 來源 | 估計 | 依據 |
+|---|---|---|
+| Python 程序本身（numpy、sklearn、onnxruntime、ClickHouse client、300 篇文字） | 0.2～0.3 GB | evaluate 與 shadow 相近 |
+| 模型權重 | fp32 約 0.4 GB（`model.onnx` 409 MB）、int8 約 0.1 GB；載入時 protobuf 與 initializer 並存、MatMul 權重 prepack，峰值可能到 2 倍 | 需實測（修正單加「載入後 RSS」） |
+| attention 中間張量 | 每份 100 × 12 頭 × 512 × 512 × 4 B = 1.26 GB，softmax 前後與 mask 同時存在 2～3 份 → 2.5～3.8 GB | 計算 |
+| 其他中間張量 | hidden 100 × 512 × 768 × 4 B = 0.16 GB、FFN 100 × 512 × 3072 × 4 B = 0.63 GB；int8 動態量化另有 uint8／int32 副本 | 計算 |
+
+- 主因是中間張量，不是模型：int8 的權重少 0.3 GB，RSS 反而多 0.9 GB（量化多出的副本）；onnxruntime 的 arena 保留曾配置的最大量，`ru_maxrss` 也只記程序一生的峰值
+- 中間張量來自 padding：`OnnxClassifier` 把一批補到最長那篇。以 ckip tokenizer 量 3,268 篇訓練資料：token 數 p50 137、p75 248、p90 450，約 5% 超過 512 被截；每批 100 篇幾乎都含一篇 ≥ 512，**每批都以 512 計算**，而實際平均只有 183（約 64% 的計算花在 padding）
+- 代表 shadow 嗎：代表**補資料期間**的峰值。shadow 用同一個 `OnnxClassifier` 與 `INFERENCE_BATCH_SIZE`，新版本從頭消費（見上方 shadow 表），補資料時每批都是滿的 100 篇，現況會超過 1.5g 被 OOM kill、重啟後再從同一位置開始，一直重複。追上之後每批只有幾篇，記憶體小很多。evaluate 在 macOS 主機量、shadow 在 Linux 容器，數字會有出入，以容器實測為準
+
+**進 shadow 的順序**（估計值依上面的計算與 token 長度分布；耗時以 FLOPs 比例估，皆需實測）
+
+| 順序 | 做法 | 誰 | ckip fp32 每批耗時 | RSS | macro-F1 | 過了就 |
+|---|---|---|---|---|---|---|
+| 1 | `bert-evaluate-report-fix`：修報告標題與 0 篇列（見下），加「載入模型後 RSS」 | worker | — | — | — | 2 |
+| 2 | `bert-onnx-length-batching`：`OnnxClassifier.predict_proba` 依 token 數排序，切成「篇數 × 該小批最長 token 數 ≤ `INFERENCE_MAX_BATCH_TOKENS`」的小批（預設 4096 = 8 × 512），結果還原原順序 | worker | 約 0.37～0.42 倍 → 26～32 s | 中間張量約降到 1/12：fp32 估 1.0～1.4 GB，int8 估 0.6～0.9 GB | 不變（有 attention mask，只差浮點誤差） | 3 |
+| 3 | 甲方重跑步驟 4（ckip fp32），看三項：每批 < 30 s、macro-F1 與 0.612 差 ≤ 0.005、RSS ≤ 1.2 GB | 甲方 | — | — | — | 全過 → 6；任一項不過 → 4 |
+| 4 | 推論端截到 `max_len` 256、不重訓：開單 `bert-derive-max-len`（見下表）產生衍生版本 `bert-ckip-202610280849-len256`，甲方再跑步驟 4 | worker → 甲方 | 約 0.29 倍 → 約 21 s | 中間張量再減約一半 | 需實測（約 24% 的文章超過 256 token 會被截）；比 2 低 ≤ 0.02 才用 | 6 |
+| 5 | 4 掉分超過 0.02：甲方以 `max_len` 256 重跑 Colab（`BASE = "ckip"`，訓練約 5 分鐘）、匯入、跑步驟 4；4、5 後仍超過 1.5g 時改問甲方是否放寬 D-023 | 甲方 | 同 4 | 同 4 | 需實測 | 6 |
+| 6 | `make up-shadow`；補資料期間看 `docker stats radar_inference_shadow` 的峰值與 `docker inspect -f '{{.State.OOMKilled}}' radar_inference_shadow`；補完所需時間 ≈ 保留期間內的文章數 × 每篇耗時（文章數需實測） | 甲方 | — | — | — | 回到派工順序 9 |
+
+- int8 照「自行決定」不用：兩個預訓練模型的 int8 掉分都超過 0.02；順序 2 之後 fp32 的耗時差距縮小，int8 的價值也變小
+- 門檻 30 s 不放寬：新文章每分鐘不到 10 篇，追上之後每批只有幾篇，延遲由每篇耗時決定；30 s 是補資料期間每批不卡住 consumer（`max.poll.interval.ms` 預設 300 s）的餘裕
+
+**修正單**
+
+| task_id | 負責檔案 | 驗收條件 | 相依 |
+|---|---|---|---|
+| `bert-evaluate-report-fix` | `ml/training/evaluate.py`、`tests/unit/ml/training/test_evaluate.py` | 分數節標題由寫死的「## Baseline」改為「## 模型分數」；「LLM 標註者 vs 人工」某標註者與人工重疊 0 篇時不列 0 篇的列，改一行說明「`<labeler>` 在人工測試集沒有 `<label_version>` 的標註」（有篇數的照舊）；CPU 節加一列「載入模型後 RSS」（`main()` 在 `load_classifier` 後讀 `_peak_rss_mb()`；`RuntimeStats` 只能新增有預設值的欄位，`measure_runtime` 簽名不變） | 無 |
+| `bert-onnx-length-batching` | `ml/training/classifier.py`、`common/settings.py`（`InferenceSettings.max_batch_tokens`，預設 4096、≥ `card.max_len`）、`.env.example`（選填 `# INFERENCE_MAX_BATCH_TOKENS=4096`）、`ml/inference/main.py`、`ml/training/evaluate.py` 的 `main()`（兩處都傳入設定值）、`tests/unit/ml/test_stage8_interfaces.py`（`load_classifier` 加 keyword-only `max_batch_tokens`）、`tests/unit/ml/training/test_classifier.py` | 打亂長短的輸入，分小批結果與整批一次推論的機率差 < 1e-5、順序與輸入一致；每次 `session.run` 的篇數 × 序列長度 ≤ 上限（單篇超過上限時單獨一批）；`tests/unit/acceptance/bert-classifier/` 照常通過 | 等 `bert-evaluate-report-fix`（同改 `evaluate.py`） |
+| `bert-derive-max-len`（只在順序 4 才開） | 新增 `ml/training/derive_model.py` 與單元測試 | `python -m radar.ml.training.derive_model --model models/<v> --max-len 256` 產生 `models/<v>-len256/`：`model.onnx`、`tokenizer.json` 原樣複製、雜湊不變，card 的 `model_version`、`max_len` 改新值、`params.derived_from` 記原版本；目標已存在、`max_len` 不小於原值、新 `model_version` 不符 `import_model` 的格式都拒絕 | 等 3 |
+
+「LLM 標註者 vs 人工」0 篇不是計算錯誤：`evaluate` 依 card 的 `label_version`（prompt-v6）查標註，而兩個 LLM 在人工測試集只標過 v5（升 v6 時決定不重標，見 6 章 S3-01 與 `docs/reports/model-evaluation.md` 的 baseline 節）；baseline 的 `evaluation.md` 一樣是 0 篇，報告改用 v5 手算。程式的錯只有標題寫死、0 篇照列（連帶每個看板都被標「樣本少」），由上表第一張單修。要補 v6 的數字需用 v6 重標測試集，不影響進 shadow，本節不處理。
+
+**本節自行決定**
+
+| 項目 | 決定 |
+|---|---|
+| 選 ckip fp32 為候選 | 照上方「自行決定」的 fp32／int8 與預訓練模型規則 |
+| 先改推論端、不先重訓 | 長度排序分小批不改預測、不用甲方跑 Colab；max_len 256 也先在推論端截，掉分才重訓 |
+| 小批以 token 數為上限 | 記憶體由「篇數 × 序列長度」決定，用 token 上限才能同時限住長文的峰值與讓短文多篇一起算 |
+| `INFERENCE_MAX_BATCH_TOKENS` 預設 4096 | 8 × 512 時 attention 每份約 0.1 GB；估計耗時（0.37 倍）不比 16 × 512（0.42 倍）差，記憶體減半 |
+| RSS 門檻 1.2 GB | 1.5g 扣掉主機與容器量法的差異、hash 快取 |
+| 衍生版本另取 `model_version` | 不改原資料夾的 card：同一版本號不可對應兩種推論結果 |
 
 ## 8. 風險清單
 
