@@ -180,7 +180,9 @@ def main() -> None:
     setup_logging("inference")
     settings = InferenceSettings()
     targets = ROLE_TARGETS[settings.role]
-    classifier, card = load_classifier(settings.model_dir, threads=settings.threads)
+    classifier, card = load_classifier(
+        settings.model_dir, threads=settings.threads, max_batch_tokens=settings.max_batch_tokens
+    )
     group_id = consumer_group(settings.role, card.model_version)
     cache = HashCache(settings.cache_size)
     ch = ClickHouseClient(ClickHouseSettings())

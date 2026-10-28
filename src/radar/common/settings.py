@@ -97,6 +97,8 @@ class InferenceSettings(BaseSettings):
     role: InferenceRole = InferenceRole.PRIMARY
     # ONNX 的 intra-op thread 數（D-023）
     threads: int = Field(default=2, ge=1)
+    # ONNX 每次 run 的篇數 × 序列長度上限；須 ≥ card.max_len（load_classifier 檢查）
+    max_batch_tokens: int = Field(default=4096, ge=1)
 
 
 class CdcWatchdogSettings(BaseSettings):

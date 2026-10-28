@@ -9,7 +9,7 @@ from typing import Protocol
 import numpy as np
 import onnxruntime
 from sklearn.pipeline import Pipeline
-from tokenizers import Tokenizer
+from tokenizers import Encoding, Tokenizer
 
 from radar.common.enums import Polarity
 from radar.ml.training.train import CARD_FILE, ModelCard, ModelKind, load_model
@@ -25,6 +25,7 @@ class Classifier(Protocol):
 
 
 PAD_TOKEN = "[PAD]"
+DEFAULT_MAX_BATCH_TOKENS = 4096
 
 
 def top_class(scores: dict[Polarity, float]) -> Polarity:
@@ -52,11 +53,20 @@ class SklearnClassifier:
 
 
 class OnnxClassifier:
-    """tokenizer 截斷到 max_len、batch 內 padding；logits 依 labels 順序做 softmax。"""
+    """截斷到 max_len、依長度排序切批（篇數 × 序列長度 ≤ 上限）；logits 依 labels 做 softmax。"""
 
-    def __init__(self, model_dir: Path, card: ModelCard, threads: int) -> None:
+    def __init__(
+        self,
+        model_dir: Path,
+        card: ModelCard,
+        threads: int,
+        max_batch_tokens: int = DEFAULT_MAX_BATCH_TOKENS,
+    ) -> None:
         if card.max_len is None:
             raise ValueError("onnx model card needs max_len")
+        if max_batch_tokens < card.max_len:
+            raise ValueError(f"max_batch_tokens {max_batch_tokens} < max_len {card.max_len}")
+        self._max_batch_tokens = max_batch_tokens
         options = onnxruntime.SessionOptions()
         options.intra_op_num_threads = threads
         self._session = onnxruntime.InferenceSession(
@@ -68,32 +78,55 @@ class OnnxClassifier:
         self._labels = list(card.labels)
         self._tokenizer = Tokenizer.from_file(str(model_dir / TOKENIZER_FILE))
         self._tokenizer.enable_truncation(max_length=card.max_len)
-        pad_id = self._tokenizer.token_to_id(PAD_TOKEN) or 0
-        self._tokenizer.enable_padding(pad_id=pad_id, pad_token=PAD_TOKEN)
+        # NOTE: 不用 tokenizer 的 padding（會補到整批最長）；各小批自己補
+        self._pad_id = self._tokenizer.token_to_id(PAD_TOKEN) or 0
 
     def predict_proba(self, texts: list[str]) -> list[dict[Polarity, float]]:
         if not texts:
             return []
         encodings = self._tokenizer.encode_batch(texts)
-        ids = np.array([e.ids for e in encodings], dtype=np.int64)
-        feeds = {
-            "input_ids": ids,
-            "attention_mask": np.array([e.attention_mask for e in encodings], dtype=np.int64),
-        }
+        order = sorted(range(len(texts)), key=lambda i: len(encodings[i].ids))
+        results: list[dict[Polarity, float] | None] = [None] * len(texts)
+        for chunk in self._chunks(order, [len(e.ids) for e in encodings]):
+            probs = self._run([encodings[i] for i in chunk])
+            for i, row in zip(chunk, probs, strict=True):
+                results[i] = {label: float(p) for label, p in zip(self._labels, row, strict=True)}
+        return [r for r in results if r is not None]
+
+    def _chunks(self, order: list[int], lengths: list[int]) -> list[list[int]]:
+        # order 依長度遞增，新增一篇後的序列長度就是該篇長度
+        chunks: list[list[int]] = []
+        current: list[int] = []
+        for i in order:
+            if current and (len(current) + 1) * max(lengths[i], 1) > self._max_batch_tokens:
+                chunks.append(current)
+                current = []
+            current.append(i)
+        if current:
+            chunks.append(current)
+        return chunks
+
+    def _run(self, encodings: list[Encoding]) -> np.ndarray:
+        width = max(max(len(e.ids) for e in encodings), 1)
+        ids = np.full((len(encodings), width), self._pad_id, dtype=np.int64)
+        mask = np.zeros((len(encodings), width), dtype=np.int64)
+        for row, e in enumerate(encodings):
+            ids[row, : len(e.ids)] = e.ids
+            mask[row, : len(e.ids)] = 1
+        feeds = {"input_ids": ids, "attention_mask": mask}
         if "token_type_ids" in self._input_names:
             feeds["token_type_ids"] = np.zeros_like(ids)
         logits = self._session.run(["logits"], feeds)[0].astype(np.float64)
         shifted = np.exp(logits - logits.max(axis=1, keepdims=True))
-        probs = shifted / shifted.sum(axis=1, keepdims=True)
-        return [
-            {label: float(p) for label, p in zip(self._labels, row, strict=True)} for row in probs
-        ]
+        return shifted / shifted.sum(axis=1, keepdims=True)
 
 
-def load_classifier(model_dir: Path, *, threads: int) -> tuple[Classifier, ModelCard]:
-    """讀 model_card.json，依 kind 建立實作；threads 只用於 ONNX（INFERENCE_THREADS）。"""
+def load_classifier(
+    model_dir: Path, *, threads: int, max_batch_tokens: int = DEFAULT_MAX_BATCH_TOKENS
+) -> tuple[Classifier, ModelCard]:
+    """讀 model_card.json，依 kind 建立實作；threads、max_batch_tokens 只用於 ONNX。"""
     card = ModelCard.model_validate_json((model_dir / CARD_FILE).read_text())
     if card.kind is ModelKind.ONNX:
-        return OnnxClassifier(model_dir, card, threads), card
+        return OnnxClassifier(model_dir, card, threads, max_batch_tokens), card
     pipeline, card = load_model(model_dir)
     return SklearnClassifier(pipeline), card
