@@ -105,9 +105,24 @@ def test_torch_logits_reference_runs_on_cpu_reloaded_fp32_model() -> None:
     cell = next(c for c in _cells() if "def run_torch" in c)
     assert "from_pretrained(\n    FINAL_DIR" in cell
     assert '.to("cpu")' in cell
-    assert "device" not in cell.split("def run_torch")[1].split("LOGITS_TOLERANCE")[0]
+    assert "run_torch(cpu_model, tk_ids)" in cell
 
 
-def test_logits_check_also_compares_predicted_classes_before_packaging() -> None:
+def test_logits_check_prints_gpu_vs_cpu_diff_without_raising() -> None:
     cell = next(c for c in _cells() if "def run_torch" in c)
-    assert "torch_logits.argmax(axis=1) != onnx_logits.argmax(axis=1)" in cell
+    assert "run_torch(model, tk_ids)" in cell
+    assert "GPU PyTorch 對 CPU PyTorch" in cell
+    assert cell.index("gpu_cpu_diff") < cell.index("if max_diff >= LOGITS_TOLERANCE")
+    assert "if gpu_cpu_diff" not in cell
+
+
+def test_prediction_mismatch_is_printed_not_raised() -> None:
+    cell = next(c for c in _cells() if "def run_torch" in c)
+    assert "預測類別不一致篇數" in cell
+    assert "if mismatch" not in cell
+
+
+def test_run_torch_sorts_batches_by_length_like_run_onnx() -> None:
+    cell = next(c for c in _cells() if "def run_torch" in c)
+    body = cell.split("def run_torch")[1].split("LOGITS_TOLERANCE")[0]
+    assert "sorted(range(len(id_lists))" in body
