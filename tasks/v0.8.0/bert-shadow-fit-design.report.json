@@ -1,0 +1,17 @@
+{
+  "task_id": "bert-shadow-fit-design",
+  "status": "done",
+  "files_changed": [
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "pre-commit run --files docs/development-spec.md",
+    "exit_code": 0,
+    "tail": "trim trailing whitespace....Passed\nfix end of files....Passed\ncheck yaml....Skipped\nruff (legacy alias)....Skipped\nruff format....Passed\nbandit....Skipped"
+  },
+  "open_questions": [
+    "待決定（條件式，現在不必開 D）：7.27 順序 4、5 做完後 ckip fp32 的 evaluate RSS 仍超過 1.2 GB（進 shadow 門檻，含 1.2～1.5 GB 之間）時，才問甲方是否放寬 D-023 的記憶體上限（決策分級④／②）",
+    "需調查（甲方實測）：順序 2 後的每批耗時與 RSS（估 26～32 s、1.0～1.4 GB）；max_len 256 的 macro-F1；保留期間（14 天）內的文章數（決定補資料要多久）",
+    "要開的單：bert-evaluate-report-fix（先）、bert-onnx-length-batching（等前一張，兩張都改 evaluate.py），以及只在順序 4 才開的 bert-derive-max-len；負責檔案與驗收條件見 7.27「修正單」表"
+  ]
+}

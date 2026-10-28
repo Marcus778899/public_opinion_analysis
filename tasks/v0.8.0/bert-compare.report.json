@@ -1,0 +1,16 @@
+{
+  "task_id": "bert-compare",
+  "status": "done",
+  "files_changed": [
+    "src/radar/ml/training/compare.py",
+    "tests/unit/ml/training/test_compare.py",
+    "tests/integration/ml/test_compare.py",
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "make check; docker compose --env-file .env -f .worktrees/bert-compare/compose.yaml run --rm test",
+    "exit_code": 0,
+    "tail": "make check: 1306 passed; 整合測試: 347 passed in 55.83s（含 acceptance/bert-compare 全部）；已 down -v；grep TODO(bert-compare) 無結果；追加：7.27 已補 4 項決定，sync 後 make check 重跑"
+  },
+  "open_questions": []
+}

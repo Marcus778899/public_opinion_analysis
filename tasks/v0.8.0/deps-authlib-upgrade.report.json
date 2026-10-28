@@ -1,0 +1,14 @@
+{
+  "task_id": "deps-authlib-upgrade",
+  "status": "done",
+  "files_changed": ["uv.lock"],
+  "verification": {
+    "command": "uv lock --upgrade-package authlib; uv sync; make check",
+    "exit_code": 0,
+    "tail": "Updated authlib v1.8.0 -> v1.9.1; make check rc=0; 1348 passed in 5.74s"
+  },
+  "open_questions": [
+    "本機沒有 osv-scanner（OSV_SCANNER_VERSION 2.6.0），未在本機掃描；以 PR 的 CI Security 為準",
+    "只有 authlib 變動，沒有連帶升其他套件；pyproject.toml 未改"
+  ]
+}

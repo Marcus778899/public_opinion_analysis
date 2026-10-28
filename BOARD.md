@@ -2,12 +2,12 @@
 
 <!-- 只放目前這一階段；只有 manager 透過 scripts/board.py 修改；階段完成時整份封存到 tasks/<tag>.md -->
 
-> 上一階段：`tasks/backlog-cleanup-2026-10.md`（派工單在 `tasks/backlog-cleanup-2026-10/`）
+> 上一階段：`tasks/v0.8.0.md`（派工單在 `tasks/v0.8.0/`）
 
 ## 目標與範圍
 
-- 本輪：v0.8.0 階段 8 BERT 與 shadow 比較（驗收見開發規格階段 8）；BERT 進 shadow 調整：7.27「評估結果與進 shadow 的調整」順序 1～6（候選 ckip fp32）
-- 不做：上雲（階段 9）；backlog 其餘 issue
+- 本輪：（尚未設定）
+- 不做：（尚未設定）
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
@@ -40,24 +40,6 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
-| gitleaks-cleanup-archive-ignore | backend | done | 0 | PR #150 |
-| bert-design | architect | done | 1 | PR #154 |
-| gitleaks-archive-allowlist | backend | done | 0 | PR #153 |
-| bert-skeleton | architect | done | 0 | PR #156 |
-| bert-classifier | backend | done | 0 | PR #161 |
-| bert-model-import | backend | done | 0 | PR #160 |
-| bert-shadow-inference | backend | done | 0 | PR #165 |
-| bert-notebook | backend | done | 0 | PR #166 |
-| bert-compare | backend | done | 0 | PR #167 |
-| gitleaks-revision-allowlist | backend | done | 1 | PR #170 |
-| notebook-onnx-export-fix | backend | done | 0 | PR #183 |
-| deps-authlib-upgrade | backend | done | 0 | PR #185 |
-| notebook-logits-check-fix | backend | done | 0 | PR #187 |
-| bert-colab-record | backend | done | 0 | PR #189 |
-| bert-colab-record-ckip | backend | done | 0 | PR #191 |
-| bert-shadow-fit-design | architect | done | 1 | PR #193 |
-| bert-evaluate-report-fix | backend | done | 0 | PR #195 |
-| bert-onnx-length-batching | backend | done | 0 | PR #197 |
 
 ## 卡住／待甲方決定
 

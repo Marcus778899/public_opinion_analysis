@@ -1,0 +1,30 @@
+{
+  "task_id": "bert-classifier",
+  "kind": "feat",
+  "owner": "backend",
+  "lane": "full",
+  "title": "`Classifier` 介面的 sklearn 與 ONNX 實作、`load_classifier` 依 `model_card.kind` 載入；`evaluate` 改用它，並輸出 CPU 推論耗時（每篇 p50／p95、每批耗時、`INFERENCE_THREADS`）與程序記憶體峰值",
+  "issue": 157,
+  "branch": "feat/bert-classifier",
+  "worktree": ".worktrees/bert-classifier",
+  "pr": 161,
+  "qa": {
+    "result": "pass",
+    "sha": "1d9ff5fe44adab9ced041d62adaad29f0a9370b7",
+    "by": "qa",
+    "carried_from": "bccac84d4ef003e1423dd8308501ef2b7adf8e10"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "1d9ff5fe44adab9ced041d62adaad29f0a9370b7",
+    "by": "architect",
+    "carried_from": "bccac84d4ef003e1423dd8308501ef2b7adf8e10"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "3aa7739cf09bd2eb5f5e1e1e0bcce5fae6840a7f",
+    "sha": "1d9ff5fe44adab9ced041d62adaad29f0a9370b7",
+    "carried_from": "bccac84d4ef003e1423dd8308501ef2b7adf8e10"
+  },
+  "amend_sha": "69b92aeb7951fce3f93b3a2ee3d5628525363505"
+}

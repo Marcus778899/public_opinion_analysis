@@ -1,0 +1,26 @@
+{
+  "task_id": "bert-evaluate-report-fix",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "`evaluate` 產生的 `evaluation.md` 修掉寫死的標題與 0 篇列，並多記「載入模型後 RSS」，讓甲方重跑時能分開看模型載入與推論的記憶體",
+  "issue": 194,
+  "branch": "fix/bert-evaluate-report-fix",
+  "worktree": ".worktrees/bert-evaluate-report-fix",
+  "pr": 195,
+  "qa": {
+    "result": "pass",
+    "sha": "a213c0986f4053a127ff1e77740e2435786f4ad1",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "a213c0986f4053a127ff1e77740e2435786f4ad1",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "e112049e9af35d9a3c641f755341c8ded759c294",
+    "sha": "68ddf0b61d2ce7dad4555f2fdabea2649ecafe9d"
+  }
+}

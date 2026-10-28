@@ -1,0 +1,22 @@
+{
+  "task_id": "gitleaks-cleanup-archive-ignore",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "把 backlog 清理封存引入的 gitleaks 誤判加進忽略清單，讓 CI 的 Security 恢復綠燈",
+  "issue": 149,
+  "branch": "chore/gitleaks-cleanup-archive-ignore",
+  "worktree": ".worktrees/gitleaks-cleanup-archive-ignore",
+  "pr": 150,
+  "qa": {
+    "result": "pass",
+    "sha": "eabd633f4f161a6aceb9e995f007183d3c8ba497",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "eabd633f4f161a6aceb9e995f007183d3c8ba497",
+    "by": "architect"
+  },
+  "merged": true
+}

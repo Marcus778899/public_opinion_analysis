@@ -1,0 +1,16 @@
+{
+  "task_id": "gitleaks-archive-allowlist",
+  "status": "done",
+  "files_changed": [".gitleaks.toml", ".gitleaksignore"],
+  "verification": {
+    "command": "gitleaks git --redact --no-banner . (8.30.1, darwin_arm64)",
+    "exit_code": 0,
+    "tail": "227 commits scanned. no leaks found（含暫時移除 .gitleaksignore 中 7 筆 tasks/ 項目後同樣 no leaks found）。反向：暫時 repo 中 tasks/ 與 src/ 各放一個假 generic-api-key 字串，只有 src/a.py 被抓到（leaks found: 1）"
+  },
+  "open_questions": [
+    "新增 .gitleaks.toml：[extend] useDefault=true 保留全部預設規則，另加 allowlists paths ^tasks/；規則本身未改動，故數量不變（gitleaks 沒有列規則指令，以 extend 結構保證，未逐條計數）",
+    ".gitleaksignore 刪除 7 筆 tasks/ 封存項目（v0.6.0 ci-gitleaks-ignore 的 qa／本體／review 共 3 筆；v0.7.0 gitleaks-archive-ignore 的 review／qa 共 2 筆；backlog-cleanup-2026-10 gitleaks-v070-archive-ignore 的 review／qa 共 2 筆），其餘非 tasks/ 項目保留，檔頭註解補一行說明",
+    "反向測試用 generic-api-key 字串；另試了 AWS 格式假字串未被抓到（格式／熵不符預設規則），不影響結論",
+    "PR 的 CI 全綠需待開 PR 後確認，本地未能驗證"
+  ]
+}

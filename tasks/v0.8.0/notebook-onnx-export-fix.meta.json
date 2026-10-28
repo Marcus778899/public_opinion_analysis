@@ -1,0 +1,24 @@
+{
+  "task_id": "notebook-onnx-export-fix",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "fast",
+  "title": "`notebooks/bert_finetune.ipynb` 在現行 Colab（Python 3.13）上能從 fine-tune 一路跑到匯出 ONNX、量化、打包，不再因 diffusers 中斷",
+  "issue": 182,
+  "branch": "fix/notebook-onnx-export-fix",
+  "worktree": ".worktrees/notebook-onnx-export-fix",
+  "pr": 183,
+  "qa": {
+    "result": "pass",
+    "sha": "0a75ddf90e797928bc6ba69262d6caeb5f9cdad1",
+    "by": "qa",
+    "carried_from": "b1b812fb4e0451b65a69a358a2535c7737034bc5"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "0a75ddf90e797928bc6ba69262d6caeb5f9cdad1",
+    "by": "architect",
+    "carried_from": "b1b812fb4e0451b65a69a358a2535c7737034bc5"
+  },
+  "merged": true
+}

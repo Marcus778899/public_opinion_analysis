@@ -1,0 +1,26 @@
+{
+  "task_id": "bert-design",
+  "kind": "docs",
+  "owner": "architect",
+  "lane": "full",
+  "title": "階段 8 BERT 與 shadow 比較的設計（S8-01～S8-03），含派工順序",
+  "issue": 152,
+  "branch": "docs/bert-design",
+  "worktree": ".worktrees/bert-design",
+  "pr": 154,
+  "qa": {
+    "result": "pass",
+    "sha": "8492cabad7784c38517207bf0c23b9b9107db535",
+    "by": "qa",
+    "carried_from": "3acd2e66c9acbc497a5a14c903a9bbf6148fbecd"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "8492cabad7784c38517207bf0c23b9b9107db535",
+    "by": "甲方",
+    "carried_from": "3acd2e66c9acbc497a5a14c903a9bbf6148fbecd"
+  },
+  "merged": true,
+  "qa_fails": 1,
+  "amend_sha": "a093a56e4d4d2412a45e8260980ac42c658fb25e"
+}

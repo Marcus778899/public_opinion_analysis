@@ -1,0 +1,11 @@
+{
+  "task_id": "bert-evaluate-report-fix",
+  "status": "done",
+  "files_changed": ["src/radar/ml/training/evaluate.py", "tests/unit/ml/training/test_evaluate.py"],
+  "verification": {
+    "command": "uv run pytest tests/unit/acceptance/bert-evaluate-report-fix tests/unit/ml/training/test_evaluate.py; make check",
+    "exit_code": 0,
+    "tail": "30 passed (acceptance + test_evaluate); make check: 1368 passed, pre-commit all passed"
+  },
+  "open_questions": ["render_markdown 新增 keyword 參數 label_version（預設空字串）供 0 篇說明使用；RuntimeStats 新增有預設值的 load_rss_mb"]
+}

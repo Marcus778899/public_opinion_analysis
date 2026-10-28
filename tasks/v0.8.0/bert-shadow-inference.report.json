@@ -1,0 +1,23 @@
+{
+  "task_id": "bert-shadow-inference",
+  "status": "done",
+  "files_changed": [
+    "src/radar/ml/inference/main.py",
+    "tests/unit/ml/inference/test_main.py",
+    "tests/integration/conftest.py",
+    "tests/integration/ml/test_inference_consumer.py",
+    "tests/integration/ml/test_inference_shadow.py",
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "make check; docker compose --env-file .env -f .worktrees/bert-shadow-inference/compose.yaml run --rm test (之後 down -v)",
+    "exit_code": 0,
+    "tail": "make check: 1286 passed; compose test: 344 passed in 57.11s（含 acceptance/bert-shadow-inference 全部）；TODO(bert-shadow-inference) grep 無結果"
+  },
+  "open_questions": [
+    "已改用 radar.ml.training.classifier.top_class 並刪本地版；正式版缺類會 KeyError，本地版的缺類測試已移除（FakeClassifier 與各實作皆回三類齊全）",
+    "開發規格 7.27 shadow 並行那句已改為現況（查表取 topic／表、load_cache 的 table 參數、top_class）；「載入」段落描述 predict() 搬入 sklearn 實作仍屬正確，未動",
+    "舊 main.predict() 已移除；load_cache 新增選用參數 table（預設 predictions），只接受 ROLE_TARGETS 內的表名，其他丟 ValueError",
+    "已 commit 於 feat/bert-shadow-inference，未 push；容器已 down -v"
+  ]
+}

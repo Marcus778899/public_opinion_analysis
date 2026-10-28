@@ -1,0 +1,30 @@
+{
+  "task_id": "bert-compare",
+  "kind": "feat",
+  "owner": "backend",
+  "lane": "full",
+  "title": "`python -m radar.ml.training.compare --a <版本> --b <版本> --since <時間>` 從 ClickHouse 比較兩版，輸出 `models/<b>/comparison.md` 與 `data/review/disagreements-<a>-vs-<b>.csv`",
+  "issue": 164,
+  "branch": "feat/bert-compare",
+  "worktree": ".worktrees/bert-compare",
+  "pr": 167,
+  "qa": {
+    "result": "pass",
+    "sha": "e7e281d3bb541b801a56fe7883a9c6a5ec34795b",
+    "by": "qa",
+    "carried_from": "4bc93eb4896beadca68be8850fecbbc3df201aa1"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "e7e281d3bb541b801a56fe7883a9c6a5ec34795b",
+    "by": "architect",
+    "carried_from": "4bc93eb4896beadca68be8850fecbbc3df201aa1"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "89f339e9554ab8e491cf635c31fb166bf94036fd",
+    "sha": "e7e281d3bb541b801a56fe7883a9c6a5ec34795b",
+    "carried_from": "4bc93eb4896beadca68be8850fecbbc3df201aa1"
+  },
+  "amend_sha": "7aa7aa02cc802791fbb87a170e6db82f11701c9a"
+}

@@ -1,0 +1,15 @@
+{
+  "task_id": "gitleaks-cleanup-archive-ignore",
+  "status": "done",
+  "files_changed": [".gitleaksignore"],
+  "verification": {
+    "command": "gitleaks git --no-banner --redact .  (gitleaks 8.30.1, darwin_arm64, 下載到 $TMPDIR)",
+    "exit_code": 0,
+    "tail": "INF 224 commits scanned.\nINF no leaks found"
+  },
+  "open_questions": [
+    "發現1 fingerprint d452b141b0b2d00e80101ec3fe2fc79768a221ce:tasks/backlog-cleanup-2026-10/gitleaks-v070-archive-ignore.review.md:generic-api-key:9 ；內容：review 中文敘述引用 \"unit_key\": \"<PTT post_id 範例>\"；誤判：generic-api-key 把 key 名稱 unit_key 當密鑰，值是 PTT 文章 ID，無憑證",
+    "發現2 fingerprint d452b141b0b2d00e80101ec3fe2fc79768a221ce:tasks/backlog-cleanup-2026-10/gitleaks-v070-archive-ignore.qa.md:generic-api-key:17 ；內容與誤判原因同發現1（qa 敘述引用同一個 unit_key 範例）",
+    "新增兩行 fingerprint 已 commit（eabd633）。fingerprint 綁 develop 上的 commit d452b14，PR 合併方式若改寫該 commit（squash）fingerprint 會失效；本機未驗證 PR 的 CI Security"
+  ]
+}

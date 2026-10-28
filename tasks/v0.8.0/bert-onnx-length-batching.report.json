@@ -1,0 +1,22 @@
+{
+  "task_id": "bert-onnx-length-batching",
+  "status": "done",
+  "files_changed": [
+    "src/radar/ml/training/classifier.py",
+    "src/radar/common/settings.py",
+    ".env.example",
+    "src/radar/ml/inference/main.py",
+    "src/radar/ml/training/evaluate.py",
+    "tests/unit/ml/test_stage8_interfaces.py",
+    "tests/unit/ml/training/test_classifier.py"
+  ],
+  "verification": {
+    "command": "make check；docker compose --env-file .env -f .worktrees/bert-onnx-length-batching/compose.yaml run --rm test（預設全部整合測試，HEAD 61ae81b，之後已 down -v）",
+    "exit_code": 0,
+    "tail": "361 passed in 60.91s (0:01:00)；含 tests/integration/acceptance/bert-shadow-inference/test_shadow_service.py 全部通過；make check 1384 passed"
+  },
+  "open_questions": [
+    "load_classifier 的 max_batch_tokens 有預設 4096（keyword-only），讓既有呼叫與 bert-classifier 驗收測試不需改；sklearn 模型忽略此值",
+    "未實測 ckip fp32 真實耗時與 RSS，待甲方重跑 evaluate（順序 3）"
+  ]
+}

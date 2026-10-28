@@ -1,0 +1,21 @@
+{
+  "task_id": "bert-notebook",
+  "status": "done",
+  "files_changed": [
+    "notebooks/bert_finetune.ipynb",
+    "tests/unit/ml/notebook/__init__.py",
+    "tests/unit/ml/notebook/test_notebook_cells.py",
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "uv run pytest tests/unit/acceptance/bert-notebook tests/unit/ml/notebook; make check",
+    "exit_code": 0,
+    "tail": "45 passed (acceptance + notebook unit); make check: 1334 passed, ruff/format/bandit passed"
+  },
+  "open_questions": [
+    "review 2 項已修：第一格加 torchvision==0.22.1、torchaudio==2.7.1；CKPT_DIR／FINAL_DIR／WORK 帶 RUN_NAME={BASE}-len{MAX_LEN}；各加靜態測試；7.27 套件版本列已補",
+    "不擋合併建議已處理：per_channel=False 與 x86 驗證說明寫進 7.27 int8 列；下載失敗的提示寫進最後一格 markdown",
+    "套件版本仍未在 sandbox 驗證，甲方第一次 Colab 執行時確認；notebook 未實際執行",
+    "gitleaks 對驗收測試 GOOGLE_TOKENIZER_REV 的誤判由 manager 另案，未動驗收測試與 .gitleaks.toml"
+  ]
+}

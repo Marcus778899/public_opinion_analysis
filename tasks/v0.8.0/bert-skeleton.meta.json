@@ -1,0 +1,25 @@
+{
+  "task_id": "bert-skeleton",
+  "kind": "chore",
+  "owner": "architect",
+  "lane": "full",
+  "title": "階段 8 的骨架：相依套件、設定、topic、migration、各模組骨架與驗收測試共用 fixture，以及完整實作的測試用小 ONNX 模型 helper",
+  "issue": 155,
+  "branch": "chore/bert-skeleton",
+  "worktree": ".worktrees/bert-skeleton",
+  "pr": 156,
+  "qa": {
+    "result": "pass",
+    "sha": "b0795ace28d2da74ad583ab4ec4903dd5044d6a7",
+    "by": "qa",
+    "carried_from": "407d3429eade73cad0f11a33c39452653bd690e1"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "b0795ace28d2da74ad583ab4ec4903dd5044d6a7",
+    "by": "architect",
+    "carried_from": "407d3429eade73cad0f11a33c39452653bd690e1"
+  },
+  "merged": true,
+  "amend_sha": "573b9662383c00860d29f2db0391e36d1e5e9dc1"
+}

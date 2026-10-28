@@ -1,0 +1,30 @@
+{
+  "task_id": "bert-notebook",
+  "kind": "feat",
+  "owner": "backend",
+  "lane": "full",
+  "title": "`notebooks/bert_finetune.ipynb`：甲方在 Colab 依第一格參數 `BASE`（`macbert`｜`ckip`）fine-tune 一個預訓練模型，匯出 ONNX、產生 fp32 與 int8 兩個模型包並印出 SHA-256；加上 notebook 的靜態單元測試",
+  "issue": 163,
+  "branch": "feat/bert-notebook",
+  "worktree": ".worktrees/bert-notebook",
+  "pr": 166,
+  "qa": {
+    "result": "pass",
+    "sha": "f65de06a63e7c48a53817e53c33977b1acb6a961",
+    "by": "qa",
+    "carried_from": "bf3b579e921deb7900c1c97e84300674910e7b7c"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "f65de06a63e7c48a53817e53c33977b1acb6a961",
+    "by": "architect",
+    "carried_from": "bf3b579e921deb7900c1c97e84300674910e7b7c"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "ceadd9c9943c3491f672cc7411d6921c306ab322",
+    "sha": "f65de06a63e7c48a53817e53c33977b1acb6a961",
+    "carried_from": "bf3b579e921deb7900c1c97e84300674910e7b7c"
+  },
+  "amend_sha": "7142450cce5664b74a6d336f006671fd1abafd3d"
+}

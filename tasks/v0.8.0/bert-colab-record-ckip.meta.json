@@ -1,0 +1,18 @@
+{
+  "task_id": "bert-colab-record-ckip",
+  "kind": "docs",
+  "owner": "backend",
+  "lane": "fast",
+  "title": "在 `docs/reports/model-evaluation.md` 的「階段 8 BERT：Colab fine-tune 紀錄」一節補上 ckip 這次執行的結果，並把兩個模型並列比較",
+  "issue": 190,
+  "branch": "docs/bert-colab-record-ckip",
+  "worktree": ".worktrees/bert-colab-record-ckip",
+  "pr": 191,
+  "qa": {
+    "result": "pass",
+    "sha": "c952ec03322ad01e4388f6eb87327da5c4338ded",
+    "by": "qa"
+  },
+  "review": null,
+  "merged": true
+}
