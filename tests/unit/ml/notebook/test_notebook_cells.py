@@ -99,3 +99,15 @@ def test_notebook_has_no_outputs() -> None:
         if cell["cell_type"] == "code":
             assert cell["outputs"] == []
             assert cell["execution_count"] is None
+
+
+def test_torch_logits_reference_runs_on_cpu_reloaded_fp32_model() -> None:
+    cell = next(c for c in _cells() if "def run_torch" in c)
+    assert "from_pretrained(\n    FINAL_DIR" in cell
+    assert '.to("cpu")' in cell
+    assert "device" not in cell.split("def run_torch")[1].split("LOGITS_TOLERANCE")[0]
+
+
+def test_logits_check_also_compares_predicted_classes_before_packaging() -> None:
+    cell = next(c for c in _cells() if "def run_torch" in c)
+    assert "torch_logits.argmax(axis=1) != onnx_logits.argmax(axis=1)" in cell
