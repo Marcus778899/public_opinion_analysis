@@ -59,7 +59,7 @@
 ## 卡住／待甲方決定
 
 - v0.8.0 待甲方驗收（README 階段 8 小節）
-- Colab 4 個模型包完成；待甲方 import_model＋evaluate（#178）
+- evaluate 完成：ckip fp32 最佳 0.612（baseline 0.504），但 fp32 每批約 70 秒（門檻 30）、記憶體峰值 5～6 GB（D-023 上限 1.5g）；LLM vs 人工表全 0 篇疑似 bug；派 architect 分析（#178）
 
 ## 注意事項（踩過的坑）
 
