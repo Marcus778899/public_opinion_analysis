@@ -6,7 +6,7 @@
 
 ## 目標與範圍
 
-- 本輪：v0.8.0 階段 8 BERT 與 shadow 比較：S8-01 fine-tune 中文 BERT（D-019：agent 備 notebook／匯出，甲方跑訓練）、S8-02 新 model_version 並行推論、S8-03 ClickHouse 比較兩版（macro-F1、不一致文章、延遲）；驗收見開發規格階段 8；另：gitleaks 封存根治（D-018）
+- 本輪：v0.8.0 階段 8 BERT 與 shadow 比較（驗收見開發規格階段 8）；BERT 進 shadow 調整：7.27「評估結果與進 shadow 的調整」順序 1～6（候選 ckip fp32）
 - 不做：上雲（階段 9）；backlog 其餘 issue
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
@@ -55,11 +55,11 @@
 | notebook-logits-check-fix | backend | done | 0 | PR #187 |
 | bert-colab-record | backend | done | 0 | PR #189 |
 | bert-colab-record-ckip | backend | done | 0 | PR #191 |
+| bert-shadow-fit-design | architect | done | 1 | PR #193 |
 
 ## 卡住／待甲方決定
 
 - v0.8.0 待甲方驗收（README 階段 8 小節）
-- evaluate 完成：ckip fp32 最佳 0.612（baseline 0.504），但 fp32 每批約 70 秒（門檻 30）、記憶體峰值 5～6 GB（D-023 上限 1.5g）；LLM vs 人工表全 0 篇疑似 bug；派 architect 分析（#178）
 
 ## 注意事項（踩過的坑）
 
