@@ -40,12 +40,13 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
+| bert-shadow-gate-ruling | architect | done | 0 | PR #200 |
 
 ## 卡住／待甲方決定
 
 - v0.8.0 待甲方驗收（README 階段 8 小節）
 - BERT 進 shadow 順序 1、2 已合併（#195、#197）；待甲方重跑 ckip fp32 evaluate（順序 3）
-- 順序 3 結果：F1 0.612、RSS 932 MB 過；每批 p50 25.8 s 過、最大 30.46 s 超過 30 s 0.46 s，門檻指 p50 或最大待 architect 判定
+- shadow 已啟動（2026-10-28 10:30Z，ckip fp32）：前 1 分鐘重啟 2 次、記憶體峰值 1.32 GB（> 1.2 GB 門檻），待甲方 docker inspect 確認是否 OOM
 
 ## 注意事項（踩過的坑）
 
