@@ -53,6 +53,7 @@
 | notebook-onnx-export-fix | backend | done | 0 | PR #183 |
 | deps-authlib-upgrade | backend | done | 0 | PR #185 |
 | notebook-logits-check-fix | backend | done | 0 | PR #187 |
+| bert-colab-record | backend | done | 0 | PR #189 |
 
 ## 卡住／待甲方決定
 
