@@ -46,7 +46,7 @@
 
 - v0.8.0 待甲方驗收（README 階段 8 小節）
 - BERT 進 shadow 順序 1、2 已合併（#195、#197）；待甲方重跑 ckip fp32 evaluate（順序 3）
-- shadow 已啟動（2026-10-28 10:30Z，ckip fp32）：前 1 分鐘重啟 2 次、記憶體峰值 1.32 GB（> 1.2 GB 門檻），待甲方 docker inspect 確認是否 OOM
+- shadow 重啟迴圈：約每 45 秒重啟、卡在同 18 篇、log 無錯誤；OOMKilled=false、RestartCount 11、memory.peak 1.32 GB；manager 已 stop，派查原因
 
 ## 注意事項（踩過的坑）
 
