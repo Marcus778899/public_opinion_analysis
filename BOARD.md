@@ -57,11 +57,12 @@
 | bert-colab-record-ckip | backend | done | 0 | PR #191 |
 | bert-shadow-fit-design | architect | done | 1 | PR #193 |
 | bert-evaluate-report-fix | backend | done | 0 | PR #195 |
-| bert-onnx-length-batching | backend | qa-fail | 0 |  |
+| bert-onnx-length-batching | backend | done | 0 | PR #197 |
 
 ## 卡住／待甲方決定
 
 - v0.8.0 待甲方驗收（README 階段 8 小節）
+- BERT 進 shadow 順序 1、2 已合併（#195、#197）；待甲方重跑 ckip fp32 evaluate（順序 3）
 
 ## 注意事項（踩過的坑）
 
