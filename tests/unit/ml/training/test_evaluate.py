@@ -247,3 +247,34 @@ def test_evaluate_by_board_passes_batch_size_through(examples):
 def test_evaluate_model_rejects_bad_batch_size(examples):
     with pytest.raises(ValueError, match="batch_size"):
         evaluate_model(FakeClassifier(), examples, batch_size=0)
+
+
+def test_render_markdown_runtime_with_load_rss_has_extra_row(examples):
+    report = evaluate_model(SklearnClassifier(train(examples, seed=42)), examples)
+    runtime = RuntimeStats(2, 100, 1.0, 2.0, 1.0, 2.0, 812.4, load_rss_mb=300.2)
+
+    md = render_markdown("v", report, [], board_reports={}, board_agreements={}, runtime=runtime)
+
+    assert "| 載入模型後 RSS | 300 MB |" in md
+
+
+def test_render_markdown_runtime_without_load_rss_omits_row(examples):
+    report = evaluate_model(SklearnClassifier(train(examples, seed=42)), examples)
+    runtime = RuntimeStats(2, 100, 1.0, 2.0, 1.0, 2.0, 812.4)
+
+    md = render_markdown("v", report, [], board_reports={}, board_agreements={}, runtime=runtime)
+
+    assert "載入模型後 RSS" not in md
+
+
+def test_render_markdown_zero_overlap_labeler_gets_note_not_row(examples):
+    report = evaluate_model(SklearnClassifier(train(examples, seed=42)), examples)
+    agreements = [llm_vs_human("groq:q", {"a": NEG}, {"b": NEG})]
+
+    md = render_markdown(
+        "v", report, agreements, board_reports={}, board_agreements={}, label_version="prompt-v6"
+    )
+
+    assert "`groq:q` 在人工測試集沒有 `prompt-v6` 的標註" in md
+    assert "| `groq:q` |" not in md
+    assert "## 模型分數" in md
