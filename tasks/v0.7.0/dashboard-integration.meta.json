@@ -1,0 +1,28 @@
+{
+  "task_id": "dashboard-integration",
+  "kind": "test",
+  "owner": "qa",
+  "lane": "full",
+  "title": "用 compose 的 grafana 與 clickhouse，透過 Grafana API 驗證 provisioning 的 dashboard 與每個面板查詢在真的 plugin 上可用（開發規格 7.25 派工順序 4）",
+  "issue": 108,
+  "branch": "test/dashboard-integration",
+  "worktree": ".worktrees/dashboard-integration",
+  "pr": 109,
+  "qa": {
+    "result": "pass",
+    "sha": "5009f7b4f4fc344ade640f07ef531b13185811a3",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "5009f7b4f4fc344ade640f07ef531b13185811a3",
+    "by": "architect"
+  },
+  "merged": true,
+  "amend_sha": "7d272176a0c85a2efc5e5a9e2f1d5f3f4cc6d1cb",
+  "acceptance_lock": {
+    "patch": "b6aaa5631b3517b9d54394f5976297f595244cb9",
+    "sha": "94182641f44fc9e77cdc3adc901ab6cc778cab72"
+  },
+  "qa_fails": 1
+}

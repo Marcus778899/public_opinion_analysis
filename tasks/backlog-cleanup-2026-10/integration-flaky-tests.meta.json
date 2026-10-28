@@ -1,0 +1,25 @@
+{
+  "task_id": "integration-flaky-tests",
+  "kind": "test",
+  "owner": "backend",
+  "lane": "full",
+  "title": "消除 4 個整合測試偶發失敗，CI 的 Integration Test 不用再重跑",
+  "issue": 129,
+  "branch": "test/integration-flaky-tests",
+  "worktree": ".worktrees/integration-flaky-tests",
+  "pr": 138,
+  "qa": {
+    "result": "pass",
+    "sha": "d730c96f3fe99d212fa664cde6c4eaad489ac101",
+    "by": "qa",
+    "carried_from": "0d62e9577d6386e610b32fa4ac44d36fa5f13656"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "d730c96f3fe99d212fa664cde6c4eaad489ac101",
+    "by": "architect",
+    "carried_from": "0d62e9577d6386e610b32fa4ac44d36fa5f13656"
+  },
+  "merged": true,
+  "amend_sha": "c324a04d849ddb04cd63ae799200247232aa4b14"
+}

@@ -1,0 +1,27 @@
+{
+  "task_id": "kafka-commit-retry",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "共用 consumer 的 commit 遇到暫時性 Kafka 錯誤時重試，不讓服務崩潰",
+  "issue": 144,
+  "branch": "fix/kafka-commit-retry",
+  "worktree": ".worktrees/kafka-commit-retry",
+  "pr": 145,
+  "qa": {
+    "result": "pass",
+    "sha": "82533910f9449729fa91f9f9511a845bec5b198a",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "82533910f9449729fa91f9f9511a845bec5b198a",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "93ef914278098ef73537a8f449d64f7fa88a390a",
+    "sha": "7edaf29fbe863247f5d699f889d3ac573dbd0c0e"
+  },
+  "amend_sha": "d982194c9e3492cdc0775769c644a6fa14369da0"
+}

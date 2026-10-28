@@ -1,0 +1,20 @@
+{
+  "task_id": "dashboard-var-test-hardening",
+  "status": "done",
+  "files_changed": [
+    "tests/integration/dashboard/test_variable_formats.py",
+    "tests/integration/acceptance/dashboard/test_panels.py",
+    "tests/integration/dashboard/_dash.py",
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "make check; docker compose --env-file .env -f .worktrees/dashboard-var-test-hardening/compose.yaml run --rm test (之後 down -v)",
+    "exit_code": 0,
+    "tail": "make check: 1134 passed; compose test: 330 passed in 41.23s (追加後重跑，已 down -v)"
+  },
+  "open_questions": [
+    "PR 的 CI 尚未開，需 manager 透過 scripts 開 PR 後確認全綠",
+    "P_VOLUME 非空轉的確認：新增 panel_text 讀 frame 欄名與 labels，並在 P_VOLUME 斷言自己的看板名稱 mine.board 一定出現在文字中（證明 labels 有被讀到）；若讀不到 labels 該斷言會失敗，other.board not in text 才有意義。未另做刻意混入別看板的反向實驗",
+    "追加處理 qa 問題 1：references 的 in_string 改為只認單引號（雙引號、反引號為 False），新增 test_references_helper_counts_only_single_quotes_as_in_string 涵蓋雙引號、反引號、引號外各一例；問題 2（CI pending）待 manager 確認"
+  ]
+}

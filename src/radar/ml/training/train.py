@@ -8,10 +8,11 @@ import argparse
 import json
 from collections import Counter
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 
 import joblib
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
@@ -35,7 +36,14 @@ PARAMS: dict[str, str | int | float] = {
 }
 
 
+class ModelKind(StrEnum):
+    SKLEARN = "sklearn"
+    ONNX = "onnx"
+
+
 class ModelCard(BaseModel):
+    """models/<model_version>/model_card.json；BERT 新增的欄位都有預設值，舊卡片照讀（7.27）。"""
+
     model_version: str
     created_at: datetime
     dataset: str
@@ -47,6 +55,27 @@ class ModelCard(BaseModel):
     params: dict[str, str | int | float]
     # evaluate 執行後補上
     metrics: dict[str, float] = {}
+    kind: ModelKind = ModelKind.SKLEARN
+    # 預訓練模型名稱與 revision（commit hash），例 hfl/chinese-macbert-base@<sha>
+    base_model: str | None = None
+    max_len: int | None = Field(default=None, ge=1)
+    # ONNX logits 的類別順序
+    labels: list[Polarity] = Field(default_factory=lambda: list(Polarity))
+    # 模型包內的檔名 → SHA-256（import_model 比對）
+    files: dict[str, str] = {}
+
+    @field_validator("labels")
+    @classmethod
+    def _labels_are_three_polarities(cls, value: list[Polarity]) -> list[Polarity]:
+        if len(value) != len(Polarity) or set(value) != set(Polarity):
+            raise ValueError(f"labels must be each Polarity exactly once, got {value}")
+        return value
+
+    @model_validator(mode="after")
+    def _onnx_needs_max_len_and_files(self) -> "ModelCard":
+        if self.kind is ModelKind.ONNX and (self.max_len is None or not self.files):
+            raise ValueError("onnx model card needs max_len and files")
+        return self
 
 
 def model_version(now: datetime) -> str:

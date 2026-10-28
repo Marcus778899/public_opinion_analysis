@@ -71,7 +71,7 @@ def test_apply_tolerates_topic_created_but_not_yet_visible(kafka_settings):
     apply_plan(admin, plan_changes([spec], {}))
 
 
-def test_apply_updates_changed_retention_and_partitions(kafka_settings):
+def test_apply_updates_changed_retention_and_partitions(kafka_settings, wait_until):
     admin = AdminClient(admin_config(kafka_settings))
     spec = single_node_specs(uuid.uuid4().hex[:8])[0]
     apply_plan(admin, plan_changes([spec], {}))
@@ -82,6 +82,15 @@ def test_apply_updates_changed_retention_and_partitions(kafka_settings):
 
     apply_plan(admin, plan_changes([changed], fetch_existing(admin, [spec.name])))
 
+    # NOTE: alter 回來時 list_topics／describe_configs 仍可能是舊值（#126），等到都看見新值
+    wait_until(
+        lambda: (
+            fetch_existing(admin, [spec.name])[spec.name].partitions == changed.partitions
+            and fetch_existing(admin, [spec.name])[spec.name].config["retention.ms"] == "3600000"
+        ),
+        "partition count or retention.ms not propagated",
+        30,
+    )
     current = fetch_existing(admin, [spec.name])[spec.name]
     assert current.partitions == spec.partitions + 1
     assert current.config["retention.ms"] == "3600000"

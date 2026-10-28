@@ -10,6 +10,7 @@ from radar.common.settings import (
     ConnectSettings,
     CrawlerSettings,
     HeatSettings,
+    InferenceRole,
     InferenceSettings,
     KafkaSettings,
     LabelingSettings,
@@ -210,6 +211,30 @@ def test_inference_settings_defaults(no_inference_env, monkeypatch):
 
     assert str(s.model_dir) == "models/tfidf-lr-x"
     assert (s.cache_size, s.batch_size) == (200_000, 100)
+    assert (s.role, s.threads) == (InferenceRole.PRIMARY, 2)
+
+
+def test_inference_settings_shadow_role_and_threads_from_env(no_inference_env, monkeypatch):
+    monkeypatch.setenv("INFERENCE_MODEL_DIR", "models/bert-x")
+    monkeypatch.setenv("INFERENCE_ROLE", "shadow")
+    monkeypatch.setenv("INFERENCE_THREADS", "4")
+
+    s = InferenceSettings()
+
+    assert (s.role, s.threads) == (InferenceRole.SHADOW, 4)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"), [("INFERENCE_ROLE", "canary"), ("INFERENCE_THREADS", "0")]
+)
+def test_inference_settings_invalid_role_or_threads_rejected(
+    no_inference_env, monkeypatch, key, value
+):
+    monkeypatch.setenv("INFERENCE_MODEL_DIR", "models/bert-x")
+    monkeypatch.setenv(key, value)
+
+    with pytest.raises(ValidationError):
+        InferenceSettings()
 
 
 def test_heat_settings_defaults_match_dev_spec(monkeypatch):

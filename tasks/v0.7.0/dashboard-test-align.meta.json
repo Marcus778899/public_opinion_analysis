@@ -1,0 +1,22 @@
+{
+  "task_id": "dashboard-test-align",
+  "kind": "docs",
+  "owner": "architect",
+  "lane": "full",
+  "title": "修訂開發規格 7.25 的測試做法，配合 7.26（整合測試改走 compose `test` 服務、移除 testcontainers、xdist 平行）",
+  "issue": 92,
+  "branch": "docs/dashboard-test-align",
+  "worktree": ".worktrees/dashboard-test-align",
+  "pr": 94,
+  "qa": {
+    "result": "pass",
+    "sha": "d0cf76f3a5a7a4146f80ce3d2cbaa98ee0a3230f",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "d0cf76f3a5a7a4146f80ce3d2cbaa98ee0a3230f",
+    "by": "甲方"
+  },
+  "merged": true
+}

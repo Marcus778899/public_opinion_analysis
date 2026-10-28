@@ -30,6 +30,10 @@ topics:
   - name: predictions
     partitions: 3
     retention_hours: 720
+  # shadow 推論（階段 8，開發規格 7.27）；不寫 predictions，呈現層不受影響
+  - name: predictions.shadow
+    partitions: 3
+    retention_hours: 720
   - name: alerts
     partitions: 1
     retention_hours: 168

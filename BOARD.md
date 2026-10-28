@@ -2,12 +2,12 @@
 
 <!-- 只放目前這一階段；只有 manager 透過 scripts/board.py 修改；階段完成時整份封存到 tasks/<tag>.md -->
 
-> 上一階段：`tasks/v0.6.0.md`（派工單在 `tasks/v0.6.0/`）
+> 上一階段：`tasks/backlog-cleanup-2026-10.md`（派工單在 `tasks/backlog-cleanup-2026-10/`）
 
 ## 目標與範圍
 
-- 本輪：v0.7.0 階段 7：呈現方式（Grafana 面板，或 Grafana 只做監控＋web 前端，待 architect 評估與甲方決定）、compose test 服務＋CI 加速（#78）、bot 允許清單 fail closed（D-010）
-- 不做：Stock 重新標註、階段 5 的 3 天驗收（第 6 章之後再做）；其餘 backlog（#65～#71、#79～#82）
+- 本輪：v0.8.0 階段 8 BERT 與 shadow 比較（驗收見開發規格階段 8）；BERT 進 shadow 調整：7.27「評估結果與進 shadow 的調整」順序 1～6（候選 ckip fp32）
+- 不做：上雲（階段 9）；backlog 其餘 issue
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
@@ -24,30 +24,45 @@
 | 2026-10-20 | D-015 | CI 加速加 pytest-xdist，不用付費 runner |
 | 2026-10-20 | D-016 | qa 也可以跑 docker compose |
 | 2026-10-21 | D-017 | Dashboard 變數一律 percentencode 由 ClickHouse 解碼；驗收只做靜態＋正常值，不用攻擊字串 |
+| 2026-10-21 | D-018 | gitleaks 不掃 tasks/ 封存，改設定根治（不再逐筆加忽略） |
+| 2026-10-21 | D-019 | 階段 8：agent 準備 notebook／匯出／評估，甲方在 Colab 跑 fine-tune |
+| 2026-10-21 | D-020 | 推論套件 onnxruntime＋tokenizers |
+| 2026-10-21 | D-021 | 預訓練模型 ckiplab 與 hfl macbert 各訓一版比較（接受 GPL，不對外散布） |
+| 2026-10-21 | D-022 | Colab 端 torch、transformers、optimum |
+| 2026-10-21 | D-023 | shadow 上限 2 CPU、1.5g、INFERENCE_THREADS=2 |
+| 2026-10-21 | D-024 | 訓練資料只在 Colab 工作階段上傳 |
+| 2026-10-22 | D-025 | ckiplab 釘 safetensors 轉換 PR；macbert 載 .bin 要求 torch>=2.6、釘 revision |
+| 2026-10-25 | D-026 | gitleaks 對 generic-api-key 放行 rev/sha 變數名＋40 位小寫 hex（不逐筆忽略） |
+| 2026-10-26 | D-027 | v0.8.0 先發版；模型驗收（Colab、shadow 3 天、compare）改由 #178 追蹤 |
+| 2026-10-27 | D-028 | 推文立場分類先不做，列 backlog #181（D-029、D-030 延到設計時） |
 
 ## 任務狀態
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
-| dashboard-design | architect | done | 0 | PR #86 |
-| test-infra-design | architect | done | 0 | PR #87 |
-| gitleaks-archive-ignore | backend | done | 0 | PR #89 |
-| test-infra-compose | backend | done | 1 | PR #95 |
-| bot-allowlist-required | backend | done | 0 | PR #93 |
-| dashboard-test-align | architect | done | 0 | PR #94 |
-| test-infra-fast-waits | backend | done | 0 | PR #97 |
-| dashboard-grafana-infra | backend | done | 1 | PR #100 |
-| certifi-security-bump | backend | done | 0 | PR #103 |
-| dashboard-views | backend | done | 0 | PR #105 |
-| dashboard-panels | backend | done | 0 | PR #107 |
-| dashboard-integration | backend | done | 1 | PR #109 |
-| e2e-grafana-volume | backend | done | 1 | PR #114 |
-| gitleaks-uat-ignore | backend | done | 1 | PR #116 |
-| dashboard-min-score-select | backend | done | 2 | PR #124 |
+| gitleaks-cleanup-archive-ignore | backend | done | 0 | PR #150 |
+| bert-design | architect | done | 1 | PR #154 |
+| gitleaks-archive-allowlist | backend | done | 0 | PR #153 |
+| bert-skeleton | architect | done | 0 | PR #156 |
+| bert-classifier | backend | done | 0 | PR #161 |
+| bert-model-import | backend | done | 0 | PR #160 |
+| bert-shadow-inference | backend | done | 0 | PR #165 |
+| bert-notebook | backend | done | 0 | PR #166 |
+| bert-compare | backend | done | 0 | PR #167 |
+| gitleaks-revision-allowlist | backend | done | 1 | PR #170 |
+| notebook-onnx-export-fix | backend | done | 0 | PR #183 |
+| deps-authlib-upgrade | backend | done | 0 | PR #185 |
+| notebook-logits-check-fix | backend | done | 0 | PR #187 |
+| bert-colab-record | backend | done | 0 | PR #189 |
+| bert-colab-record-ckip | backend | done | 0 | PR #191 |
+| bert-shadow-fit-design | architect | done | 1 | PR #193 |
+| bert-evaluate-report-fix | backend | done | 0 | PR #195 |
+| bert-onnx-length-batching | backend | done | 0 | PR #197 |
 
 ## 卡住／待甲方決定
 
-- v0.7.0 發版中：甲方驗收 PASS、security PASS 3fccb90；release.py open → CI 綠 → finish
+- v0.8.0 待甲方驗收（README 階段 8 小節）
+- BERT 進 shadow 順序 1、2 已合併（#195、#197）；待甲方重跑 ckip fp32 evaluate（順序 3）
 
 ## 注意事項（踩過的坑）
 

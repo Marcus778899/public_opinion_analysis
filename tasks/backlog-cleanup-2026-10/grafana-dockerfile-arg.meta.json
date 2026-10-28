@@ -1,0 +1,28 @@
+{
+  "task_id": "grafana-dockerfile-arg",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "建置 Grafana image 時不再印 InvalidDefaultArgInFrom 警告",
+  "issue": 135,
+  "branch": "fix/grafana-dockerfile-arg",
+  "worktree": ".worktrees/grafana-dockerfile-arg",
+  "pr": 136,
+  "qa": {
+    "result": "pass",
+    "sha": "936b431da2060769bec12b562d4d9c6e2d80b491",
+    "by": "qa",
+    "carried_from": "0b62464c88a93d02606bba21508168610b587cc0"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "936b431da2060769bec12b562d4d9c6e2d80b491",
+    "by": "architect",
+    "carried_from": "0b62464c88a93d02606bba21508168610b587cc0"
+  },
+  "merged": true,
+  "amend_sha": "0b62464c88a93d02606bba21508168610b587cc0",
+  "lane_upgraded": [
+    "碰到受保護路徑 infra/grafana/Dockerfile"
+  ]
+}

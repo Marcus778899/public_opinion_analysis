@@ -209,6 +209,26 @@ services:
     environment:
       <<: *app-env
       INFERENCE_MODEL_DIR: '/app/models/${INFERENCE_MODEL_VERSION:-}'
+      # NOTE: 角色寫死在服務定義，.env 設了也會被覆寫；shadow 結果不可寫進 predictions（7.27）
+      INFERENCE_ROLE: 'primary'
+    volumes:
+      - app_logs:/app/log
+      - ../models:/app/models:ro
+
+  # shadow 推論（S8-02，開發規格 7.27）：同一個 image，寫 predictions.shadow；make up-shadow 才啟動
+  inference-shadow:
+    <<: *app
+    container_name: radar_inference_shadow
+    profiles: ["shadow"]
+    command: ["python", "-m", "radar.ml.inference.main"]
+    environment:
+      <<: *app-env
+      INFERENCE_MODEL_DIR: '/app/models/${INFERENCE_SHADOW_MODEL_VERSION:-}'
+      INFERENCE_ROLE: 'shadow'
+      INFERENCE_THREADS: '2'
+    # D-023：不搶 Kafka、ClickHouse 的 CPU 與記憶體
+    cpus: 2
+    mem_limit: 1.5g
     volumes:
       - app_logs:/app/log
       - ../models:/app/models:ro

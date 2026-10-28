@@ -103,3 +103,67 @@
 - 理由：寫攻擊字串測試的方向被安全機制擋下；改成從格式上保證不可能注入
 - 影響：開發規格 7.25、`dashboard-min-score-select` 驗收條件 2
 - 日期：2026-10-21
+
+### D-018 封存派工單反覆觸發 gitleaks 誤判
+- 決定：根治：gitleaks 不掃 `tasks/` 底下的封存（派工單、qa／review 報告），改 gitleaks 設定而非逐筆加忽略
+- 理由：v0.6.0、v0.7.0、backlog 清理三次封存都觸發誤判，且每次修正單的報告又成為下一次的誤判來源
+- 影響：gitleaks 設定（派工單 `gitleaks-archive-allowlist`，PR #153）；`tasks/` 只放派工流程文件，不可放設定值或密鑰；v0.8.0 security 審查要更新「`.gitleaks.toml` 存在、排除 `^tasks/`」並抽查 `tasks/` 新增內容；開發規格第 38 行忽略檔說明待下一張改開發規格的單補一句
+- 日期：2026-10-21
+
+### D-019 階段 8 BERT fine-tune 的分工
+- 決定：A. agent 準備 fine-tune notebook、模型匯出與評估流程；甲方在 Colab／Kaggle 執行訓練並交回模型檔
+- 理由：agent 無法操作 Colab／Kaggle
+- 影響：開發規格階段 8 S8-01、`bert-design`
+- 日期：2026-10-21
+
+### D-020 推論服務的新套件
+- 決定：A. 執行期 `onnxruntime`＋`tokenizers`，開發用 `onnx`（不用 torch＋transformers 推論）
+- 理由：image 小、載入時不執行模型附帶程式；onnxruntime 有 Python 3.12 x86_64／aarch64 wheel
+- 影響：開發規格 7.27、`bert-skeleton`
+- 日期：2026-10-21
+
+### D-021 預訓練模型
+- 決定：D. ckiplab/bert-base-chinese（GPL-3.0）與 hfl/chinese-macbert-base（Apache-2.0）各訓一版，用人工測試集決定
+- 理由：甲方接受 GPL 風險；模型只在自己的機器與 VM 使用、不對外散布。日後若要對外提供或散布模型、產品，須重新評估 GPL
+- 影響：開發規格 7.27、`bert-notebook`、`bert-eval-report`
+- 日期：2026-10-21
+
+### D-022 notebook 端套件（只裝在 Colab，不進 `uv.lock`）
+- 決定：A. `torch`、`transformers`、`optimum[onnxruntime]`
+- 影響：`bert-notebook`
+- 日期：2026-10-21
+
+### D-023 shadow 推論的資源上限
+- 決定：A. 2 CPU、1.5g 記憶體、`INFERENCE_THREADS=2`
+- 影響：開發規格 7.27、`bert-shadow-inference`
+- 日期：2026-10-21
+
+### D-024 訓練資料（PTT 內文）上傳平台
+- 決定：A. Colab，工作階段上傳、不放 Drive
+- 理由：Kaggle 條款只取得摘要（非商用）、預設可見度查不到；甲方知悉兩平台條款皆未明文規範論壇內容
+- 影響：`bert-notebook`
+- 日期：2026-10-21
+
+### D-025 預訓練模型只有 pickle 權重（`pytorch_model.bin`），notebook 怎麼載入
+- 決定：B. ckiplab/bert-base-chinese 釘 SFconvertbot 的 safetensors 轉換 PR（`refs/pr/1`，commit `d3e55b839fccbf1bba9e194b8626b18b30fcc5f3`）只載 safetensors；hfl/chinese-macbert-base 沒有 safetensors，在 Colab 載 `.bin`，notebook 第一格要求 `torch>=2.6`（weights_only 預設）、釘 revision、`trust_remote_code=False`
+- 理由：有 safetensors 就用；pickle 只在用完即丟的 Colab VM 解開，本機與 VM 仍只載 ONNX／JSON
+- 影響：開發規格 7.27「威脅與對策」預訓練模型來源列、7.27 派工順序第 2 步；`bert-notebook`
+- 日期：2026-10-22
+
+### D-026 gitleaks 把 Hugging Face 的模型版本號（40 位 hex）誤判成密鑰，所有分支的 CI 都卡住
+- 決定：A. `.gitleaks.toml` 只對 `generic-api-key` 加一條放行規則：變數名含 rev／revision／commit／sha **且**值是 40 位小寫 hex 才放行；不逐筆加 `.gitleaksignore`
+- 理由：依類別根治、範圍窄，延續 D-018；之後新的 revision 不會再擋 CI
+- 影響：`.gitleaks.toml`；chore 單 `gitleaks-revision-allowlist`（調查見 reports/bert-shadow-inference.gitleaks.md）；合併後 PR #165、#166、#167 sync
+- 日期：2026-10-25
+
+### D-027 v0.8.0 要不要等甲方訓練模型、shadow 跑滿 3 天才發版
+- 決定：A. 現在發版；甲方只驗 README 與流程能看懂，模型相關驗收（docs/uat/v0.8.0.md S15–S18、甲方驗收清單第 2～7 項）改由 #178 追蹤，跑完補 `docs/reports/model-evaluation.md`
+- 理由：程式、uat、資安都已驗完；模型好壞是資料結果，不影響這版程式能不能發（比照 D-003）
+- 影響：v0.8.0 甲方驗收範圍；#178
+- 日期：2026-10-26
+
+### D-028 推文立場分類（設計 14.4）要不要做、排在哪
+- 決定：B. 先不做，列 backlog #181，之後再設計；原提問的 D-029（標註 LLM）、D-030（送外部的資料範圍）一併延到設計時再問，選項與調查記在 #181
+- 理由：甲方決定；甲方傾向推文短、量少，標註可直接交給 Claude 一次標完，不走文章那套 batch（設計時納入）
+- 影響：設計 14.4 維持延伸功能；#181；docs/research/comment-stance.md
+- 日期：2026-10-27

@@ -1,0 +1,14 @@
+{
+  "task_id": "bot-allowlist-required",
+  "status": "done",
+  "files_changed": ["src/radar/common/settings.py","src/radar/bot/main.py","tests/unit/common/test_settings.py","tests/unit/bot/test_main.py",".env.example","docs/realtime-sentiment-radar-design.md","docs/development-spec.md"],
+  "verification": {
+    "command": "cd .worktrees/bot-allowlist-required && PYTHONPATH=src uv run --no-sync pytest tests/unit (pre-commit hooks passed at commit)",
+    "exit_code": 0,
+    "tail": "1027 passed in 3.84s"
+  },
+  "open_questions": [
+    "make check 以 uv run 執行會把 editable 指到 worktree，改以 PYTHONPATH=src uv run --no-sync 跑 pre-commit 同等 hooks 與 pytest tests/unit；未直接跑 make check",
+    "清單有值又設 ALLOW_ALL=true：採清單優先＋警告，已寫入開發規格 7.21，無異議"
+  ]
+}

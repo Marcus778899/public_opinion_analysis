@@ -1,0 +1,19 @@
+{
+  "task_id": "e2e-volume-regression",
+  "kind": "test",
+  "owner": "backend",
+  "lane": "fast",
+  "title": "加一條通用回歸測試：e2e 合併後任何服務都不掛開發環境的 volume；開發規格補上遺漏的說明",
+  "issue": 139,
+  "branch": "test/e2e-volume-regression",
+  "worktree": ".worktrees/e2e-volume-regression",
+  "pr": 140,
+  "qa": {
+    "result": "pass",
+    "sha": "c53f3ad85bf32f32974b016434c0c0dd53bcdf13",
+    "by": "qa",
+    "carried_from": "796d3f4aab19b1bd97d9470b5e50b1a46013b590"
+  },
+  "review": null,
+  "merged": true
+}

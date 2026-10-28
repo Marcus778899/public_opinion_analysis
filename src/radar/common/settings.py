@@ -1,3 +1,4 @@
+from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
@@ -77,6 +78,13 @@ class ConnectSettings(BaseSettings):
     ready_timeout_s: float = 180.0
 
 
+class InferenceRole(StrEnum):
+    """推論服務的角色；group、topic、表名由 radar.ml.inference.roles 的對照表得出（7.27）。"""
+
+    PRIMARY = "primary"
+    SHADOW = "shadow"
+
+
 class InferenceSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="INFERENCE_")
 
@@ -85,6 +93,12 @@ class InferenceSettings(BaseSettings):
     # 文章 → 模型輸入文字 hash 的 LRU 上限（開發規格 7.18）
     cache_size: int = 200_000
     batch_size: int = 100
+    # compose 的服務定義寫死，不從 .env 設定（開發規格 7.27）
+    role: InferenceRole = InferenceRole.PRIMARY
+    # ONNX 的 intra-op thread 數（D-023）
+    threads: int = Field(default=2, ge=1)
+    # ONNX 每次 run 的篇數 × 序列長度上限；須 ≥ card.max_len（load_classifier 檢查）
+    max_batch_tokens: int = Field(default=4096, ge=1)
 
 
 class CdcWatchdogSettings(BaseSettings):

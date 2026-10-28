@@ -1,0 +1,34 @@
+{
+  "task_id": "test-infra-fast-waits",
+  "status": "done",
+  "files_changed": [
+    "pyproject.toml",
+    "uv.lock",
+    "Makefile",
+    "compose.yaml",
+    "docs/development-spec.md",
+    "tests/helpers/clickhouse.py",
+    "tests/integration/conftest.py",
+    "tests/integration/_xdist.py",
+    "tests/integration/test_parallel_isolation.py",
+    "tests/integration/streaming/test_heat_app.py",
+    "tests/integration/common/test_producer_partition.py",
+    "tests/integration/cdc/test_slot.py",
+    "tests/integration/cdc/test_clickhouse_migrations.py",
+    "tests/integration/bot/test_stats_clickhouse.py",
+    "tests/integration/db/test_schema.py"
+  ],
+  "verification": {
+    "command": "make check; docker compose --env-file .env -f .worktrees/test-infra-fast-waits/compose.yaml run --rm test (連跑兩次) ; ... run --rm test pytest tests/integration -n 0 -q; down -v",
+    "exit_code": 0,
+    "tail": "make check: 1066 passed. run --rm test: 150 passed in 40.34s, 150 passed in 53.08s (-n auto, 8 workers). -n 0: 150 passed in 120.98s. down -v 已執行。"
+  },
+  "open_questions": [
+    "只改文件 <= 1 分鐘由 7.26 做法 12（順序 1 已做）保證，本單未再改動，未實測。Makefile coverage 與 compose test 預設 command 都已加 --durations=15（CI 走 make coverage）",
+    "偏離 7.26 原設計並已回寫文件：xdist_group 只留 test_clickhouse_migrations（shared_radar_db），heat、inference 不分組（斷言只看自己的 uuid key）；全域重置用 flock（_xdist.run_once）而非 pytest_sessionstart（後者在直接下 pytest 時不會觸發）",
+    "新增行為：radar 已套完所有 migration 時，全域重置保留 ClickHouse Kafka engine 表與 labels／predictions／alerts 三個 topic（被刪的 Kafka engine consumer 不離開 group，重建後第一個等 Kafka 資料的測試要多等約 45 秒，原本 60 秒 timeout 會偶發失敗）。代價：這三個 topic 跨次執行保留，heat 看板名稱因此改帶 uuid",
+    "test-service 的 -n auto 取容器可用 CPU 數，CI runner（2～4 核）worker 數較少，時間需看 CI 實測；cdc/test_slot 的 lag 斷言改為相對值（降了至少 400KB）以免平行寫入造成偶發失敗",
+    "backend-standards 檢查清單：無端點／授權／migration 項目不適用；無新環境變數（CLUSTER_ID 為 compose 內測試用固定值，非機密）；新增相依 pytest-xdist 已由 D-015 核可",
+    "review 退回的 6 點（皆在 docs/development-spec.md 7.26 與進度表）已改完 commit：威脅表補 cluster_id、合併過時條文（flock、without_kafka）、做法 8 與實作補充重置順序更新、xdist_group 規則統一、進度表改 ✅ 並補 CI 1m56s"
+  ]
+}

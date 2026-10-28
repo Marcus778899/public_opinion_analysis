@@ -143,7 +143,8 @@ def test_without_kafka_removes_engine_tables_and_views_only():
     kept = [s for m in ch_helper.without_kafka(migrations) for s in m.statements]
 
     assert kept
-    assert not any("ENGINE = Kafka" in s or "MATERIALIZED VIEW" in s for s in kept)
+    assert not any("ENGINE = Kafka" in s for s in kept)
+    assert not any(ch_helper.is_kafka_statement(s) for s in kept)
     assert any("CREATE TABLE IF NOT EXISTS labels" in s for s in kept)
 
 

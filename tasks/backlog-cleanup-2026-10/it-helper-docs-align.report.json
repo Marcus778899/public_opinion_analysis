@@ -1,0 +1,21 @@
+{
+  "task_id": "it-helper-docs-align",
+  "status": "done",
+  "files_changed": [
+    "tests/helpers/clickhouse.py",
+    "tests/integration/test_parallel_isolation.py",
+    "tests/integration/common/test_topics_apply.py",
+    "tests/integration/cdc/test_slot.py",
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "make check; docker compose --env-file .env -f .worktrees/it-helper-docs-align/compose.yaml run --rm test (x2, then down -v)",
+    "exit_code": 0,
+    "tail": "make check: 1152 passed; integration run 1 (fresh stack): 330 passed in 41.43s; run 2: 330 passed in 39.25s; down -v done; docker compose ls was empty beforehand"
+  },
+  "open_questions": [
+    "retention 根因：apply_plan 的 alter_configs／create_partitions 回來時，broker metadata 與 describe_configs 回的是舊值（與 #126 partition 同類的傳播延遲），斷言在傳播前讀到舊的 retention.ms。修法：沿用 wait_until，等 partitions 與 retention.ms 都是新值才斷言，斷言本身沒放寬。偶發問題本機兩次全過，無法證明已根除，需看 CI／後續觀察。",
+    "without_kafka 測試改法：移除「kept 不含任何 MATERIALIZED VIEW」，改斷言沒有 ENGINE = Kafka 且沒有 helper.is_kafka_statement 判定為真的語句（即只略過 Kafka engine 表與讀 *_queue 的 MV），保留 labels 表存在的斷言。",
+    "docs 7.26 ④ 已補 is_current 另查 Kafka 物件，以及 *_queue 命名與只用 CREATE／DROP 的限制。PR 與 CI 結果由 manager 開 PR 後確認。"
+  ]
+}

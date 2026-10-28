@@ -4,7 +4,8 @@
 在 radar DB 執行，結果符合種子資料。plugin 實際展開巨集的結果由 dashboard-integration 驗證。
 
 種子資料放 radar DB（管理帳號寫入），看板名稱帶 uuid，變數 board 只代入自己的看板，
-所以不需要 xdist_group，也不斷言整張表（開發規格 7.26）。測試帳密與 compose.yaml 一致。
+標 xdist_group("shared_radar_db") 避免被 cdc 模組 TRUNCATE 清掉（#111），
+也不斷言整張表（開發規格 7.26）。測試帳密與 compose.yaml 一致。
 面板的欄位名稱規格沒有訂，所以結果以「內容」辨認（標題、看板、類別名稱、數值），不靠欄名。
 """
 
@@ -25,6 +26,8 @@ from tests.integration.dashboard._dash import (
     FIXED_NUMBER,
     references,
 )
+
+pytestmark = pytest.mark.xdist_group("shared_radar_db")
 
 ROOT = Path(__file__).resolve().parents[4]
 DASHBOARD = ROOT / "infra" / "grafana" / "dashboards" / "radar.json"
@@ -414,6 +417,8 @@ def test_every_board_and_min_score_reference_uses_percentencode(
     for sql in _sqls(_panel(dashboard, title)):
         bad = [r.text for r in references(sql) if r.fmt not in ALLOWED_FORMATS]
         assert not bad, f"面板「{title}」只准 {sorted(ALLOWED_FORMATS)}，實際：{bad}"
+        loose = [r.text for r in references(sql) if not r.in_string]
+        assert not loose, f"面板「{title}」引用必須在 SQL 單引號內，實際不在：{loose}"
 
 
 def test_min_score_options_and_default_are_fixed_numbers(dashboard: dict) -> None:

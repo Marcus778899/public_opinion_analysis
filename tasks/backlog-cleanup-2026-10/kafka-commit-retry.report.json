@@ -1,0 +1,7 @@
+{
+  "task_id": "kafka-commit-retry",
+  "status": "done",
+  "files_changed": ["src/radar/common/kafka/consumer.py", "tests/unit/common/kafka/test_consumer.py", "docs/development-spec.md"],
+  "verification": {"command": "make check", "exit_code": 0, "tail": "1150 passed in 2.97s (acceptance kafka-commit-retry: 12 passed)"},
+  "open_questions": ["commit 重試上限固定 6 次（_COMMIT_MAX_RETRIES），退避沿用 backoff_delays（約 0.5~16s，總計約 31s）；未新增環境變數。重試期間以 stop.wait 等待、未 poll，若 coordinator 持續故障超過 max.poll.interval.ms 可能被踢出 group（commit 失敗本就代表 group 不健康，失去 assignment 的既有處理接手）。整合測試未跑（僅單元變動）。"]
+}

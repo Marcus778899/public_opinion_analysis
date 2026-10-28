@@ -1,9 +1,12 @@
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
+from pydantic import ValidationError
 
+from radar.common.enums import Polarity
 from radar.ml.training.train import (
     ModelCard,
+    ModelKind,
     load_model,
     model_version,
     save_model,
@@ -66,3 +69,54 @@ def test_save_model_refuses_existing_dir(tmp_path, examples):
 
     with pytest.raises(FileExistsError):
         save_model(pipeline, card(), tmp_path)
+
+
+def test_baseline_card_json_without_bert_fields_reads_with_defaults():
+    old = card().model_dump(exclude={"kind", "base_model", "max_len", "labels", "files"})
+
+    loaded = ModelCard.model_validate(old)
+
+    assert loaded.kind is ModelKind.SKLEARN
+    assert (loaded.base_model, loaded.max_len, loaded.files) == (None, None, {})
+    assert loaded.labels == list(Polarity)
+
+
+def onnx_card(**overrides) -> ModelCard:
+    fields = {
+        **card("bert-macbert-202610210000").model_dump(),
+        "kind": "onnx",
+        "base_model": "hfl/chinese-macbert-base@abc123",
+        "max_len": 512,
+        "labels": ["negative", "neutral", "positive"],
+        "files": {"model.onnx": "0" * 64, "tokenizer.json": "1" * 64},
+    }
+    return ModelCard.model_validate({**fields, **overrides})
+
+
+def test_onnx_card_keeps_label_order_and_roundtrips_json():
+    c = onnx_card()
+
+    loaded = ModelCard.model_validate_json(c.model_dump_json())
+
+    assert loaded == c
+    assert loaded.labels == [Polarity.NEGATIVE, Polarity.NEUTRAL, Polarity.POSITIVE]
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [
+        ["negative", "neutral"],
+        ["negative", "neutral", "neutral"],
+        ["negative", "neutral", "positive", "positive"],
+        ["negative", "neutral", "happy"],
+    ],
+)
+def test_card_labels_not_exactly_three_polarities_rejected(labels):
+    with pytest.raises(ValidationError):
+        onnx_card(labels=labels)
+
+
+@pytest.mark.parametrize("overrides", [{"max_len": None}, {"files": {}}, {"max_len": 0}])
+def test_onnx_card_without_max_len_or_files_rejected(overrides):
+    with pytest.raises(ValidationError):
+        onnx_card(**overrides)

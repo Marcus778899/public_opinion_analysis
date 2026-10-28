@@ -1,0 +1,11 @@
+{
+  "task_id": "grafana-dockerfile-arg",
+  "status": "done",
+  "files_changed": ["infra/grafana/Dockerfile", "tests/unit/infra/__init__.py", "tests/unit/infra/test_grafana_dockerfile.py"],
+  "verification": {
+    "command": "make check; docker compose -f .worktrees/grafana-dockerfile-arg/infra/docker-compose.yaml --env-file .env build grafana",
+    "exit_code": 0,
+    "tail": "1117 passed; grafana build: no InvalidDefaultArgInFrom, image radar-grafana:13.0.2-4.23.0 (same versions, plugin layer CACHED)"
+  },
+  "open_questions": ["ARG GRAFANA_VERSION 預設值為佔位字串 unset-use-compose-build-arg（不寫死版本）；沒傳 build arg 時會因 tag 不存在而失敗，compose 另有 :? 檢查。新增 tests/unit/infra/__init__.py（派工單未列，為測試套件結構所需）。PR CI 未跑（未 push）。"]
+}

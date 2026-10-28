@@ -1,0 +1,15 @@
+{
+  "task_id": "gitleaks-uat-ignore",
+  "status": "done",
+  "files_changed": [".gitleaksignore"],
+  "verification": {
+    "command": "gitleaks git --redact --no-banner .  (gitleaks 8.30.1, darwin_arm64, 在 commit a34985e 上)",
+    "exit_code": 0,
+    "tail": "INF 182 commits scanned. / INF scanned ~7211946 bytes (7.21 MB) in 1.28s / INF no leaks found"
+  },
+  "open_questions": [
+    "第一輪回報與實測不符：95ef462 的檔頭註解含 curl 指令原文，被 curl-auth-user 在 .gitleaksignore 第 4 行再抓一次。已在新 commit a34985e 修正（未改寫既有 commit）：註解第 4 行改成不含帳密字樣，並新增 fingerprint 95ef462c3de5f6cf78d4041b222c40ba3e457b36:.gitleaksignore:curl-auth-user:4。",
+    "原本那筆仍是 7b0386c72267117fa573f7e2d83913371bc8dfc4:docs/uat/v0.7.0.md:curl-auth-user:19（UAT 測錯誤密碼的假帳密，非真密鑰），已忽略。",
+    "PR #116 的 CI 要推送後才知道，未驗證。"
+  ]
+}

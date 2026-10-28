@@ -1,0 +1,28 @@
+{
+  "task_id": "e2e-grafana-volume",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "e2e 環境的 Grafana 改用 e2e 專用的資料 volume，README e2e 第 4 步的 down -v 不再刪到開發環境的 radar_grafana_data",
+  "issue": 113,
+  "branch": "fix/e2e-grafana-volume",
+  "worktree": ".worktrees/e2e-grafana-volume",
+  "pr": 114,
+  "qa": {
+    "result": "pass",
+    "sha": "19b1e8d11b05cc735b4aa3f96b3eb2ee697de104",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "19b1e8d11b05cc735b4aa3f96b3eb2ee697de104",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "4f7d7b65deca4215a1c90a16654d0c73bb375386",
+    "sha": "19b1e8d11b05cc735b4aa3f96b3eb2ee697de104",
+    "carried_from": "d90d3f3c16df3d0561d70daad074a1941bd46f1b"
+  },
+  "qa_fails": 1
+}

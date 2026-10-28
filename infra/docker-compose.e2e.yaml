@@ -60,6 +60,9 @@ services:
   inference:
     volumes:
       - e2e_app_logs:/app/log
+  inference-shadow:
+    volumes:
+      - e2e_app_logs:/app/log
   heat:
     volumes:
       - e2e_app_logs:/app/log

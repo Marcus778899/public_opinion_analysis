@@ -20,6 +20,10 @@ STATE_FILE_RE = re.compile(r"\.meta\.json\b")
 SHELLS = {"bash", "sh", "zsh"}
 # 後面接另一個指令的包裝：timeout 600 docker compose … 一樣留在 sandbox
 WRAPPERS = {"env", "time", "timeout", "nohup", "xargs", "sudo", "exec", "command", "watch"}
+# 只認指令名：docker-compose.yml、dockerfile 這類檔名不是指令
+DOCKER_CMDS = {"docker", "docker-compose"}
+# 字串裡呼叫 docker：後面要接空白或結尾，docker-compose.yml、docker/ 這類路徑不算
+DOCKER_WORD_RE = re.compile(r"(?<![\w./-])docker(?:-compose)?(?=\s|$)")
 KEYWORDS = {"do", "then", "else", "elif", "if", "while", "until", "!", "{"}
 HEREDOC_RE =re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?\n\s*\2\s*(?=\n|$)", re.S)
 DOCKER_HINT = (
@@ -58,11 +62,11 @@ def docker_misuse(command: str) -> bool:
         if not words:
             continue
         cmd = words[0].rsplit("/", 1)[-1]
-        if cmd in SHELLS and any(re.search(r"\bdocker\b", w) for w in words[1:]):
+        if cmd in SHELLS and any(DOCKER_WORD_RE.search(w) for w in words[1:]):
             return True
-        if cmd in WRAPPERS and any(w.rsplit("/", 1)[-1].startswith("docker") for w in words[1:]):
+        if cmd in WRAPPERS and any(w.rsplit("/", 1)[-1] in DOCKER_CMDS for w in words[1:]):
             return True
-        if cmd.startswith("docker"):
+        if cmd in DOCKER_CMDS:
             ok = cmd == "docker" and words[1:2] == ["compose"] and len(words) == len(seg)
             if not ok or has_operator:
                 return True

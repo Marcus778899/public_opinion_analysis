@@ -78,16 +78,26 @@ def drop_databases(settings: ClickHouseSettings) -> None:
 
 
 def is_current(settings: ClickHouseSettings) -> bool:
-    """radar database 已套完所有 migration（Kafka engine 表的 consumer 還活著）。"""
+    """radar database 已套完所有 migration，且 Kafka engine 表與讀它的 MV 都還在。"""
     assert_test_clickhouse(settings)
+    migrations = load_migrations(CH_DIR / "migrations")
     client = ClickHouseClient(settings)
     try:
         applied = applied_versions(client)
+        if applied != {m.version for m in migrations}:
+            return False
+        present = set(
+            client.execute(
+                "SELECT name FROM system.tables "
+                f"WHERE database = '{settings.db}' AND engine IN ('Kafka', 'MaterializedView') "
+                "FORMAT TSV"
+            ).splitlines()
+        )
     except ClickHouseError:
         return False
     finally:
         client.close()
-    return applied == {m.version for m in load_migrations(CH_DIR / "migrations")}
+    return kafka_objects(migrations) <= present
 
 
 def reset_keeping_radar(settings: ClickHouseSettings) -> None:
@@ -121,11 +131,38 @@ def create_worker_database(settings: ClickHouseSettings) -> None:
         client.close()
 
 
+# NOTE: 依賴 Kafka engine 表命名為 `*_queue`，且 Kafka 物件只用 CREATE／DROP 變更；
+# migration 改用 RENAME／EXCHANGE 時要同步改 `kafka_objects`。
+_CREATE_RE = re.compile(
+    r"^\s*CREATE\s+(TABLE|MATERIALIZED\s+VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(\w+)`?", re.I
+)
+_DROP_RE = re.compile(r"^\s*DROP\s+(?:TABLE|VIEW)\s+(?:IF\s+EXISTS\s+)?`?(\w+)`?", re.I)
+_FROM_QUEUE_RE = re.compile(r"\bFROM\s+`?\w+_queue\b", re.I)
+
+
+def is_kafka_statement(statement: str) -> bool:
+    """Kafka engine 表，或 SELECT 自 *_queue 的 MV；讀一般表的 MV 不算。"""
+    if "ENGINE = Kafka" in statement:
+        return True
+    return "CREATE MATERIALIZED VIEW" in statement and bool(_FROM_QUEUE_RE.search(statement))
+
+
+def kafka_objects(migrations: list[Migration]) -> set[str]:
+    """套完全部 migration 後應存在的 Kafka engine 表與讀它們的 MV 名稱（DROP 會被扣掉）。"""
+    names: set[str] = set()
+    for m in migrations:
+        for s in m.statements:
+            if drop := _DROP_RE.match(s):
+                names.discard(drop.group(1))
+            elif (create := _CREATE_RE.match(s)) and is_kafka_statement(s):
+                names.add(create.group(2))
+    return names
+
+
 def without_kafka(migrations: list[Migration]) -> list[Migration]:
     """去掉 Kafka engine 表與讀它的 MV：同 consumer group 只能有一組，不能搶 radar 的 partition。"""
-    skip = ("ENGINE = Kafka", "CREATE MATERIALIZED VIEW")
     return [
-        replace(m, statements=[s for s in m.statements if not any(k in s for k in skip)])
+        replace(m, statements=[s for s in m.statements if not is_kafka_statement(s)])
         for m in migrations
     ]
 

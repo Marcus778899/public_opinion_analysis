@@ -1,0 +1,23 @@
+{
+  "task_id": "test-infra-fast-waits",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "整合測試用 pytest-xdist 平行跑、去掉固定等待，讓 CI 的 Integration Test 變快（開發規格 7.26 順序 2）",
+  "issue": 96,
+  "branch": "chore/test-infra-fast-waits",
+  "worktree": ".worktrees/test-infra-fast-waits",
+  "pr": 97,
+  "qa": {
+    "result": "pass",
+    "sha": "7ec9afcd78fb9534634f52b9f9fc4ad4a9d462d4",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "7ec9afcd78fb9534634f52b9f9fc4ad4a9d462d4",
+    "by": "architect"
+  },
+  "merged": true,
+  "amend_sha": "a0b68bf35653756d02d7f85cb443370313ebf61e"
+}

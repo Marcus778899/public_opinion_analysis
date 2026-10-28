@@ -1,0 +1,27 @@
+{
+  "task_id": "it-helper-mv-filter",
+  "kind": "test",
+  "owner": "backend",
+  "lane": "full",
+  "title": "整合測試 helper 的 `without_kafka` 只略過讀 Kafka 的 MV，`is_current` 判斷涵蓋 Kafka engine consumer",
+  "issue": 137,
+  "branch": "test/it-helper-mv-filter",
+  "worktree": ".worktrees/it-helper-mv-filter",
+  "pr": 141,
+  "qa": {
+    "result": "pass",
+    "sha": "7c352f36debcc080cc8fdf01afd6ffb16ba480a5",
+    "by": "qa",
+    "carried_from": "a1d581081a092c80bec5513a76ef62e737de0b07"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "7c352f36debcc080cc8fdf01afd6ffb16ba480a5",
+    "by": "architect",
+    "carried_from": "a1d581081a092c80bec5513a76ef62e737de0b07"
+  },
+  "merged": true,
+  "lane_upgraded": [
+    "改了 132 行（上限 100）"
+  ]
+}

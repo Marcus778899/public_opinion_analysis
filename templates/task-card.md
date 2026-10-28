@@ -15,8 +15,8 @@
 - **負責檔案**：只能改這些（相對 repo 根目錄）
   - `path/to/file.py`
 - **禁區**：不可改的檔案或行為
-- **驗收測試**：qa 先寫、worker 不可改的目錄（見設計文件）；docs／chore 寫「無」
-  - `path/to/acceptance/`
+- **驗收測試**：qa 先寫、worker 不可改的目錄：驗收測試目錄（見設計文件）底下這張單自己的子目錄；docs／chore 寫「無」
+  - `path/to/acceptance/<task_id>/`
 - **驗收條件**：
   - [ ] 條件一
 - **驗證指令**：`make check`

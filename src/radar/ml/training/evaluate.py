@@ -5,26 +5,36 @@
 """
 
 import argparse
-from dataclasses import dataclass
+import math
+import resource
+import sys
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from sklearn.metrics import confusion_matrix, f1_score
-from sklearn.pipeline import Pipeline
 
 from radar.common.clickhouse import ClickHouseClient
 from radar.common.enums import Polarity
 from radar.common.log import log, setup_logging
-from radar.common.settings import ClickHouseSettings
+from radar.common.settings import ClickHouseSettings, InferenceSettings
 from radar.ml.labeling.cross_check import fetch_whole_post_labels, kappa
 from radar.ml.labeling.manual import MANUAL_LABELER
 from radar.ml.labeling.sampling import fetch_posts
 from radar.ml.labeling.testset import TESTSET_DIR, load_human_labels
+from radar.ml.training.classifier import Classifier, load_classifier, top_class
 from radar.ml.training.dataset import Example, post_text
-from radar.ml.training.train import load_model, write_card
+from radar.ml.training.train import write_card
 
 REPORT_FILE = "evaluation.md"
 # 看板樣本數低於此值時在輸出註明 F1 只供參考
 SMALL_BOARD_N = 50
+# 與 InferenceSettings.batch_size 的預設相同
+DEFAULT_BATCH_SIZE = 100
+BYTES_PER_MB = 1024 * 1024
+# NOTE: 測試替換這兩個來源，耗時與 RSS 才不依賴機器
+_clock: Callable[[], float] = time.perf_counter
 
 
 @dataclass(frozen=True)
@@ -44,12 +54,86 @@ class Agreement:
     cohen_kappa: float
 
 
-def evaluate_model(pipeline: Pipeline, examples: list[Example]) -> ClassificationReport:
+@dataclass(frozen=True)
+class RuntimeStats:
+    """CPU 推論耗時與記憶體（開發規格 7.27 步驟 4）；寫進 evaluation.md 供選 fp32／int8。"""
+
+    threads: int
+    batch_size: int
+    per_post_p50_ms: float
+    per_post_p95_ms: float
+    # 每批 batch_size 篇的耗時；進 shadow 門檻見 7.27「自行決定」
+    per_batch_p50_s: float
+    per_batch_max_s: float
+    peak_rss_mb: float
+    # 載入模型後、推論前的 RSS；None 表示沒量
+    load_rss_mb: float | None = None
+
+
+def _peak_rss_mb() -> float:
+    # NOTE: ru_maxrss 在 macOS 是 bytes、Linux 是 KB
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return peak / BYTES_PER_MB if sys.platform == "darwin" else peak / 1024
+
+
+def _percentile(sorted_values: list[float], q: float) -> float:
+    """nearest-rank 百分位；sorted_values 不可為空。"""
+    rank = max(1, math.ceil(q * len(sorted_values)))
+    return sorted_values[rank - 1]
+
+
+def measure_runtime(
+    classifier: Classifier, texts: list[str], *, batch_size: int, threads: int
+) -> RuntimeStats:
+    """先用第一批暖機（不計時），再逐批計時；每篇耗時 = 該批耗時 / 該批篇數。"""
+    if not texts:
+        raise ValueError("texts is empty")
+    if batch_size < 1:
+        raise ValueError("batch_size must be >= 1")
+    batches = [texts[i : i + batch_size] for i in range(0, len(texts), batch_size)]
+    classifier.predict_proba(batches[0])
+    batch_seconds: list[float] = []
+    per_post_ms: list[float] = []
+    for batch in batches:
+        start = _clock()
+        classifier.predict_proba(batch)
+        elapsed = _clock() - start
+        batch_seconds.append(elapsed)
+        per_post_ms.extend([elapsed / len(batch) * 1000] * len(batch))
+    batch_seconds.sort()
+    per_post_ms.sort()
+    return RuntimeStats(
+        threads=threads,
+        batch_size=batch_size,
+        per_post_p50_ms=_percentile(per_post_ms, 0.5),
+        per_post_p95_ms=_percentile(per_post_ms, 0.95),
+        per_batch_p50_s=_percentile(batch_seconds, 0.5),
+        per_batch_max_s=batch_seconds[-1],
+        peak_rss_mb=_peak_rss_mb(),
+    )
+
+
+def _predict_in_batches(
+    classifier: Classifier, texts: list[str], batch_size: int
+) -> list[dict[Polarity, float]]:
+    """依 batch_size 分批推論，記憶體峰值才對應 shadow 的 INFERENCE_BATCH_SIZE。"""
+    if batch_size < 1:
+        raise ValueError("batch_size must be >= 1")
+    scores: list[dict[Polarity, float]] = []
+    for i in range(0, len(texts), batch_size):
+        scores.extend(classifier.predict_proba(texts[i : i + batch_size]))
+    return scores
+
+
+def evaluate_model(
+    classifier: Classifier, examples: list[Example], *, batch_size: int = DEFAULT_BATCH_SIZE
+) -> ClassificationReport:
     if not examples:
         raise ValueError("testset is empty")
     labels = [p.value for p in Polarity]
     y_true = [e.polarity.value for e in examples]
-    y_pred = list(pipeline.predict([e.text for e in examples]))
+    predictions = _predict_in_batches(classifier, [e.text for e in examples], batch_size)
+    y_pred = [top_class(s).value for s in predictions]
     per_class = f1_score(y_true, y_pred, labels=labels, average=None, zero_division=0)
     matrix = confusion_matrix(y_true, y_pred, labels=labels)
     return ClassificationReport(
@@ -77,13 +161,16 @@ def llm_vs_human(labeler: str, llm: dict[str, Polarity], human: dict[str, Polari
 
 
 def evaluate_by_board(
-    pipeline: Pipeline, examples: list[Example]
+    classifier: Classifier, examples: list[Example], *, batch_size: int = DEFAULT_BATCH_SIZE
 ) -> dict[str, ClassificationReport]:
     """依 Example.board 分組各自評估；依看板名稱排序。"""
     groups: dict[str, list[Example]] = {}
     for e in examples:
         groups.setdefault(e.board, []).append(e)
-    return {board: evaluate_model(pipeline, groups[board]) for board in sorted(groups)}
+    return {
+        board: evaluate_model(classifier, groups[board], batch_size=batch_size)
+        for board in sorted(groups)
+    }
 
 
 def agreements_by_board(
@@ -109,6 +196,8 @@ def render_markdown(
     *,
     board_reports: dict[str, ClassificationReport],
     board_agreements: dict[str, list[Agreement]],
+    runtime: RuntimeStats | None = None,
+    label_version: str = "",
 ) -> str:
     """寫入 models/<model_version>/evaluation.md；手寫評估報告的數字來源（開發規格 7.11）。"""
     labels = list(Polarity)
@@ -117,7 +206,7 @@ def render_markdown(
         "",
         f"人工測試集 {model.n} 篇（整篇情緒）。",
         "",
-        "## Baseline",
+        "## 模型分數",
         "",
         "| 範圍 | 篇數 | macro-F1 | " + " | ".join(f"{p.value} F1" for p in labels) + " |",
         "|---" * (len(labels) + 3) + "|",
@@ -137,15 +226,41 @@ def render_markdown(
         "",
         "| 標註者 | 範圍 | 篇數 | 一致率 | Cohen's kappa |",
         "|---|---|---|---|---|",
-        *(_agreement_row(a, "整體") for a in agreements),
+        *(_agreement_row(a, "整體") for a in agreements if a.n > 0),
         *(
             _agreement_row(a, _board_name(board, a.n))
             for board, board_rows in board_agreements.items()
             for a in board_rows
+            if a.n > 0
         ),
         "",
+        *(
+            f"`{a.labeler}` 在人工測試集沒有 `{label_version}` 的標註。"
+            for a in agreements
+            if a.n == 0
+        ),
     ]
+    if runtime is not None:
+        lines += _runtime_section(runtime)
     return "\n".join(lines)
+
+
+def _runtime_section(r: RuntimeStats) -> list[str]:
+    return [
+        "## CPU 推論耗時與記憶體",
+        "",
+        f"INFERENCE_THREADS = {r.threads}，每批 {r.batch_size} 篇。",
+        "",
+        "| 指標 | 數值 |",
+        "|---|---|",
+        f"| 每篇 p50 | {r.per_post_p50_ms:.2f} ms |",
+        f"| 每篇 p95 | {r.per_post_p95_ms:.2f} ms |",
+        f"| 每批 p50 | {r.per_batch_p50_s:.3f} s |",
+        f"| 每批最大 | {r.per_batch_max_s:.3f} s |",
+        *([f"| 載入模型後 RSS | {r.load_rss_mb:.0f} MB |"] if r.load_rss_mb is not None else []),
+        f"| 記憶體峰值（RSS） | {r.peak_rss_mb:.0f} MB |",
+        "",
+    ]
 
 
 def _board_name(board: str, n: int) -> str:
@@ -167,7 +282,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="在人工測試集上評估（S3-06）")
     parser.add_argument("--model", type=Path, required=True)
     args = parser.parse_args()
-    pipeline, card = load_model(args.model)
+    settings = InferenceSettings(model_dir=args.model)
+    classifier, card = load_classifier(
+        args.model, threads=settings.threads, max_batch_tokens=settings.max_batch_tokens
+    )
+    load_rss_mb = _peak_rss_mb()
     human_labels = load_human_labels(TESTSET_DIR)
     human = {
         pid: next(s.polarity for s in lbl.sentiments if s.target is None)
@@ -192,12 +311,21 @@ def main() -> None:
         for pid, pol in human.items()
         if pid in posts
     ]
-    report = evaluate_model(pipeline, examples)
-    board_reports = evaluate_by_board(pipeline, examples)
+    report = evaluate_model(classifier, examples, batch_size=settings.batch_size)
+    board_reports = evaluate_by_board(classifier, examples, batch_size=settings.batch_size)
     agreements = [llm_vs_human(name, labels, human) for name, labels in llm_labels.items()]
     boards = {pid: post.board for pid, post in posts.items()}
     board_agreements = agreements_by_board(llm_labels, human, boards)
 
+    runtime = replace(
+        measure_runtime(
+            classifier,
+            [e.text for e in examples],
+            batch_size=settings.batch_size,
+            threads=settings.threads,
+        ),
+        load_rss_mb=load_rss_mb,
+    )
     card.metrics = {
         "testset_n": float(report.n),
         "macro_f1": report.macro_f1,
@@ -211,6 +339,8 @@ def main() -> None:
         agreements,
         board_reports=board_reports,
         board_agreements=board_agreements,
+        runtime=runtime,
+        label_version=card.label_version,
     )
     (args.model / REPORT_FILE).write_text(markdown)
     log.info(

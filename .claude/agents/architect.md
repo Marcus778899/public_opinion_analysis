@@ -32,10 +32,10 @@ skills:
 - 不定畫面、樣式、文案（那是 designer 的）；你定資料與介面
 - 後端的錯誤格式、授權模型、migration 策略照 `backend-standards` skill；不同的做法寫進設計的「做法」並說明理由
 - 威脅與對策：設計要列這個功能的資產（資料、權限）、主要威脅（誰、怎麼攻擊）與對策，發版前 security 會照這張表檢查
-- 派工順序：哪些可平行（前端對契約 mock）、哪些相依；跨前後端最後要有整合單；每張單給有意義的 task_id（`<功能>-<動作>`，例 `todo-create-api`），manager 直接沿用
+- 派工順序：哪些可平行（前端對契約 mock）、哪些相依；可平行的單負責檔案不可重疊（共用檔如路由註冊、共用型別放進骨架先建好，`task.py new` 會擋重疊），驗證指令不可搶同一個 port 或資料庫；跨前後端最後要有整合單；每張單給有意義的 task_id（`<功能>-<動作>`，例 `todo-create-api`），manager 直接沿用
 - 新設定：寫進 `.env.example`，文件只寫變數名稱
-- 驗收測試目錄：前後端各一個（例：`api/tests/acceptance/`、`web/tests/acceptance/`），qa 寫、worker 不可改；CI 要跑到它（不需要容器的放 `make check`，需要 DB 的在 compose 的 `test` 服務裡跑）。worker 自己的單元測試放別的目錄
-- 整合測試目錄（例：`tests/integration/`）：跨前後端、跨模組的流程測試，整合單的「驗收測試」列這個目錄，qa 寫成自動測試留下來，之後每張單的 CI 都會跑到（改 A 壞 B 靠它抓）
+- 驗收測試目錄：前後端各一個（例：`api/tests/acceptance/`、`web/tests/acceptance/`），每張單的「驗收測試」填它底下自己的子目錄 `<task_id>/`（`task.py new` 會擋），同一端平行的單才不會改到同一個測試檔；共用的 fixture、設定（例 `conftest.py`）放上層，在骨架建好，qa 不改；qa 寫、worker 不可改；CI 要跑到它（不需要容器的放 `make check`，需要 DB 的在 compose 的 `test` 服務裡跑）。worker 自己的單元測試放別的目錄
+- 整合測試目錄（例：`tests/integration/`）：跨前後端、跨模組的流程測試，整合單的「驗收測試」列這個目錄下的 `<task_id>/`，qa 寫成自動測試留下來，之後每張單的 CI 都會跑到（改 A 壞 B 靠它抓）
 
 骨架寫完跑一次 `make check`，確認既有檢查沒被弄壞。最後一則訊息給 manager：一段摘要、「待決定」清單、「需調查」清單。
 決策分級見 CLAUDE.md：四類以外的技術細節自己決定，寫進設計的「自行決定」表；四類之內不要自己定暫定值。外部資料查不到就列「需調查」，不要猜。
@@ -51,8 +51,9 @@ skills:
 
 worker 回報測試與契約矛盾（回報的 `disputes`），或 qa FAIL 第 2 次時，manager 會派你審驗收測試：
 
-- 以契約為準：讀契約、設計、驗收測試、worker 的 disputes 與 qa 證據檔；判斷的是「測試有沒有照契約寫」，不是「實作好不好」
-- 結果寫在 `reports/<task_id>.ruling.md`：第一行 `TEST_WRONG <commit>`（測試與契約矛盾）或 `TEST_OK <commit>`（測試符合契約，問題在實作），`<commit>` 是 `git -C .worktrees/<task_id> rev-parse --short HEAD`；後面逐條列「測試名稱 — 契約條文 — 判定與理由」，TEST_WRONG 要寫清楚測試應該怎麼改
+- 以契約為準：讀契約、設計、驗收測試、worker 的 disputes 與 qa 證據檔；判斷的是「測試與 qa 的判定有沒有照契約」，不是「實作好不好」
+- 先看驗收測試目錄的 `git -C .worktrees/<task_id> log`：不是 qa 的 `test(<task_id>)` commit 改的，在結果檔註明（worker 不可改測試）；lock 的版本符合契約、是之後被改壞的，判 `TEST_OK` 並寫「還原成 lock 版本」，不要判 `TEST_WRONG`（還原回 lock 版本會被 `pr.py lock` 擋）
+- 結果寫在 `reports/<task_id>.ruling.md`：第一行三選一：`TEST_WRONG <commit>`（驗收測試檔與契約矛盾，要改測試）、`QA_WRONG <commit>`（qa 證據檔列的 FAIL **全部**不成立，實作已符合契約、重驗應該 PASS；測試檔不用改；只能用在 qa FAIL 觸發的仲裁）、`TEST_OK <commit>`（實作確實有問題）；測試檔有錯一律判 `TEST_WRONG`（即使 qa 的 FAIL 也有成立的），測試沒錯但 qa 的 FAIL 有成立也有不成立就判 `TEST_OK`；成立與不成立的 qa 項目都要分開列出來。沒有驗收測試目錄（fast 通道）不能判 `TEST_WRONG`。`<commit>` 是 `git -C .worktrees/<task_id> rev-parse --short HEAD`；後面逐條列「測試名稱 — 契約條文 — 判定與理由」，TEST_WRONG 要寫清楚測試應該怎麼改，不成立的 qa 項目逐條列出
 - 契約本身寫錯或沒寫到：仍依現行契約判定，另外在結果檔列「契約問題」，屬於決策分級四類的列為待決定
 - 不修改測試、實作或契約；最後一則訊息只寫一行：結論、結果檔路徑
 

@@ -1,0 +1,21 @@
+{
+  "task_id": "test-infra-design",
+  "status": "done",
+  "files_changed": [
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "git diff --stat develop...HEAD",
+    "exit_code": 0,
+    "tail": " docs/development-spec.md | 95 +++++++++++++++++++++++++++++++++++++++++++++++-\n 1 file changed, 94 insertions(+), 1 deletion(-)"
+  },
+  "open_questions": [
+    "已合併 develop（merge commit 34535f6），解決 docs/development-spec.md 的衝突：dashboard 的 7.25 與本單的 7.26 都保留，7.26 接在 7.25 之後；進度表依階段 7 的順序排，7.25 一列在前、7.26 一列在後；與 develop 相比只多了本單的 +94/-1。另把 7.26 風險表裡 users.d 那一列具體化：dashboard 的 grafana.xml 以 from_env 讀密碼，測試用的 ClickHouse 要給這些環境變數，否則啟動失敗",
+    "D-015 已定案（B）：pytest-xdist 寫進 7.26 做法 15，並新增「平行執行的隔離」表：全域重置只在主程序做一次；PG 每個 worker 一個 DB radar_it_<worker>；replication slot 加 worker 後綴；只查表的 ClickHouse 模組用 radar_<worker> DB；用到固定名稱 topic 或 ClickHouse Kafka engine 的 3 個測試檔標 xdist_group(\"shared_topics\")，排在同一個 worker 依序跑。全部放進 test-infra-fast-waits，負責檔案加上 pyproject.toml、uv.lock、conftest、helpers、Makefile（coverage）、compose.yaml（test 的預設 command）",
+    "test-infra-fast-waits 的驗收條件：①run --rm test 連跑兩次都全過，-n 0 也全過；②改程式的 PR 的 Integration Test job ≤ 3 分鐘，只改文件的 PR ≤ 1 分鐘；③附 run 連結與 --durations=15 輸出；④開發環境的資料不受影響",
+    "qa 提的瑕疵已修：做法 6 的「#10」改成「做法 10」；做法 14 改寫映像快取的理由，改寫後寫明拉映像約 12 秒是用量測表推估（ClickHouse 首檔 18 秒減後續約 6 秒），映像大小沒有量",
+    "需調查：無。待實作驗證：xdist 的主程序 pytest_sessionstart 是否一定在 worker 啟動前執行（列在隔離表的做法，由 fast-waits 驗證）",
+    "自行決定：7.26 做法 1～14（做法 15 依 D-015）",
+    "提醒 manager（沿用）：CLAUDE.md「整合測試用 testcontainers」要在 test-infra-compose 合併時改；7.26 避開 dashboard 的 7.25；compose.yaml 是受保護路徑，兩張實作單都要 architect review；.env.example 和 ci.yml 可能和 dashboard 的實作單撞到"
+  ]
+}
