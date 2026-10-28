@@ -42,12 +42,13 @@
 |---|---|---|---|---|
 | bert-shadow-gate-ruling | architect | done | 0 | PR #200 |
 | shadow-restart-investigate | backend | done | 0 | reports/shadow-restart-investigate.json（只調查，已作廢 PR） |
+| bert-derive-max-len | backend | done | 0 | PR #203 |
 
 ## 卡住／待甲方決定
 
 - v0.8.0 待甲方驗收（README 階段 8 小節）
 - BERT 進 shadow 順序 1、2 已合併（#195、#197）；待甲方重跑 ckip fp32 evaluate（順序 3）
-- shadow 在容器內被 1.5g cgroup OOM kill（主機 evaluate 932 MB 低估）；依 7.27 回到順序 4：bert-derive-max-len
+- len256 衍生版已產生（models/bert-ckip-202610280849-len256）；在 shadow 容器（1.5g）內跑 evaluate 仍 exit 137；派容器內實測不同 INFERENCE_MAX_BATCH_TOKENS，再決定是否問甲方放寬 D-023
 
 ## 注意事項（踩過的坑）
 
