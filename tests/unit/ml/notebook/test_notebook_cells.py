@@ -84,3 +84,18 @@ def test_checkpoint_dirs_depend_on_base_and_max_len() -> None:
     for name in ("CKPT_DIR", "FINAL_DIR"):
         line = next(ln for ln in source.splitlines() if ln.startswith(f"{name} = "))
         assert "{RUN_NAME}" in line
+
+
+def test_first_cell_uninstalls_diffusers_after_installing_packages() -> None:
+    first = _cells()[0]
+    assert '"uninstall", "-y", "-q", "diffusers"' in first
+    assert first.index('"install"') < first.index('"uninstall"')
+    assert first.index('"uninstall"') < first.index("import torch")
+
+
+def test_notebook_has_no_outputs() -> None:
+    nb = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
+    for cell in nb["cells"]:
+        if cell["cell_type"] == "code":
+            assert cell["outputs"] == []
+            assert cell["execution_count"] is None
