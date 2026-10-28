@@ -54,6 +54,7 @@
 ## 卡住／待甲方決定
 
 - v0.8.0 待甲方驗收（README 階段 8 小節）
+- Colab notebook：ckip 訓練完成（val macro-F1 0.68），optimum-cli 匯出 ONNX 失敗，待甲方貼出實際錯誤（#178）
 
 ## 注意事項（踩過的坑）
 
