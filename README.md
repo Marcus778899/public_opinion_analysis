@@ -128,7 +128,7 @@
 | `stage-1`、`stage-2` | 2026-10 | 爬取入庫、CDC → ClickHouse |
 | v0.6.0 | 2026-10-20 | 階段 3～6：情緒標註與模型、推論、熱度警示、Telegram 互動 |
 | v0.7.0 | 2026-10-21 | 階段 7：Grafana Dashboard（情緒信心下限為下拉選單）；整合測試改用 compose test 服務並平行執行（#78）；bot 允許清單 fail closed（D-010） |
-| v0.8.0 | 2026-10-26 | 階段 8：BERT fine-tune notebook、ONNX 模型包匯入、shadow 並行推論、兩版比較；gitleaks 誤判根治（D-018、D-026） |
+| v0.8.0 | 2026-10-28 | 階段 8：BERT fine-tune notebook（已在 Colab 實跑 macbert、ckip）、ONNX 模型包匯入、shadow 並行推論、兩版比較；ONNX 推論依長度分小批（選填 `INFERENCE_MAX_BATCH_TOKENS`）；authlib 漏洞升級；gitleaks 誤判根治（D-018、D-026）。模型進 shadow 與切換由 #178 追蹤（D-027） |
 
 ## 授權
 
