@@ -1261,7 +1261,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | `model_card.json` | 沿用 `ModelCard`（`ml/training/train.py`），新增欄位皆有預設值，舊的 baseline 卡片照常讀取：`kind`（`sklearn`｜`onnx`，預設 `sklearn`）、`base_model`（含 revision）、`max_len`、`labels`（logits 順序）、`files`（檔名 → SHA-256）；`max_chars` 取自訓練資料的 meta 檔，推論與 hash 照舊（7.18） |
 
 - `model_version` = `bert-<BASE>-<UTC yyyymmddHHMM>`（`BASE` 為 `macbert`｜`ckip`），int8 版加 `-int8`，由 notebook 產生；`base_model` 記模型名稱與 revision
-- 匯出：notebook 用 `optimum-cli export onnx`（動態軸預設開）。`--dynamo` 與 opset 官方文件前後矛盾（調查 2），不靠文件判斷：匯出後在 notebook 內比對 PyTorch 與 ONNX 的 logits（驗證集抽樣，最大絕對差 < 1e-3）才打包，int8 版另比對驗證集 macro-F1
+- 匯出：notebook 用 `optimum-cli export onnx`（動態軸預設開）。`--dynamo` 與 opset 官方文件前後矛盾（調查 2），不靠文件判斷：匯出後在 notebook 內比對 PyTorch 與 ONNX 的 logits（驗證集抽樣，最大絕對差 < 1e-3）才打包。PyTorch 端在 CPU 以 fp32 重新載入存檔權重執行，與 ONNX 同裝置同權重來源；Colab T4 上 GPU PyTorch 對 CPU ONNX 曾差 2.17e-3，推測來自裝置間 fp32 運算差異（未實測，見 #178），所以另印出「GPU PyTorch 對 CPU PyTorch」的最大差供診斷（不擋），並印出預測類別不一致篇數（只印出，近似平手的樣本可能不一致）。匯出錯誤（權重或圖錯）的差異是 O(0.1～1)，1e-3 仍擋得住，int8 版另比對驗證集 macro-F1
 - tokenizer：`macbert` 用自己 repo（釘選 revision）的 tokenizer；`ckip` 照 ckiplab README 用 `google-bert/bert-base-chinese` 的 tokenizer，同樣釘 revision（值見調查末節第 4 項）。兩者都以 `BertTokenizerFast` 載入後 `save_pretrained` 產生模型包的 `tokenizer.json`。打包前以推論端的載入方式 `tokenizers.Tokenizer.from_file("tokenizer.json")` 重新編碼驗證集抽樣，`input_ids` 須與訓練用的 tokenizer 完全一致；上面的 PyTorch／ONNX logits 比對也用這組 ids，一併驗到推論端的 tokenizer
 - 不接受 pickle 類格式（`.bin`、`.pt`、joblib）：ONNX 與 JSON 載入時不執行程式。`load_model` 的 joblib 只用於本機訓練的 baseline（現狀）
 
@@ -1381,7 +1381,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | 進 shadow 的門檻 | 步驟 4 每批 `INFERENCE_BATCH_SIZE` 篇的耗時 < 30 秒（新文章每分鐘不到 10 篇，留足餘裕）；不到就重跑 notebook 改 `max_len` 256 |
 | Colab 12 小時上限 | 預估時間超過 10 小時就停；同一工作階段內從 epoch checkpoint 續跑 |
 | notebook 訓練設定 | 3 個 epoch、learning rate 2e-5、有效 batch 16（8 × 累積 2）、class weight balanced（與 baseline 同義）、fp16、warmup 6%、weight decay 0.01；驗證集為分層 10%、seed 42；依驗證集 macro-F1 選最佳 epoch |
-| Colab 套件版本 | `torch==2.7.1`、配對的 `torchvision==0.22.1`、`torchaudio==2.7.1`（Colab 預裝的版本與降級後的 torch 不配對，否則 `transformers` 載入失敗）、`transformers==4.53.3`、`optimum[onnxruntime]==1.27.0`（第一格釘版本）；**未在 sandbox 驗證**，甲方第一次執行時確認，不相容就調整第一格 |
+| Colab 套件版本 | `torch==2.7.1`、配對的 `torchvision==0.22.1`、`torchaudio==2.7.1`（Colab 預裝的版本與降級後的 torch 不配對，否則 `transformers` 載入失敗）、`transformers==4.53.3`、`optimum[onnxruntime]==1.27.0`（第一格釘版本）；第一格另移除 Colab 預裝的 diffusers（與釘版套件帶進來的 `huggingface_hub` 不相容，`optimum` 匯出時會 import）；**未在 sandbox 驗證**，甲方第一次執行時確認，不相容就調整第一格 |
 | int8 品質 | 兩個包都照常產生；int8 驗證集 macro-F1 比 fp32 低超過 0.03 時 notebook 印出警告，差值記進 int8 card 的 `params.val_f1_drop_vs_fp32`（量化用 arm64 設定、`per_channel=False`；驗證在 Colab 的 x86 CPU 上算，可能比 arm64 略低）；是否採用 int8 由步驟 4 的人工測試集評估決定 |
 
 **已定案**（細節見 `docs/decisions.md`）
