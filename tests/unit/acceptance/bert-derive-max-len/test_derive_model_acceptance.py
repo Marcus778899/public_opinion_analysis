@@ -50,6 +50,7 @@ def _assert_rejected(result: subprocess.CompletedProcess[str]) -> None:
     assert result.returncode != 0
     assert result.stderr.strip()
     assert "Traceback" not in result.stderr
+    assert "No module named" not in result.stderr
 
 
 def test_derive_creates_len_dir_with_copied_files_and_updated_card(tmp_path: Path) -> None:
