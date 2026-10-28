@@ -16,7 +16,7 @@ def params(func) -> list[str]:
 @pytest.mark.parametrize(
     ("func", "expected"),
     [
-        (classifier.load_classifier, ["model_dir", "threads"]),
+        (classifier.load_classifier, ["model_dir", "threads", "max_batch_tokens"]),
         (classifier.top_class, ["scores"]),
         (evaluate.measure_runtime, ["classifier", "texts", "batch_size", "threads"]),
         (import_model.import_model, ["zip_path", "models_dir"]),
@@ -29,6 +29,11 @@ def params(func) -> list[str]:
 )
 def test_cross_task_function_signatures(func, expected):
     assert params(func) == expected
+
+
+def test_max_batch_tokens_is_keyword_only_for_loading():
+    kind = inspect.signature(classifier.load_classifier).parameters["max_batch_tokens"].kind
+    assert kind is inspect.Parameter.KEYWORD_ONLY
 
 
 def test_threads_is_keyword_only_for_loading_and_runtime():

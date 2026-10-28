@@ -98,3 +98,20 @@ def test_onnx_scores_follow_keywords(tmp_path: Path):
     results = clf.predict_proba(["今天好棒", "爛糟慘"])
 
     assert [top_class(s) for s in results] == [Polarity.POSITIVE, Polarity.NEGATIVE]
+
+
+def test_onnx_chunks_group_by_length_within_token_limit(tmp_path: Path):
+    model_dir = build_model_dir(tmp_path / "bert-test-202610210000", max_len=32)
+    clf, _ = load_classifier(model_dir, threads=1, max_batch_tokens=64)
+    assert isinstance(clf, OnnxClassifier)
+
+    chunks = clf._chunks([0, 1, 2, 3, 4], [4, 4, 30, 32, 32])
+
+    assert chunks == [[0, 1], [2, 3], [4]]
+
+
+def test_onnx_max_batch_tokens_below_max_len_is_rejected(tmp_path: Path):
+    model_dir = build_model_dir(tmp_path / "bert-test-202610210000", max_len=32)
+
+    with pytest.raises(ValueError, match="max_batch_tokens"):
+        load_classifier(model_dir, threads=1, max_batch_tokens=31)

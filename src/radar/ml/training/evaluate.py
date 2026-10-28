@@ -283,7 +283,9 @@ def main() -> None:
     parser.add_argument("--model", type=Path, required=True)
     args = parser.parse_args()
     settings = InferenceSettings(model_dir=args.model)
-    classifier, card = load_classifier(args.model, threads=settings.threads)
+    classifier, card = load_classifier(
+        args.model, threads=settings.threads, max_batch_tokens=settings.max_batch_tokens
+    )
     load_rss_mb = _peak_rss_mb()
     human_labels = load_human_labels(TESTSET_DIR)
     human = {
