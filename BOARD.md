@@ -58,7 +58,7 @@
 ## 卡住／待甲方決定
 
 - v0.8.0 待甲方驗收（README 階段 8 小節）
-- Colab：macbert 完成（ONNX 差 1.55e-6、GPU/CPU 差 1.8e-3 證實推測；int8 掉 0.0755），待甲方跑 ckip（#178）
+- Colab 4 個模型包完成；待甲方 import_model＋evaluate（#178）
 
 ## 注意事項（踩過的坑）
 
