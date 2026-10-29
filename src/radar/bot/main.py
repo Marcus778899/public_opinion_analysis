@@ -180,7 +180,7 @@ def poll_commands(
             for update in updates:
                 try:
                     handle_update(update, telegram, settings, sessions, queries, now)
-                except _PG_TRANSIENT:
+                except (TransientError, *_PG_TRANSIENT):
                     raise
                 except Exception as e:  # noqa: BLE001
                     # 單筆壞資料不可卡住整個迴圈；offset 照常前進避免重複處理

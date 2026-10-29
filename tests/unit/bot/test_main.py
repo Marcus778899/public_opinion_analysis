@@ -433,3 +433,16 @@ def test_poll_commands_update_pg_down_keeps_offset_and_waits(monkeypatch):
 
     assert telegram.offsets[:2] == [None, None]
     assert len(waits) == 2
+
+
+@pytest.mark.parametrize("update_factory", [lambda: msg(1), lambda: button(1)])
+def test_poll_commands_reply_transient_error_retries_same_update(monkeypatch, update_factory):
+    monkeypatch.setattr(bot_main, "purge_muted", lambda *_a: 0)
+
+    telegram, waits = run(
+        [[update_factory()], [update_factory()]],
+        error=TransientError("429", retry_after_s=3),
+    )
+
+    assert telegram.offsets[:2] == [None, None]
+    assert waits[0] == 3
