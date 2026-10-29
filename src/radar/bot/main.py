@@ -8,6 +8,7 @@ import threading
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from radar.bot.callbacks import CallbackResult, handle_callback
@@ -43,6 +44,10 @@ from radar.common.settings import (
 GROUP_ID = "bot"
 # 「不再通知」的清理頻率；表很小，每小時一次就夠
 PURGE_INTERVAL = timedelta(hours=1)
+# 指令迴圈重試退避上限（秒）：恢復後最久這麼久就會再收指令
+POLL_BACKOFF_MAX_S = 30.0
+# PG 斷線算暫時性錯誤
+_PG_TRANSIENT = (OperationalError, InterfaceError)
 
 
 def is_allowed(chat_id: int | None, allowed: list[int]) -> bool:
@@ -159,22 +164,37 @@ def poll_commands(
     """getUpdates 迴圈：處理完才把 offset 往前推；每 PURGE_INTERVAL 清一次「不再通知」。"""
     wait = wait or stop.wait
     offset: int | None = None
-    delays: Iterator[float] = backoff_delays()
+    delays: Iterator[float] = backoff_delays(max_s=POLL_BACKOFF_MAX_S)
     last_purge: datetime | None = None
     while not stop.is_set():
         now = clock()
         if last_purge is None or now - last_purge >= PURGE_INTERVAL:
-            purge_muted(sessions, settings, now)
-            last_purge = now
+            try:
+                purge_muted(sessions, settings, now)
+                last_purge = now
+            except _PG_TRANSIENT as e:
+                # 不更新 last_purge，下一輪再試；指令照常處理
+                log.warning("purge_muted failed (PG unavailable), retry next round: %s", e)
         try:
             updates = telegram.get_updates(offset, settings.poll_timeout_s)
             for update in updates:
-                handle_update(update, telegram, settings, sessions, queries, now)
+                try:
+                    handle_update(update, telegram, settings, sessions, queries, now)
+                except _PG_TRANSIENT:
+                    raise
+                except Exception as e:  # noqa: BLE001
+                    # 單筆壞資料不可卡住整個迴圈；offset 照常前進避免重複處理
+                    log.warning("update %s skipped after unexpected error: %r", update.update_id, e)
                 offset = update.update_id + 1
-            delays = backoff_delays()
+            delays = backoff_delays(max_s=POLL_BACKOFF_MAX_S)
         except TransientError as e:
             delay = e.retry_after_s if e.retry_after_s is not None else next(delays)
             log.warning("telegram polling failed, retry in %.1fs: %s", delay, e)
+            wait(delay)
+        except _PG_TRANSIENT as e:
+            # offset 不前進：PG 恢復後重新處理這筆
+            delay = next(delays)
+            log.warning("PG unavailable while handling update, retry in %.1fs: %s", delay, e)
             wait(delay)
 
 
