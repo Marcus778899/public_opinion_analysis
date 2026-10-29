@@ -410,3 +410,76 @@ def test_check_shadow_model_with_card_returns_none(tmp_path) -> None:  # type: i
 
     (tmp_path / "model_card.json").write_text("{}")
     assert check_shadow_model(tmp_path) is None
+
+
+def _patch_main(monkeypatch: pytest.MonkeyPatch, tmp_path, role: str | None) -> list[str]:  # type: ignore[no-untyped-def]
+    import radar.ml.inference.main as m
+
+    calls: list[str] = []
+    for key in ("INFERENCE_ROLE", "INFERENCE_MODEL_DIR", "INFERENCE_THREADS"):
+        monkeypatch.delenv(key, raising=False)
+    if role:
+        monkeypatch.setenv("INFERENCE_ROLE", role)
+    monkeypatch.setattr(m, "setup_logging", lambda name: None)
+
+    def fake_load(*a, **k):  # type: ignore[no-untyped-def]
+        calls.append("load_classifier")
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(m, "load_classifier", fake_load)
+    return calls
+
+
+def test_main_shadow_model_dir_unset_exits_78_without_loading(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from radar.ml.inference.main import main
+
+    calls = _patch_main(monkeypatch, tmp_path, "shadow")
+    with pytest.raises(SystemExit) as info:
+        main()
+    assert info.value.code == 78
+    assert calls == []
+
+
+def test_main_shadow_dir_without_card_exits_78_without_loading(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from radar.ml.inference.main import main
+
+    calls = _patch_main(monkeypatch, tmp_path, "shadow")
+    monkeypatch.setenv("INFERENCE_MODEL_DIR", str(tmp_path))
+    with pytest.raises(SystemExit) as info:
+        main()
+    assert info.value.code == 78
+    assert calls == []
+
+
+def test_main_shadow_other_setting_invalid_raises_validation_error(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from pydantic import ValidationError
+
+    from radar.ml.inference.main import main
+
+    calls = _patch_main(monkeypatch, tmp_path, "shadow")
+    monkeypatch.setenv("INFERENCE_MODEL_DIR", str(tmp_path))
+    monkeypatch.setenv("INFERENCE_THREADS", "0")
+    with pytest.raises(ValidationError):
+        main()
+    assert calls == []
+
+
+def test_main_shadow_model_dir_missing_and_other_invalid_raises(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from pydantic import ValidationError
+
+    from radar.ml.inference.main import main
+
+    _patch_main(monkeypatch, tmp_path, "shadow")
+    monkeypatch.setenv("INFERENCE_THREADS", "0")
+    with pytest.raises(ValidationError):
+        main()
+
+
+def test_main_primary_dir_without_card_still_loads_classifier(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from radar.ml.inference.main import main
+
+    calls = _patch_main(monkeypatch, tmp_path, None)
+    monkeypatch.setenv("INFERENCE_MODEL_DIR", str(tmp_path))
+    with pytest.raises(RuntimeError, match="stop here"):
+        main()
+    assert calls == ["load_classifier"]

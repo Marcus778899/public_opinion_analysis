@@ -191,7 +191,7 @@ def check_shadow_model(model_dir: Path | None) -> str | None:
     return None
 
 
-def exit_missing_model(problem: str | None) -> NoReturn:
+def exit_missing_model(problem: str) -> NoReturn:
     log.error(problem)
     # NOTE: 結束碼 78（EX_CONFIG）；compose 不重啟，up --wait 會回報容器已結束
     sys.exit(78)
@@ -202,11 +202,16 @@ def main() -> None:
     setup_logging("inference")
     try:
         settings = InferenceSettings()
-    except ValidationError:
-        # NOTE: shadow 沒設模型資料夾要印設定提示，不是 pydantic 的 traceback（#215）
-        if os.environ.get("INFERENCE_ROLE") != InferenceRole.SHADOW.value:
+    except ValidationError as exc:
+        # NOTE: 只有 shadow 缺 model_dir 才印設定提示；其他設定錯誤照常丟出（#215）
+        only_model_dir_missing = all(
+            e["loc"] == ("model_dir",) and e["type"] == "missing" for e in exc.errors()
+        )
+        if os.environ.get("INFERENCE_ROLE") != InferenceRole.SHADOW.value or not (
+            only_model_dir_missing
+        ):
             raise
-        exit_missing_model(check_shadow_model(None))
+        exit_missing_model(check_shadow_model(None) or "")
     targets = ROLE_TARGETS[settings.role]
     if settings.role is InferenceRole.SHADOW:
         problem = check_shadow_model(settings.model_dir)
