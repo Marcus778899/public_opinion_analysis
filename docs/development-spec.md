@@ -1592,7 +1592,7 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 |---|---|---|---|---|---|
 | 1 | `crawl-backfill-depth` | backend | 可與 2 平行 | `src/radar/common/schemas.py`（`CrawlTask`）、`src/radar/common/enums.py`（`CrawlReason`）、`src/radar/common/tasks.py`（`make_list_task` 加 `since`、續抓任務）、`src/radar/collector/crawler.py`、`src/radar/collector/scheduler.py`、`tests/unit/collector/`、`tests/unit/common/`、`tests/integration/collector/`（Scheduler 查 PG）、`tests/e2e/fake_ptt.py`、`tests/e2e/test_pipeline.py`（假 PTT 放超過 3 頁新文章再重啟爬蟲，全部補到） | `tests/unit/acceptance/crawl-backfill-depth/`（翻頁規則、續抓任務內容、80 頁上限、略過積壓的列表任務、訊息驗證）；`tests/integration/acceptance/crawl-backfill-depth/`（真的 PG：`since` 取該看板最新文章、沒有文章時為 null） |
 | 2 | `pipeline-stall-alert` | backend | 可與 1 平行 | `src/radar/cdc/watchdog.py`、`src/radar/common/settings.py`（`CdcWatchdogSettings`）、`src/radar/common/clickhouse.py`（`timeout_s`）、`.env.example`（選填註解 `# CDC_WATCHDOG_STALE_ALERT_S=1800`）、`tests/unit/cdc/`、`tests/unit/common/`、`tests/integration/cdc/` | `tests/unit/acceptance/pipeline-stall-alert/`（門檻前後、只在狀態改變時記、查詢失敗沿用舊值、停擺時 heartbeat 送 `/fail`）；`tests/integration/acceptance/pipeline-stall-alert/`（真的 ClickHouse：讀到 `posts_history` 最新 `changed_at`） |
-| 3 | `kafka-upgrade-4-1-2` | backend | 待甲方核可；在 2 之後（同改 `.env.example`） | `.env.example`（`KAFKA_VERSION=4.1.2`） | 無；CI 以 `.env.example` 的版本跑全部整合測試即為驗證，開發環境由甲方改 `.env` 後照上方步驟逐台升級 |
+| 3 | `kafka-upgrade-4-1-2` | backend | 已定案（D-034），PR #229 完成；在 2 之後（同改 `.env.example`） | `.env.example`（`KAFKA_VERSION=4.1.2`） | 無；CI 以 `.env.example` 的版本跑全部整合測試即為驗證，開發環境由甲方改 `.env` 後照上方步驟逐台升級 |
 
 - 1、2 的 `tests/unit/common/` 不可平行改同一個檔：1 改 `test_schemas.py`、`test_tasks.py`，2 改 `test_clickhouse.py`、`test_settings.py`
 - 本節與設計文件（4.2、4.4、4.6、6.4）已先寫成目標行為；實作單不改文件，實作與文件不符時回報 manager
