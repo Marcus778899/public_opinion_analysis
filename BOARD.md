@@ -49,6 +49,7 @@
 | comment-year-infer | backend | qa-fail | 0 |  |
 | consumer-commit-wait | backend | done | 0 | PR #210 |
 | gossiping-gap-investigate | backend | done | 0 | reports/gossiping-gap-investigate.json（只調查，已作廢 PR） |
+| init-exit-code | backend | done | 0 | PR #213（只加回歸測試，255 無法重現） |
 
 ## 卡住／待甲方決定
 
