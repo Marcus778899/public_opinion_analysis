@@ -1539,6 +1539,7 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 | 要補到哪裡 | 該看板在 PG 最新一篇文章的時間（`posts.created_at` 最大值）減 10 分鐘，叫 `since`；爬蟲翻頁直到遇到不晚於 `since` 的文章 |
 | 誰查 PG | Scheduler：`make_list_task_sender` 每次送列表任務前查 `SELECT max(created_at) FROM posts WHERE board = :board`（Core `select()`，同 `DuePostDispatcher` 的 engine）。爬蟲照舊不碰 PG |
 | 查不到時 | 看板還沒有文章、或查詢失敗（記 WARNING）→ `since` 為 null，爬蟲只讀第一頁（手動觸發也是）；新看板不往回翻 |
+| 查詢逾時 | Scheduler 的 engine 設 `statement_timeout`（`SCHEDULER_STATEMENT_TIMEOUT_SEC`，預設 30 秒；`make_engine(statement_timeout_sec=)`，其他服務不設）。`QueryCanceled` 時記 WARNING、略過該看板這一輪（不送列表任務，下一輪照常），`DuePostDispatcher` 同樣略過該輪；其他錯誤照舊（#226） |
 | 訊息格式 | `crawl.tasks` 加 `since`、`backfill_depth`，`reason` 加 `backfill`（3.1）；只加欄位，`schema_version` 仍為 1 |
 | 翻頁規則（取代 `cache_was_empty`） | 讀完一頁後，以下全部成立才往前翻：`since` 不是 null；這頁最舊文章的時間（檔名 epoch，`created_at_from_filename`）晚於 `since`；有上一頁。不看頁面文章是否已在列表快取：補抓途中內頁暫時性錯誤、整批重試時，重讀的頁面已全進快取，若以此停止，續抓鏈會斷。正常運作時 `since`≈PG 最新－10 分鐘，第一頁通常就到 `since`，多翻一頁的內頁多數在快取不重抓 |
 | 每個任務最多幾頁 | 沿用 `max_list_pages=3`；3 頁約 63 次請求、約 3 分鐘，低於 `max.poll.interval.ms` 300 秒。3 頁後還要翻 → 送一個續抓任務，本任務結束 |
