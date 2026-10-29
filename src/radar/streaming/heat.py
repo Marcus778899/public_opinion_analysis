@@ -21,7 +21,6 @@ from quixstreams import Application, State
 from quixstreams.models.serializers import Deserializer, SerializationContext
 
 from radar.common.ids import split_post_id
-from radar.common.kafka import names
 from radar.common.kafka.consumer import DecodeError
 from radar.common.kafka.dlq import DlqPublisher
 from radar.common.kafka.producer import JsonProducer
@@ -423,7 +422,7 @@ def build_app(
         value_deserializer=CdcCommentDeserializer(registry),
         key_deserializer="bytes",
     )
-    alerts = app.topic(names.ALERTS, value_serializer="json", key_serializer="str")
+    alerts = app.topic(settings.output_topic, value_serializer="json", key_serializer="str")
     sdf = app.dataframe(comments)
     sdf = sdf.filter(counts_value)
     sdf = sdf.group_by(board_of, name="board")

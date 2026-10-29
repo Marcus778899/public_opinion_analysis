@@ -12,5 +12,7 @@ PREDICTIONS_SHADOW = "predictions.shadow"
 ALERTS = "alerts"
 # 熱度偵測的回放與人工暴增（開發規格 7.20）
 REPLAY_COMMENTS = "replay.cdc.comments"
+# 回放用的警示輸出；bot 不訂閱，不會推到 Telegram（開發規格 7.20）
+REPLAY_ALERTS = "replay.alerts"
 DLQ = "dlq"
 CDC_HEARTBEAT = "__debezium-heartbeat.cdc"

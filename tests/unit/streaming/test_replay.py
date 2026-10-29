@@ -12,6 +12,7 @@ from radar.streaming.replay import (
     replay,
     replay_delays,
     surge_events,
+    surge_tail_event,
     write_file,
 )
 
@@ -257,3 +258,15 @@ def test_read_file_bad_line_reports_line_number(tmp_path):
 
     with pytest.raises(ValueError, match=r"x.jsonl:2"):
         read_file(path)
+
+
+# --- surge_tail_event ---
+
+
+def test_surge_tail_event_is_one_minute_after_last_and_parses():
+    event = surge_tail_event(PID, 99, NOW)
+
+    parsed = CdcComment.model_validate(event)
+    assert parsed.floor == 99
+    assert event["__source_ts_ms"] == int((NOW + timedelta(minutes=1)).timestamp() * 1000)
+    assert event["__op"] == "c"

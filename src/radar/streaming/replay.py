@@ -3,7 +3,8 @@
 用法：
   python -m radar.streaming.replay record --since <ISO> --until <ISO> --out data/replay/x.jsonl
   python -m radar.streaming.replay replay --file data/replay/x.jsonl [--speed 10]
-  python -m radar.streaming.replay surge --post-id <post_id> --count 60 --minutes 3
+  python -m radar.streaming.replay surge --post-id <post_id> [--count N] --minutes 3
+（--count 預設 HEAT_POST_MIN_COUNT）
 """
 
 import argparse
@@ -25,7 +26,7 @@ from radar.common.ids import split_post_id
 from radar.common.kafka import names
 from radar.common.kafka.config import consumer_config, producer_config
 from radar.common.log import log, setup_logging
-from radar.common.settings import SchemaRegistrySettings, get_kafka_settings
+from radar.common.settings import HeatSettings, SchemaRegistrySettings, get_kafka_settings
 
 # NOTE: 回放與人工暴增一律送到 REPLAY_COMMENTS，不碰正式的 cdc.public.comments
 SCHEMA_SUBJECT = f"{names.CDC_COMMENTS}-value"
@@ -161,6 +162,23 @@ def surge_events(
     return events
 
 
+def surge_tail_event(post_id: str, floor: int, last: datetime) -> dict[str, object]:
+    """暴增結束後 1 分鐘的單筆事件；回放 topic 沒有後續事件，最後一分鐘才會被結算。"""
+    at = last + timedelta(minutes=1)
+    return {
+        "post_id": post_id,
+        "floor": floor,
+        "type": "push",
+        "user_id": "surge",
+        "content": "人工暴增收尾（S5-05）",
+        "commented_at": at.astimezone(UTC).isoformat().replace("+00:00", "Z"),
+        "__op": "c",
+        "__source_ts_ms": int(at.timestamp() * 1000),
+        "__source_lsn": 0,
+        "__deleted": "false",
+    }
+
+
 def surge(
     producer: Producer,
     registry: SchemaRegistryClient,
@@ -222,7 +240,7 @@ def main() -> None:
     rep.add_argument("--speed", type=float, default=1.0)
     sg = sub.add_parser("surge")
     sg.add_argument("--post-id", required=True)
-    sg.add_argument("--count", type=int, default=60)
+    sg.add_argument("--count", type=int, default=None)
     sg.add_argument("--minutes", type=int, default=3)
     sg.add_argument("--start-floor", type=int, default=10_000)
     args = parser.parse_args()
@@ -240,9 +258,10 @@ def main() -> None:
         n = replay(producer, read_file(args.file), args.speed, time.sleep)
     else:
         registry = SchemaRegistryClient.new_client({"url": SchemaRegistrySettings().url})
-        events = surge_events(
-            args.post_id, args.start_floor, args.count, args.minutes, datetime.now(UTC)
-        )
+        now = datetime.now(UTC)
+        count = args.count if args.count is not None else HeatSettings().post_min_count
+        events = surge_events(args.post_id, args.start_floor, count, args.minutes, now)
+        events.append(surge_tail_event(args.post_id, args.start_floor + count, now))
         n = surge(producer, registry, events)
     log.info("sent %d messages to %s", n, names.REPLAY_COMMENTS)
 
