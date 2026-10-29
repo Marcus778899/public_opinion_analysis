@@ -94,7 +94,7 @@
 | `make human-label` | 本機人工標註頁（http://127.0.0.1:8090） |
 | `make ch-migrate` | 套用 ClickHouse 尚未執行的 migration |
 | `make api` | 本機啟動管理 API（http://localhost:8000/docs） |
-| `make seed` | 透過 API 建立初始看板（冪等，需先 `make api`） |
+| `make seed` | 透過 API 建立初始看板（冪等；api 已在跑即可，本機 `make api` 或 docker 啟動的 api 都可以） |
 | `make up-app` | 基礎設施加上 api、scheduler、crawler ×3、ingest；`init` 自動建表、建 topic、ClickHouse migration、註冊 connector |
 | `make e2e-up` / `make e2e` | 啟動端到端環境（假 PTT、e2e 專用 volume）/ 執行端到端測試 |
 | `make e2e-down` | 停止端到端環境並刪除其資料 volume |
@@ -370,7 +370,7 @@
 | 階段 7 規劃：Dashboard 呈現方式（7.25） | ✅ 實作完成（2026-10-21）；呈現方式已定案：全用 Grafana（D-014）；`dashboard-grafana-infra`、`dashboard-views`、`dashboard-panels`、`dashboard-integration` 完成（畫面截圖由階段收尾的 uat 做） | — |
 | 階段 8 規劃：BERT 與 shadow 比較（7.27） | ✅ 文件完成（2026-10-21，`bert-design`）；D-020～D-024 定案；骨架 `bert-skeleton` | — |
 | 整合測試改用 compose `test` 服務、CI 加速（7.26，#78） | ✅ `test-infra-compose`、`test-infra-fast-waits` 完成（2026-10-20；本機 150 個全過、連跑兩次、`-n 0` 也過；CI Integration Test 1 分 56 秒） | — |
-| 停機後補抓深度、管線停擺偵測、Kafka coordinator 故障（7.28，#180） | ⬜ 文件完成（2026-10-29，`pipeline-gap-design`）；待實作 `crawl-backfill-depth`、`pipeline-stall-alert`，Kafka 升級待甲方決定。10-08～10-29 的停機缺口依 D-032 不補，記在 7.29 | — |
+| 停機後補抓深度、管線停擺偵測、Kafka coordinator 故障（7.28，#180） | ✅ 完成（2026-10-29）；`crawl-backfill-depth`（#225）、`pipeline-stall-alert`（#224）、`crawl-backfill-retry`（#230）已合併，Kafka 升 4.1.2 已定案（D-034），依 PR #229 完成。10-08～10-29 的停機缺口依 D-032 不補，記在 7.29 | — |
 | S5-06～S5-07 Telegram bot（7.21） | ✅ 完成；2026-10-16 在開發環境以真的 Telegram 實測指令與推送，修正 compose 漏掉 `app-env`。階段 5 驗收第 1 項（人工暴增約 10 秒收到通知）通過 | — |
 
 階段 1 拆成 5 個 PR；全部完成後依下方「驗收」逐項驗證，通過才把 `develop` 合進 `main` 並打 `stage-1` tag；階段 2 相同。階段 3 起的發版方式見 D-003。
@@ -948,6 +948,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - **模組**：`bot/main.py`，`python -m radar.bot.main`；兩個 thread：Telegram long polling 處理指令；`BatchConsumer`（group `bot`）消費 `alerts` 推送
 - **Telegram API**：用 `httpx2` 直接呼叫 Bot API（`getUpdates`、`sendMessage`），不加 SDK（同 7.11 的 LLM 呼叫）；`TELEGRAM_BOT_TOKEN`
   - 429 依 `retry_after` 等待後重試；5xx、連線錯誤為暫時性錯誤，退避重試；400 記 WARNING 略過；403（使用者封鎖 bot）刪掉該 chat 的訂閱；推送、指令回覆、按鈕回應三條路徑都一樣處理，處理完該 update 照常確認（不會讓 bot 結束或重啟後重送）
+  - 指令迴圈（`poll_commands`）的錯誤處理：Telegram 網路錯誤（`TransientError`）依 `retry_after` 或退避等待後重試，退避上限 `POLL_BACKOFF_MAX_S`（30 秒，模組常數）；PG 斷線（`OperationalError`、`InterfaceError`）也算暫時性錯誤，同樣退避重試，且 offset 不前進，PG 恢復後重新處理該筆；單筆 update 出現其他意外例外時記 WARNING 後跳過，offset 照常前進，不卡住迴圈；定期清除「不再通知」遇到 PG 斷線只記 WARNING，下一輪再試
 - **允許的 chat**（fail closed，D-010）：`TELEGRAM_ALLOWED_CHAT_IDS`（逗號分隔）；其他 chat 的指令與按鈕不回應
   - 清單沒設或空，且 `TELEGRAM_ALLOW_ALL` 不是 true：啟動失敗（`SystemExit`，訊息指出兩個變數），不連任何外部服務
   - `TELEGRAM_ALLOW_ALL=true` 且清單空：回應所有 chat，啟動 log 警告
@@ -1313,6 +1314,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 
 - 骨架（`bert-skeleton`）的驗收：`uv lock` 後在 arm64 主機以 `docker compose -f infra/docker-compose.yaml --env-file .env --profile app build init` 建 image（`radar-app` 只由 `init` 建置），再以 `--profile app run --rm --no-deps inference python -c "import onnxruntime, tokenizers"` 檢查（worktree 沒有 `.env`，`run` 用主目錄的 compose 檔，image 相同），容器內 `import onnxruntime, tokenizers` 成功；`tokenizers` 只有 `cp310-abi3` wheel、沒有 cp312 專屬的（調查 3），要實際裝過才算數。x86_64 由 CI 驗證
 - 測試用小模型：共用 helper `tests/helpers/onnx_model.py`（`bert-skeleton` 完整實作，不是骨架；之後各單只呼叫、不修改），提供以小字典建立的 `tokenizers` tokenizer、以 `onnx.helper` 產生的 fp32 與 int8 小 ONNX 模型（輸入輸出同「模型包格式」），以及打包成模型包 zip（含正確的 `model_card.files` 雜湊）；檔案寫在 pytest 的 `tmp_path`，`*.onnx` 不進 git。helper 自己的單元測試 `tests/unit/helpers/test_onnx_model_helper.py`。驗收測試的共用 fixture（`tests/unit/acceptance/conftest.py`、`tests/integration/acceptance/conftest.py`）：`tiny_model_dir`、`tiny_int8_model_dir`（import 後的資料夾）、`make_model_package`（產生模型包 zip）；單元測試的 `Classifier` 替身為 `tests/unit/ml/fakes.py` 的 `FakeClassifier`
+- 介面簽名：`import_model(zip_path, models_dir, *, sha256=None)`（`sha256` 為 keyword-only，預設 None 不比對）。改這類跨單的函式簽名時，同步修改 `tests/unit/ml/test_stage8_interfaces.py`，並把該檔列入該單的負責檔案
 - 單元測試（不需容器）：用上面的 helper；notebook 靜態檢查（沒有輸出、類別順序、card 欄位）；`import_model` 的雜湊不符、多餘檔名、路徑穿越、超過大小上限、目標已存在
 - 整合測試（compose `test` 服務）：shadow 推論只寫 `predictions.shadow`、`predictions_shadow` 有資料、`predictions` 沒有；重啟從 `predictions_shadow` 載入快取；`compare` 的查詢對預先寫入的資料算出預期值
 - notebook 本身不在 CI 執行（需要 GPU 與下載）；由甲方第一次執行時確認，ONNX 與 PyTorch 的 logits 差異在 notebook 內檢查
@@ -1577,9 +1579,12 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 #### C. Kafka 4.1.0 的 coordinator 故障
 
 - 就是 KAFKA-19888（症狀相同：時鐘跳動後 `CoordinatorRuntimeMetricsImpl` 記到負值，`__consumer_offsets` 寫入持續逾時、group 無限重新平衡；只有重啟該 broker 才恢復，coordinator 回到同一個 broker 後可能再發生）。修正版本 4.1.2（2026-03-17）、4.2.0；Docker Hub 有 `apache/kafka:4.1.2`
-- 升到 4.1.2：待甲方決定（D-034）
+- 升到 4.1.2：已定案（D-034）；開發環境於 2026-10-29 照下列步驟升完
 - 升級前的處理：找出 log 有 `Histogram recorded value cannot be negative` 的 broker，`docker compose -f infra/docker-compose.yaml --env-file .env restart kafka_N`
-- 升級步驟：`.env` 的 `KAFKA_VERSION` 改 4.1.2，一次一個 broker `docker compose … up -d kafka_N`，等 healthy 再換下一個（3 節點、`min.insync.replicas=2`，一次停一個不影響寫入）
+- 升級步驟：`.env` 的 `KAFKA_VERSION` 改 4.1.2，一次一個 broker，依序 kafka_1、kafka_2、kafka_3（3 節點、`min.insync.replicas=2`）
+  1. `docker compose -f infra/docker-compose.yaml --env-file .env up -d kafka_1`（kafka_2、kafka_3 同寫法；不可用 `down -v`，資料在具名 volume `kafka_N_data`）
+  2. `docker compose -f infra/docker-compose.yaml --env-file .env ps kafka_1` 顯示 `(healthy)`
+  3. `docker compose -f infra/docker-compose.yaml --env-file .env exec kafka_1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --describe --under-replicated-partitions` 沒有輸出，才換下一台；healthcheck 只確認 broker 有回應，副本還沒追上就停下一台，ISR 會低於 `min.insync.replicas`，`acks=all` 的寫入會失敗
 
 #### 派工順序
 
@@ -1587,7 +1592,7 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 |---|---|---|---|---|---|
 | 1 | `crawl-backfill-depth` | backend | 可與 2 平行 | `src/radar/common/schemas.py`（`CrawlTask`）、`src/radar/common/enums.py`（`CrawlReason`）、`src/radar/common/tasks.py`（`make_list_task` 加 `since`、續抓任務）、`src/radar/collector/crawler.py`、`src/radar/collector/scheduler.py`、`tests/unit/collector/`、`tests/unit/common/`、`tests/integration/collector/`（Scheduler 查 PG）、`tests/e2e/fake_ptt.py`、`tests/e2e/test_pipeline.py`（假 PTT 放超過 3 頁新文章再重啟爬蟲，全部補到） | `tests/unit/acceptance/crawl-backfill-depth/`（翻頁規則、續抓任務內容、80 頁上限、略過積壓的列表任務、訊息驗證）；`tests/integration/acceptance/crawl-backfill-depth/`（真的 PG：`since` 取該看板最新文章、沒有文章時為 null） |
 | 2 | `pipeline-stall-alert` | backend | 可與 1 平行 | `src/radar/cdc/watchdog.py`、`src/radar/common/settings.py`（`CdcWatchdogSettings`）、`src/radar/common/clickhouse.py`（`timeout_s`）、`.env.example`（選填註解 `# CDC_WATCHDOG_STALE_ALERT_S=1800`）、`tests/unit/cdc/`、`tests/unit/common/`、`tests/integration/cdc/` | `tests/unit/acceptance/pipeline-stall-alert/`（門檻前後、只在狀態改變時記、查詢失敗沿用舊值、停擺時 heartbeat 送 `/fail`）；`tests/integration/acceptance/pipeline-stall-alert/`（真的 ClickHouse：讀到 `posts_history` 最新 `changed_at`） |
-| 3 | `kafka-upgrade-4-1-2` | backend | 待甲方核可；在 2 之後（同改 `.env.example`） | `.env.example`（`KAFKA_VERSION=4.1.2`） | 無；CI 以 `.env.example` 的版本跑全部整合測試即為驗證，開發環境由甲方改 `.env` 後照上方步驟逐台升級 |
+| 3 | `kafka-upgrade-4-1-2` | backend | 已定案（D-034），PR #229 完成；在 2 之後（同改 `.env.example`） | `.env.example`（`KAFKA_VERSION=4.1.2`） | 無；CI 以 `.env.example` 的版本跑全部整合測試即為驗證，開發環境由甲方改 `.env` 後照上方步驟逐台升級 |
 
 - 1、2 的 `tests/unit/common/` 不可平行改同一個檔：1 改 `test_schemas.py`、`test_tasks.py`，2 改 `test_clickhouse.py`、`test_settings.py`
 - 本節與設計文件（4.2、4.4、4.6、6.4）已先寫成目標行為；實作單不改文件，實作與文件不符時回報 manager
@@ -1655,7 +1660,7 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 | 使用者把文章情緒誤讀成推文的風向 | 錯誤解讀輿情 | 介面寫「文章情緒」並附信心，低於門檻顯示「不確定」；推噓、爭議度分開呈現（設計文件 15.8）；推文層級情緒列入「後續階段」14 |
 | Telegram 選單的回呼資料超過 64 bytes 或格式改版 | 按鈕失效 | `callback_data` 帶版本號，解析失敗時重送主選單；單元測試檢查最長的 post_id 在上限內（7.23） |
 | 開發機休眠 | 長時間驗收中斷、數據缺一段 | 驗收期間 `caffeinate -dims` 並接電源、不闔上螢幕（闔上仍會強制睡眠）；`cdc-watchdog` 的外部 heartbeat 停止時會寄 email（7.16）；重啟後由列表任務補抓到 PG 最新文章為止，最多 80 頁（7.28 A）；10-08～10-29 的缺口見 7.29；上雲後（階段 9）不再依賴開發機 |
-| 容器都在跑，但管線靜默停擺（例：Kafka coordinator 故障，KAFKA-19888） | 沒有新資料、沒有任何警告（10-28 停 10 小時） | `cdc-watchdog` 檢查 ClickHouse 最新資料時間，超過 30 分鐘記 ERROR 並讓 heartbeat 送 `/fail`（7.28 B）；Kafka 升 4.1.2 待甲方決定（7.28 C） |
+| 容器都在跑，但管線靜默停擺（例：Kafka coordinator 故障，KAFKA-19888） | 沒有新資料、沒有任何警告（10-28 停 10 小時） | `cdc-watchdog` 檢查 ClickHouse 最新資料時間，超過 30 分鐘記 ERROR 並讓 heartbeat 送 `/fail`（7.28 B）；Kafka 已升 4.1.2（D-034，PR #229，7.28 C） |
 | 標註的系統性偏差 | 模型學到錯誤標準，資料越多越確定 | 固定主要標註者、改 prompt 修偏差、兩個不同家族的標註者交叉比對、人工測試集裁決（7.11） |
 | Grafana 的 ClickHouse plugin 與 Grafana、ClickHouse 版本不相容 | 升級後 dashboard 全部失效 | 版本釘完整 patch 號、plugin 在建置 image 時裝好（執行時不下載、不自動更新）；升級任一方都要過 `test_grafana_infra.py` 與 `tests/integration/dashboard/`（7.25） |
 | Python 端讀不了 CDC 的 Avro | S3-08 串流標註、階段 4 推論卡住 | 採用 `confluent-kafka[avro]`（fastavro + 官方 schema registry client，打 Apicurio 的 ccompat API）；已用 mock schema registry 與 S2-01 實測的欄位驗證解碼，待以實際 CDC 訊息確認 |

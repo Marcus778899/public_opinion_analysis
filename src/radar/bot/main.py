@@ -234,6 +234,14 @@ class _CommandThread(threading.Thread):
             self._on_exit()
 
 
+def filter_recipients(chat_ids: list[int], allowed: list[int]) -> list[int]:
+    """推送只送給允許清單內的 chat；訂閱資料不動（#121）。"""
+    kept = [c for c in chat_ids if is_allowed(c, allowed)]
+    if len(kept) < len(chat_ids):
+        log.info("push skipped %d subscriber(s) not in allowlist", len(chat_ids) - len(kept))
+    return kept
+
+
 def check_allowlist(settings: TelegramSettings) -> None:
     """允許清單 fail closed（D-010）：沒清單又沒明確開放就拒絕啟動。"""
     if settings.allowed_chat_ids:
@@ -267,7 +275,8 @@ def main() -> None:
 
     def recipients(alert: Alert) -> list[int]:
         with sessions() as session:
-            return PreferenceRepository(session).recipients(alert)
+            subscribed = PreferenceRepository(session).recipients(alert)
+        return filter_recipients(subscribed, settings.allowed_chat_ids)
 
     def render(alert: Alert) -> Screen:
         stats = safe_stats(queries.post_stats, stats_post_ids(alert))
