@@ -3,19 +3,21 @@
 import re
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urljoin, urlparse
 from uuid import UUID
 
 from selectolax.lexbor import LexborHTMLParser, LexborNode
 
 from radar.collector.parsers.ptt_time import (
+    PTT_TZ,
     created_at_from_filename,
     parse_article_time,
     parse_comment_time,
 )
 from radar.common.enums import CommentType
 from radar.common.ids import PTT_BASE_URL, make_post_id, split_post_id
+from radar.common.log import log
 from radar.common.schemas import RawComment, RawPost
 
 # 列表頁推文數的特殊值：「爆」代表 >= 100，「X1」～「X9」、「XX」代表噓多於推
@@ -98,7 +100,7 @@ def parse_post_page(
     created_at = parse_article_time(meta.get("時間", "")) or created_at_from_filename(
         split_post_id(post_id)[1]
     )
-    comments = _parse_comments(main, created_at)
+    comments = _parse_comments(main, created_at, crawled_at)
     counts = Counter(c.type for c in comments)
     return RawPost(
         task_id=task_id,
@@ -185,7 +187,29 @@ def _parse_content(main: LexborNode) -> str:
     return body.strip()
 
 
-def _parse_comments(main: LexborNode, post_created_at: datetime) -> list[RawComment]:
+# NOTE: 推文時間不應晚於爬取時間；容許 1 天吸收時鐘誤差與時區邊界
+_FUTURE_TOLERANCE = timedelta(days=1)
+
+
+def _bounded_comment_time(
+    when: datetime | None, post_created_at: datetime, crawled_at: datetime
+) -> datetime | None:
+    """補年份的結果晚於爬取時間時，退一年（文章跨很久才被推）；仍不合理回 None 並記 log。"""
+    if when is None or when <= crawled_at + _FUTURE_TOLERANCE:
+        return when
+    try:
+        earlier = when.astimezone(PTT_TZ).replace(year=when.astimezone(PTT_TZ).year - 1)
+    except ValueError:
+        earlier = None
+    if earlier is not None and post_created_at <= earlier <= crawled_at + _FUTURE_TOLERANCE:
+        return earlier.astimezone(UTC)
+    log.warning(f"comment time in the future, set to None: {when} (crawled {crawled_at})")
+    return None
+
+
+def _parse_comments(
+    main: LexborNode, post_created_at: datetime, crawled_at: datetime
+) -> list[RawComment]:
     """div.push 依出現順序編 floor（從 1 開始）；警告訊息等非推文的 div.push 略過。"""
     comments: list[RawComment] = []
     for node in main.css("div.push"):
@@ -204,7 +228,11 @@ def _parse_comments(main: LexborNode, post_created_at: datetime) -> list[RawComm
                 type=_COMMENT_TYPES[type_text],
                 user_id=user.text(strip=True) or None if user else None,
                 content=content.text().removeprefix(":").strip() if content else None,
-                commented_at=parse_comment_time(when.text(), post_created_at) if when else None,
+                commented_at=_bounded_comment_time(
+                    parse_comment_time(when.text(), post_created_at) if when else None,
+                    post_created_at,
+                    crawled_at,
+                ),
             )
         )
     return comments
