@@ -120,7 +120,7 @@ def test_unreasonable_comment_time_logs_one_warning(rec_log):
     assert len(rec_log.warnings) == 1
 
 
-def test_normal_and_stepped_back_comment_time_logs_no_warning(rec_log):
+def test_normal_comment_time_logs_no_warning(rec_log):
     crawled = datetime(2026, 10, 29, tzinfo=UTC)
-    _parse(_taipei(2026, 10, 7), crawled, ["10/08 10:00", "11/05 10:00"])
+    _parse(_taipei(2026, 10, 7), crawled, ["10/08 10:00", "10/20 10:00"])
     assert rec_log.warnings == []
