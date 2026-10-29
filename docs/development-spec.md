@@ -1576,7 +1576,7 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 #### C. Kafka 4.1.0 的 coordinator 故障
 
 - 就是 KAFKA-19888（症狀相同：時鐘跳動後 `CoordinatorRuntimeMetricsImpl` 記到負值，`__consumer_offsets` 寫入持續逾時、group 無限重新平衡；只有重啟該 broker 才恢復，coordinator 回到同一個 broker 後可能再發生）。修正版本 4.1.2（2026-03-17）、4.2.0；Docker Hub 有 `apache/kafka:4.1.2`
-- 升到 4.1.2：待甲方決定（D-待定，見下方「待決定」）
+- 升到 4.1.2：待甲方決定（D-034）
 - 升級前的處理：找出 log 有 `Histogram recorded value cannot be negative` 的 broker，`docker compose -f infra/docker-compose.yaml --env-file .env restart kafka_N`
 - 升級步驟：`.env` 的 `KAFKA_VERSION` 改 4.1.2，一次一個 broker `docker compose … up -d kafka_N`，等 healthy 再換下一個（3 節點、`min.insync.replicas=2`，一次停一個不影響寫入）
 
