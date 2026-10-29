@@ -132,11 +132,11 @@ def test_max_batch_tokens_is_keyword_only(model_dir):
         load_classifier(model_dir, 1, 64)  # type: ignore[misc]
 
 
-def test_settings_default_max_batch_tokens_is_4096(monkeypatch):
+def test_settings_default_max_batch_tokens_is_2048(monkeypatch):
     monkeypatch.delenv("INFERENCE_MAX_BATCH_TOKENS", raising=False)
     monkeypatch.setenv("INFERENCE_MODEL_DIR", "models/x")
 
-    assert InferenceSettings().max_batch_tokens == 4096
+    assert InferenceSettings().max_batch_tokens == 2048
 
 
 def test_settings_reads_max_batch_tokens_from_env(monkeypatch):

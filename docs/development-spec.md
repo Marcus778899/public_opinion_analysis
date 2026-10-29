@@ -1447,7 +1447,7 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 | 順序 | 做法 | 誰 | ckip fp32 每批耗時 | RSS | macro-F1 | 過了就 |
 |---|---|---|---|---|---|---|
 | 1 | `bert-evaluate-report-fix`：修報告標題與 0 篇列（見下），加「載入模型後 RSS」 | worker | — | — | — | 2 |
-| 2 | `bert-onnx-length-batching`：`OnnxClassifier.predict_proba` 依 token 數排序，切成「篇數 × 該小批最長 token 數 ≤ `INFERENCE_MAX_BATCH_TOKENS`」的小批（預設 4096 = 8 × 512），結果還原原順序 | worker | 約 0.37～0.42 倍 → 26～32 s | 中間張量約降到 1/12：fp32 估 1.0～1.4 GB，int8 估 0.6～0.9 GB | 不變（有 attention mask，只差浮點誤差） | 3 |
+| 2 | `bert-onnx-length-batching`：`OnnxClassifier.predict_proba` 依 token 數排序，切成「篇數 × 該小批最長 token 數 ≤ `INFERENCE_MAX_BATCH_TOKENS`」的小批（預設 2048 = 4 × 512；原訂 4096 在容器內 RSS 超過門檻，見順序 3 判定的容器實測），結果還原原順序 | worker | 約 0.37～0.42 倍 → 26～32 s | 中間張量約降到 1/12：fp32 估 1.0～1.4 GB，int8 估 0.6～0.9 GB | 不變（有 attention mask，只差浮點誤差） | 3 |
 | 3 | 甲方重跑步驟 4（ckip fp32），看三項：每批耗時（p50 < 30 s 且最大 ≤ 60 s，見「自行決定」）、macro-F1 與 0.612 差 ≤ 0.005、RSS ≤ 1.2 GB | 甲方 | ✅ 2026-10-28：p50 25.8／最大 30.5 s | ✅ 峰值 932 MB（載入後 689 MB） | ✅ 0.612（差 0） | 全過 → 6；任一項不過 → 4。**結果：全過，走 6**（判定見下） |
 | 4 | 推論端截到 `max_len` 256、不重訓：開單 `bert-derive-max-len`（見下表）產生衍生版本 `bert-ckip-202610280849-len256`，甲方再跑步驟 4 | worker → 甲方 | 約 0.29 倍 → 約 21 s | 中間張量再減約一半 | 需實測（約 24% 的文章超過 256 token 會被截）；比 2 低 ≤ 0.02 才用 | 6 |
 | 5 | 4 掉分超過 0.02：甲方以 `max_len` 256 重跑 Colab（`BASE = "ckip"`，訓練約 5 分鐘）、匯入、跑步驟 4；4、5 後 evaluate 的 RSS 仍超過 1.2 GB（進 shadow 的門檻）就不進 shadow，改問甲方是否放寬 D-023（含 1.2～1.5 GB 之間：餘裕不足，同樣不進） | 甲方 | 同 4 | 同 4 | 需實測 | 6 |
@@ -1472,11 +1472,19 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 - 評估只計時 3 批（人工測試集 300 篇），最大值是單一樣本，受當批長文比例影響；這次最大比 p50 多 18%，符合長度分小批後「長文多的批較慢」的預期，不是異常
 - 這是在看到結果前的設計沒寫清楚、看到結果後才補的定義，所以順序 6 的觀察以容器實測為準（下表），不以這次 evaluate 的數字放行到切換
 
+**容器內實測（shadow 容器 2 CPU、1.5g、THREADS=2，512 版，300 篇人工測試集，證據 `reports/shadow-memory-measure.json`）**
+
+| `INFERENCE_MAX_BATCH_TOKENS` | RSS 峰值 | 每批 p50／最大 | macro-F1 | 對 1.2 GB 門檻 |
+|---|---|---|---|---|
+| 4096 | 1268 MB | 27.8／34.5 s | 0.612 | 不過 |
+| 2048 | 997 MB | 23.8／30.5 s | 0.612 | 過（預設） |
+| 1024 | 951 MB | 21.5／28.7 s | 0.612 | 過 |
+
 **下一步：順序 6（啟動 shadow）**，不開 `bert-derive-max-len`（順序 4）。
 
 甲方步驟：
 
-1. `.env` 設 `INFERENCE_SHADOW_MODEL_VERSION=bert-ckip-202610280849`；`.env` 不設 `INFERENCE_MAX_BATCH_TOKENS`（用預設 4096，與 evaluate 相同）
+1. `.env` 設 `INFERENCE_SHADOW_MODEL_VERSION=bert-ckip-202610280849`；`.env` 不設 `INFERENCE_MAX_BATCH_TOKENS`（用預設 2048，與 evaluate 相同）
 2. 確認 `inference`（primary）照常運作後 `make up-shadow`，記下啟動時間（UTC，給 `compare --since`）
 3. 補資料期間依下表觀察，追上後每天看一次；任一項「不過就」成立時停掉 shadow（`docker compose -f infra/docker-compose.yaml --env-file .env --profile shadow stop inference-shadow`），把觀察結果交回、回到順序 4
 4. 運作至少 3 天且兩版重疊 ≥ 500 篇後回到派工順序 9 跑 `compare`
@@ -1494,7 +1502,7 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 | task_id | 負責檔案 | 驗收條件 | 相依 |
 |---|---|---|---|
 | `bert-evaluate-report-fix` | `ml/training/evaluate.py`、`tests/unit/ml/training/test_evaluate.py` | 分數節標題由寫死的「## Baseline」改為「## 模型分數」；「LLM 標註者 vs 人工」某標註者與人工重疊 0 篇時不列 0 篇的列，改一行說明「`<labeler>` 在人工測試集沒有 `<label_version>` 的標註」（有篇數的照舊）；CPU 節加一列「載入模型後 RSS」（`main()` 在 `load_classifier` 後讀 `_peak_rss_mb()`；`RuntimeStats` 只能新增有預設值的欄位，`measure_runtime` 簽名不變） | 無 |
-| `bert-onnx-length-batching` | `ml/training/classifier.py`、`common/settings.py`（`InferenceSettings.max_batch_tokens`，預設 4096、≥ `card.max_len`）、`.env.example`（選填 `# INFERENCE_MAX_BATCH_TOKENS=4096`）、`ml/inference/main.py`、`ml/training/evaluate.py` 的 `main()`（兩處都傳入設定值）、`tests/unit/ml/test_stage8_interfaces.py`（`load_classifier` 加 keyword-only `max_batch_tokens`）、`tests/unit/ml/training/test_classifier.py` | 打亂長短的輸入，分小批結果與整批一次推論的機率差 < 1e-5、順序與輸入一致；每次 `session.run` 的篇數 × 序列長度 ≤ 上限（單篇超過上限時單獨一批）；`tests/unit/acceptance/bert-classifier/` 照常通過 | 等 `bert-evaluate-report-fix`（同改 `evaluate.py`） |
+| `bert-onnx-length-batching` | `ml/training/classifier.py`、`common/settings.py`（`InferenceSettings.max_batch_tokens`，預設 2048（原 4096，由 `bert-batch-tokens-default` 改）、≥ `card.max_len`）、`.env.example`（選填 `# INFERENCE_MAX_BATCH_TOKENS=2048`）、`ml/inference/main.py`、`ml/training/evaluate.py` 的 `main()`（兩處都傳入設定值）、`tests/unit/ml/test_stage8_interfaces.py`（`load_classifier` 加 keyword-only `max_batch_tokens`）、`tests/unit/ml/training/test_classifier.py` | 打亂長短的輸入，分小批結果與整批一次推論的機率差 < 1e-5、順序與輸入一致；每次 `session.run` 的篇數 × 序列長度 ≤ 上限（單篇超過上限時單獨一批）；`tests/unit/acceptance/bert-classifier/` 照常通過 | 等 `bert-evaluate-report-fix`（同改 `evaluate.py`） |
 | `bert-derive-max-len`（只在順序 4 才開） | 新增 `ml/training/derive_model.py` 與單元測試 | `python -m radar.ml.training.derive_model --model models/<v> --max-len 256` 產生 `models/<v>-len256/`：`model.onnx`、`tokenizer.json` 原樣複製、雜湊不變，card 的 `model_version`、`max_len` 改新值、`params.derived_from` 記原版本；目標已存在、`max_len` 不小於原值、新 `model_version` 不符 `import_model` 的格式都拒絕 | 等 3 |
 
 「LLM 標註者 vs 人工」0 篇不是計算錯誤：`evaluate` 依 card 的 `label_version`（prompt-v6）查標註，而兩個 LLM 在人工測試集只標過 v5（升 v6 時決定不重標，見 6 章 S3-01 與 `docs/reports/model-evaluation.md` 的 baseline 節）；baseline 的 `evaluation.md` 一樣是 0 篇，報告改用 v5 手算。程式的錯只有標題寫死、0 篇照列（連帶每個看板都被標「樣本少」），由上表第一張單修。要補 v6 的數字需用 v6 重標測試集，不影響進 shadow，本節不處理。
@@ -1506,7 +1514,7 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 | 選 ckip fp32 為候選 | 照上方「自行決定」的 fp32／int8 與預訓練模型規則 |
 | 先改推論端、不先重訓 | 長度排序分小批不改預測、不用甲方跑 Colab；max_len 256 也先在推論端截，掉分才重訓 |
 | 小批以 token 數為上限 | 記憶體由「篇數 × 序列長度」決定，用 token 上限才能同時限住長文的峰值與讓短文多篇一起算 |
-| `INFERENCE_MAX_BATCH_TOKENS` 預設 4096 | 8 × 512 時 attention 每份約 0.1 GB；估計耗時（0.37 倍）不比 16 × 512（0.42 倍）差，記憶體減半 |
+| `INFERENCE_MAX_BATCH_TOKENS` 預設 2048 | 原訂 4096（8 × 512），容器內 512 版實測 RSS 1268 MB 超過 1.2 GB 門檻；2048（4 × 512）997 MB、每批 p50 23.8 s 全過，macro-F1 不變 |
 | RSS 門檻 1.2 GB | 1.5g 扣掉主機與容器量法的差異、hash 快取 |
 | 衍生版本另取 `model_version` | 不改原資料夾的 card：同一版本號不可對應兩種推論結果 |
 | 每批耗時門檻的統計量 | p50 < 30 s 管吞吐量、最大 ≤ 60 s 管 `max.poll.interval.ms`（理由見「順序 3 判定」） |

@@ -25,7 +25,7 @@ class Classifier(Protocol):
 
 
 PAD_TOKEN = "[PAD]"
-DEFAULT_MAX_BATCH_TOKENS = 4096
+DEFAULT_MAX_BATCH_TOKENS = 2048
 
 
 def top_class(scores: dict[Polarity, float]) -> Polarity:
