@@ -36,6 +36,8 @@
 | 2026-10-26 | D-027 | v0.8.0 先發版；模型驗收（Colab、shadow 3 天、compare）改由 #178 追蹤 |
 | 2026-10-27 | D-028 | 推文立場分類先不做，列 backlog #181（D-029、D-030 延到設計時） |
 | 2026-10-29 | D-031 | 多天驗收（階段 5 的 3 天、shadow 3 天＋compare、階段 9 的 7 天）往後擺，上雲後一起跑；階段 9 不等 3 天驗收 |
+| 2026-10-29 | D-032 | 停機漏抓的文章不補，開發規格記缺口日期 |
+| 2026-10-29 | D-033 | 未來時間推文所屬 55 篇重爬，依新規則覆寫 |
 
 ## 任務狀態
 
@@ -51,10 +53,11 @@
 | gossiping-gap-investigate | backend | done | 0 | reports/gossiping-gap-investigate.json（只調查，已作廢 PR） |
 | init-exit-code | backend | done | 0 | PR #213（只加回歸測試，255 無法重現） |
 | ml-cli-usability | backend | in-progress | 0 |  |
+| shadow-missing-model-exit | backend | in-progress | 0 |  |
 
 ## 卡住／待甲方決定
 
-- 待甲方決定 D-032（漏抓文章要不要補）、D-033（246 則未來時間推文要不要重爬修正）
+- （無）
 
 ## 注意事項（踩過的坑）
 
