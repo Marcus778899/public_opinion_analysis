@@ -59,6 +59,8 @@ class SchedulerSettings(BaseSettings):
     due_posts_limit: int = 500
     # 重爬間隔的倍率；只在端到端測試調小，正式環境維持 1
     time_scale: float = 1.0
+    # Scheduler 的 PG 查詢逾時（秒）；逾時只略過該輪，不讓派工卡住（7.28 A）
+    statement_timeout_sec: float = 30.0
 
 
 class CrawlerSettings(BaseSettings):
