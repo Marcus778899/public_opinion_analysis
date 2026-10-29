@@ -6,8 +6,8 @@
 
 ## 目標與範圍
 
-- 本輪：BERT 進 shadow：開發規格 7.27「評估結果與進 shadow 的調整」順序 3～6（候選 ckip fp32，#178）
-- 不做：上雲（階段 9）；backlog 其餘 issue
+- 本輪：階段 9 上雲：開發規格 S9-01～S9-06（arm64 image、Terraform VM、secrets 注入、PG 備份、磁碟監控、移除 Kafka UI）；驗收的 7 天運作與其他多天驗收上雲後一起跑（D-031）
+- 不做：階段 10 以後；Telegram Mini App；backlog 其餘 issue
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
