@@ -130,12 +130,12 @@ services:
     container_name: radar_init
     profiles: ["app"]
     env_file: ../.env
-    # 順序見開發規格 7.9：ClickHouse 表先建好，connector 才開始產生 CDC 事件
+    # 順序見開發規格 7.9：先檢查密碼不是範例值；ClickHouse 表先建好，connector 才開始產生 CDC 事件
     command:
       - sh
       - -c
       - >-
-        alembic upgrade head && python tools/create_topics.py
+        python tools/check_secrets.py && alembic upgrade head && python tools/create_topics.py
         && python tools/migrate_clickhouse.py && python tools/register_connector.py
     environment:
       <<: *app-env
