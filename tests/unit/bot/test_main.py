@@ -237,6 +237,12 @@ def test_handle_update_edit_bad_request_is_skipped():
     assert telegram.answered == [("cb1", None)]
 
 
+def test_handle_update_answer_bad_request_inside_callback_is_skipped():
+    telegram = handle(button(1), error=TelegramBadRequestError("query is too old"))
+
+    assert telegram.edited == []
+
+
 def test_handle_update_other_update_type_is_noop():
     telegram = handle(Update(update_id=1))
 

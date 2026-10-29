@@ -78,6 +78,7 @@ def on_callback(
     queries: Queries,
     min_score: float,
     now: datetime,
+    answer: Callable[[str | None], None] | None = None,
 ) -> CallbackResult:
     """parse_callback → callbacks.handle_callback；callback.chat_id 已由呼叫端檢查過。"""
     assert callback.chat_id is not None
@@ -90,6 +91,7 @@ def on_callback(
             queries,
             min_score=min_score,
             now=now,
+            answer=answer,
         )
 
 
@@ -118,9 +120,14 @@ def handle_update(
     callback = update.callback
     if callback is None or not is_allowed(callback.chat_id, allowed):
         return
-    result = on_callback(callback, sessions, queries, min_score, now)
+
+    def answer(toast: str | None) -> None:
+        telegram.answer_callback_query(callback.id, toast)
+
     try:
-        telegram.answer_callback_query(callback.id, result.toast)
+        result = on_callback(callback, sessions, queries, min_score, now, answer)
+        if not result.answered:
+            answer(result.toast)
         if result.screen is not None and callback.chat_id is not None and callback.message_id:
             telegram.edit_message_text(
                 callback.chat_id, callback.message_id, result.screen.text, result.screen.keyboard

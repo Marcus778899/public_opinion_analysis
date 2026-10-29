@@ -243,3 +243,53 @@ def test_toggle_board_alerts_back_on_says_enabled():
     run(Callback(Action.TOGGLE, "board"), prefs=prefs)
 
     assert run(Callback(Action.TOGGLE, "board"), prefs=prefs).toast == "已開啟看板警示"
+
+
+def test_sub_toggle_answers_after_write_before_requery_and_marks_answered():
+    order: list[str] = []
+
+    class Spy(FakeSubs):
+        def subscribe(self, chat_id, board):
+            order.append("write")
+            return super().subscribe(chat_id, board)
+
+        def boards_of(self, chat_id):
+            order.append("boards_of")
+            return super().boards_of(chat_id)
+
+    result = handle_callback(
+        Callback(Action.SUB, "Stock"),
+        CHAT,
+        Spy(),  # type: ignore[arg-type]
+        FakePrefs(),  # type: ignore[arg-type]
+        FakeQueries(),
+        min_score=0.6,
+        now=NOW,
+        answer=lambda toast: order.append(f"answer:{toast}"),
+    )
+
+    assert order == ["boards_of", "write", "answer:已訂閱 Stock", "boards_of"]
+    assert result.answered is True and result.toast == "已訂閱 Stock"
+
+
+def test_sub_toggle_without_answer_hook_leaves_answered_false():
+    result = run(Callback(Action.SUB, "Stock"), FakeSubs())
+
+    assert result.answered is False
+
+
+def test_sub_toggle_unknown_board_does_not_call_answer():
+    called: list[str | None] = []
+
+    handle_callback(
+        Callback(Action.SUB, "Off"),
+        CHAT,
+        FakeSubs(),  # type: ignore[arg-type]
+        FakePrefs(),  # type: ignore[arg-type]
+        FakeQueries(),
+        min_score=0.6,
+        now=NOW,
+        answer=called.append,
+    )
+
+    assert called == []

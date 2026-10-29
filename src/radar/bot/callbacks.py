@@ -1,5 +1,6 @@
 """按鈕回呼的處理（開發規格 7.23）：Callback → 要顯示的畫面與短提示；不呼叫 Telegram。"""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -29,6 +30,8 @@ class CallbackResult:
     # None 代表不改訊息（例如「這篇不再通知」只回提示）
     screen: Screen | None
     toast: str | None = None
+    # True 代表 toast 已經透過 answer 送出，呼叫端不要再 answer
+    answered: bool = False
 
 
 def handle_callback(
@@ -40,6 +43,7 @@ def handle_callback(
     *,
     min_score: float,
     now: datetime,
+    answer: Callable[[str | None], None] | None = None,
 ) -> CallbackResult:
     """callback 為 None（解析失敗、版本不符）時回傳 expired_screen。
 
@@ -56,7 +60,7 @@ def handle_callback(
         if action is Action.SUBS:
             return CallbackResult(_subscriptions(chat_id, subs))
         if action is Action.SUB:
-            return _toggle_subscription(arg, chat_id, subs)
+            return _toggle_subscription(arg, chat_id, subs, answer)
         if action is Action.BOARDS:
             return CallbackResult(board_picker_screen(subs.enabled_boards()))
         if action is Action.OVERVIEW:
@@ -89,8 +93,15 @@ def _subscriptions(chat_id: int, subs: SubscriptionRepository) -> Screen:
     return subscriptions_screen(subs.enabled_boards(), set(subs.boards_of(chat_id)))
 
 
-def _toggle_subscription(board: str, chat_id: int, subs: SubscriptionRepository) -> CallbackResult:
-    if board not in subs.enabled_boards():
+def _toggle_subscription(
+    board: str,
+    chat_id: int,
+    subs: SubscriptionRepository,
+    answer: Callable[[str | None], None] | None = None,
+) -> CallbackResult:
+    """寫入後先 answer（有給的話），再重查畫面；重查沿用已查過的看板清單。"""
+    enabled = subs.enabled_boards()
+    if board not in enabled:
         return CallbackResult(None, f"找不到看板 {board}")
     if board in subs.boards_of(chat_id):
         subs.unsubscribe(chat_id, board)
@@ -98,7 +109,10 @@ def _toggle_subscription(board: str, chat_id: int, subs: SubscriptionRepository)
     else:
         subs.subscribe(chat_id, board)
         toast = f"已訂閱 {board}"
-    return CallbackResult(_subscriptions(chat_id, subs), toast)
+    if answer is not None:
+        answer(toast)
+    screen = subscriptions_screen(enabled, set(subs.boards_of(chat_id)))
+    return CallbackResult(screen, toast, answered=answer is not None)
 
 
 def _settings(chat_id: int, prefs: PreferenceRepository, queries: Queries) -> Screen:
