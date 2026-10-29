@@ -12,13 +12,16 @@ from radar.common.log import log
 from radar.common.schemas import CrawlTask
 
 
-def make_list_task(board: str, reason: CrawlReason, now: datetime | None = None) -> CrawlTask:
+def make_list_task(
+    board: str, reason: CrawlReason, now: datetime | None = None, *, since: datetime | None = None
+) -> CrawlTask:
     return CrawlTask(
         task_id=uuid.uuid4(),
         type=CrawlTaskType.LIST,
         board=board,
         url=board_index_url(board),
         reason=reason,
+        since=since,
         created_at=now or datetime.now(UTC),
     )
 

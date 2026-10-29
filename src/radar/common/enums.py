@@ -18,6 +18,7 @@ class CrawlReason(StrEnum):
     SCHEDULE = "schedule"
     MANUAL = "manual"
     RECRAWL = "recrawl"
+    BACKFILL = "backfill"
 
 
 class Polarity(StrEnum):

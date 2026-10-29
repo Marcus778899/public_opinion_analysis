@@ -7,18 +7,19 @@ import functools
 import signal
 import threading
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx2
 from apscheduler.schedulers.base import BaseScheduler
 from apscheduler.schedulers.blocking import BlockingScheduler
 from confluent_kafka import KafkaException
 from pydantic import ValidationError
-from sqlalchemy import Connection, Engine, text
+from sqlalchemy import Connection, Engine, func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from radar.api.schemas import BoardOut
 from radar.collector.recrawl import DuePostDispatcher
+from radar.common.db.models import Post
 from radar.common.db.session import make_engine, make_session_factory
 from radar.common.enums import CrawlReason
 from radar.common.kafka import names
@@ -30,6 +31,7 @@ from radar.common.tasks import make_list_task, resolve_list_partition
 ADVISORY_LOCK_KEY = 7_200_001  # 任意固定值，只用於 Scheduler
 BOARD_JOB_PREFIX = "board:"
 BOARD_JOB_JITTER_SEC = 5
+SINCE_MARGIN = timedelta(minutes=10)  # 7.28 A：文章標頭時間只到分、作者可改，多留一點
 LOCK_HEARTBEAT_SEC = 30
 
 
@@ -97,16 +99,34 @@ def enabled_board_names(boards: list[BoardOut]) -> list[str]:
     return [b.board for b in boards if b.enabled]
 
 
+def latest_post_since(engine: Engine | None, board: str) -> datetime | None:
+    """該看板 PG 最新文章時間減 10 分鐘；沒有文章、沒有 engine 或查詢失敗回傳 None。"""
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            latest = conn.execute(
+                select(func.max(Post.created_at)).where(Post.board == board)
+            ).scalar_one()
+    except Exception as e:  # 查不到就退回只讀第一頁，不讓計時器停掉
+        log.warning("query latest post of %s failed, since=null: %r", board, e)
+        return None
+    return None if latest is None else latest - SINCE_MARGIN
+
+
 def make_list_task_sender(
-    producer: JsonProducer, enabled_boards: Callable[[], list[str]]
+    producer: JsonProducer,
+    enabled_boards: Callable[[], list[str]],
+    engine: Engine | None = None,
 ) -> Callable[[str], None]:
     """回傳 send_list_task(board)：送出 reason=schedule 的列表任務並 flush。
 
     enabled_boards 回傳最近一次同步到的啟用看板，用來決定 partition（開發規格 7.10）。
+    engine 用來查 since（7.28 A）。
     """
 
     def send_list_task(board: str) -> None:
-        task = make_list_task(board, CrawlReason.SCHEDULE)
+        task = make_list_task(board, CrawlReason.SCHEDULE, since=latest_post_since(engine, board))
         try:
             partition = resolve_list_partition(
                 board, enabled_boards(), lambda: producer.partition_count(names.CRAWL_TASKS)
@@ -217,7 +237,7 @@ def main() -> None:
     )
     # 最近一次同步到的啟用看板；sync_boards 更新、send_list_task 讀取，兩者都在 scheduler 執行緒
     enabled: list[str] = []
-    sender = make_list_task_sender(producer, lambda: enabled)
+    sender = make_list_task_sender(producer, lambda: enabled, engine)
     dispatcher = DuePostDispatcher(
         make_session_factory(engine),
         producer,

@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from radar.collector.crawler import CrawlHandler, deleted_post
+from radar.collector.crawler import CrawlHandler, _oldest_created_at, deleted_post
 from radar.collector.fetch_cache import RecentFetches
 from radar.collector.http import FetchError
 from radar.collector.list_cache import ListPushCache
@@ -23,13 +23,14 @@ POST_URL = "https://www.ptt.cc/bbs/Stock/M.1791345103.A.E41.html"
 POST_ID = "Stock.M.1791345103.A.E41"
 
 
-def list_task():
+def list_task(since=None):
     return CrawlTask(
         task_id=uuid.uuid4(),
         type=CrawlTaskType.LIST,
         board="Stock",
         url=INDEX_URL,
         reason=CrawlReason.SCHEDULE,
+        since=since,
         created_at=NOW,
     )
 
@@ -101,7 +102,7 @@ def test_list_task_follows_prev_page_when_all_entries_new(handler, fetcher, cach
     fetcher.pages[PREV_URL] = read_fixture("list_first_page.html")
     seed_cache(cache, "Stock.M.1.A.001", 1)  # 快取非空，但與第一頁都無關
 
-    handler([list_task()])
+    handler([list_task(since=datetime(2000, 1, 1, tzinfo=UTC))])
 
     assert fetcher.list_requests() == [INDEX_URL, PREV_URL]
     assert len(fetcher.post_requests()) == 3 + 20
@@ -126,6 +127,17 @@ def test_list_task_first_run_with_empty_cache_reads_one_page(handler, fetcher):
     handler([list_task()])
 
     assert fetcher.list_requests() == [INDEX_URL]
+
+
+def test_oldest_created_at_skips_entries_without_valid_filename():
+    entries = [
+        ListEntry("Stock.M.200.A.001", "u", "t", "a", 0, False),
+        ListEntry("Stock.M.100.A.002", "u", "t", "a", 0, False),
+        ListEntry("Stock.bad", "u", "t", "a", 0, False),
+    ]
+
+    assert _oldest_created_at(entries) == datetime.fromtimestamp(100, UTC)
+    assert _oldest_created_at([]) is None
 
 
 def test_list_task_parse_error_is_logged_and_skipped(handler, fetcher, producer):

@@ -4,7 +4,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from datetime import UTC, datetime
 from enum import StrEnum
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import ValidationError
 
@@ -20,7 +20,7 @@ from radar.collector.parsers.ptt import (
     post_id_from_url,
 )
 from radar.collector.parsers.ptt_time import created_at_from_filename
-from radar.common.enums import CrawlTaskType
+from radar.common.enums import CrawlReason, CrawlTaskType
 from radar.common.ids import split_post_id
 from radar.common.kafka import names
 from radar.common.kafka.consumer import BatchConsumer, TransientError
@@ -50,6 +50,7 @@ class CrawlHandler:
         *,
         clock: Callable[[], datetime],
         max_list_pages: int = 3,
+        max_backfill_pages: int = 80,
         max_transient_attempts: int = 5,
         max_list_fetch_failures: int = 3,
         max_tracked_list_failures: int = 1_000,
@@ -61,6 +62,9 @@ class CrawlHandler:
         self._recent = recent
         self._clock = clock
         self._max_list_pages = max_list_pages
+        self._max_backfill_pages = max_backfill_pages
+        # 各看板最近一次開始處理（非續抓）列表任務的時間；重啟後清空
+        self._last_list_start: dict[str, datetime] = {}
         self._max_transient_attempts = max_transient_attempts
         # 各網址連續暫時性失敗的次數；成功或略過後移除
         self._transient_attempts: dict[str, int] = {}
@@ -84,20 +88,30 @@ class CrawlHandler:
         self._transient_attempts.clear()
 
     def handle_list(self, task: CrawlTask) -> int:
-        """回傳抓了幾篇內頁。
+        """回傳抓了幾篇內頁。翻頁規則見開發規格 7.28 A。
 
-        第一頁的文章若全都沒見過、且快取不是空的，代表兩次輪詢間新文章超過一頁，
-        再往前翻，最多 max_list_pages 頁。
+        一個任務最多讀 max_list_pages 頁，還要翻就送續抓任務；一條鏈最多 max_backfill_pages 頁。
         """
-        cache_was_empty = len(self._cache) == 0
-        url: str | None = task.url
+        if task.reason is not CrawlReason.BACKFILL:
+            started = self._last_list_start.get(task.board)
+            if started is not None and task.created_at < started:
+                log.info("skip stale list task %s created at %s", task.board, task.created_at)
+                return 0
+            self._last_list_start[task.board] = self._clock()
+        depth = task.backfill_depth
+        read = 0
         fetched = 0
-        for _ in range(self._max_list_pages):
-            if url is None:
+        url: str | None = task.url
+        oldest: datetime | None = None
+        while url is not None:
+            if read >= self._max_list_pages or depth >= self._max_backfill_pages:
                 break
             page = self._fetch_list(url, task.board)
             if page is None:
+                url = None
                 break
+            depth += 1
+            read += 1
             linked = [e for e in page.entries if e.post_id]
             all_new = bool(linked) and all(e.post_id not in self._cache for e in linked)
             for entry in page.entries:
@@ -108,11 +122,44 @@ class CrawlHandler:
                         continue
                     self._list_fetch_failures.pop(entry.post_id or "", None)
                 self._cache.remember(entry)
-            if cache_was_empty or not all_new:
+            oldest = _oldest_created_at(linked)
+            if (
+                task.since is None
+                or not all_new
+                or oldest is None
+                or oldest <= task.since
+                or page.prev_page_url is None
+            ):
+                url = None
                 break
             url = page.prev_page_url
+        if url is not None and task.since is not None:
+            self._continue_or_stop(task, url, depth, oldest)
         log.info("list %s done, fetched %d posts", task.board, fetched)
         return fetched
+
+    def _continue_or_stop(
+        self, task: CrawlTask, url: str, depth: int, oldest: datetime | None
+    ) -> None:
+        if depth >= self._max_backfill_pages:
+            log.error(
+                "backfill of %s stopped at %d pages; since=%s, oldest post read=%s",
+                task.board,
+                depth,
+                task.since,
+                oldest,
+            )
+            return
+        follow_up = task.model_copy(
+            update={
+                "task_id": uuid4(),
+                "url": url,
+                "reason": CrawlReason.BACKFILL,
+                "backfill_depth": depth,
+                "created_at": self._clock(),
+            }
+        )
+        self._producer.send(names.CRAWL_TASKS, follow_up.kafka_key(), follow_up)
 
     def handle_post(self, task: CrawlTask) -> bool:
         """派發後已抓過（積壓時的重複派發）就略過、回傳 False；否則抓取並回傳 True。"""
@@ -207,6 +254,16 @@ class CrawlHandler:
             # 不重試，避免卡住 partition；下一輪輪詢會再試
             log.warning("skip list %s: %s", url, e)
             return None
+
+
+def _oldest_created_at(entries: list[ListEntry]) -> datetime | None:
+    times = []
+    for e in entries:
+        try:
+            times.append(created_at_from_filename(split_post_id(e.post_id or "")[1]))
+        except ValueError:
+            continue
+    return min(times) if times else None
 
 
 def deleted_post(
