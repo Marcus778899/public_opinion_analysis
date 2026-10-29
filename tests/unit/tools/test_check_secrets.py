@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -60,3 +61,33 @@ def test_main_bad_env_exits_nonzero_without_printing_value(
     assert exc.value.code == 1
     out = capsys.readouterr()
     assert "change-me" not in out.out + out.err
+
+
+def _load_without_radar(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    monkeypatch.setitem(sys.modules, "radar.common.log", None)
+    return _load()
+
+
+def test_fallback_logging_without_radar_good_env_returns_normally(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mod = _load_without_radar(monkeypatch)
+    for k, v in GOOD.items():
+        monkeypatch.setenv(k, v)
+    mod.main()
+    assert "all 4 secrets are set" in capsys.readouterr().err
+
+
+def test_fallback_logging_without_radar_bad_env_exits_with_names_only(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mod = _load_without_radar(monkeypatch)
+    for k, v in GOOD.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("GRAFANA_ADMIN_PASSWORD", "change-me")
+    with pytest.raises(SystemExit) as exc:
+        mod.main()
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "GRAFANA_ADMIN_PASSWORD" in err
+    assert "change-me" not in err
