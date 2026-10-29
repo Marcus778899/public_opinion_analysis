@@ -13,6 +13,12 @@
 - 提出：architect（todo-design）
 -->
 
+### D-034 Kafka 要不要從 4.1.0 升到 4.1.2
+- 背景：10-28 管線停 10 小時是 Kafka 4.1.0 的已知 bug（KAFKA-19888，coordinator 卡住），4.1.2 已修；只重啟 broker 之後還會再發生（開發規格 7.28 C）
+- 選項：A. 升級到 4.1.2（`.env` 的 `KAFKA_VERSION` 改值、三台 broker 逐台重啟，不刪資料；CI 用新版跑整合測試驗證）／B. 維持 4.1.0，靠新的停擺告警發現後人工重啟 kafka
+- 建議：A，同一小版本的修正版，風險低，根除這次停擺的原因
+- 提出：architect（pipeline-gap-design）
+
 ## 已決定
 
 <!-- 範本：

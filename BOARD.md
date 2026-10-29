@@ -54,11 +54,12 @@
 | init-exit-code | backend | done | 0 | PR #213（只加回歸測試，255 無法重現） |
 | ml-cli-usability | backend | done | 0 | PR #216 |
 | shadow-missing-model-exit | backend | done | 0 | PR #217 |
-| comment-time-recrawl | backend | in-progress | 0 |  |
+| comment-time-recrawl | backend | done | 0 | PR #220（剩 10 則在 3 篇已刪文，接受） |
+| pipeline-gap-design | architect | review | 0 |  |
 
 ## 卡住／待甲方決定
 
-- （無）
+- 待甲方：核可 pipeline-gap-design（補抓深度、停擺告警）＋決定 D-034（Kafka 4.1.0→4.1.2）
 
 ## 注意事項（踩過的坑）
 
