@@ -33,7 +33,13 @@ class Migration:
 
 
 class ClickHouseClient:
-    def __init__(self, settings: ClickHouseSettings, transport: httpx2.BaseTransport | None = None):
+    def __init__(
+        self,
+        settings: ClickHouseSettings,
+        transport: httpx2.BaseTransport | None = None,
+        *,
+        timeout_s: float = 30.0,
+    ):
         self._client = httpx2.Client(
             base_url=settings.url,
             headers={
@@ -42,7 +48,7 @@ class ClickHouseClient:
             },
             params={"database": settings.db},
             transport=transport,
-            timeout=30.0,
+            timeout=timeout_s,
         )
 
     def execute(self, sql: str, params: dict[str, str] | None = None) -> str:
