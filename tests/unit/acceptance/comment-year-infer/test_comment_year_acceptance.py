@@ -91,3 +91,36 @@ def test_one_bad_comment_does_not_affect_others():
     assert ts[0] == datetime(2026, 10, 8, 2, 0, tzinfo=UTC)
     assert ts[1] is None
     assert ts[2] is None or ts[2] <= crawled + TOLERANCE
+
+
+class _RecLog:
+    def __init__(self) -> None:
+        self.warnings: list[str] = []
+
+    def warning(self, msg: str, *args: object, **kwargs: object) -> None:
+        self.warnings.append(msg)
+
+    def __getattr__(self, name: str):
+        return lambda *a, **k: None
+
+
+@pytest.fixture
+def rec_log(monkeypatch):
+    from radar.collector.parsers import ptt as ptt_module
+
+    rec = _RecLog()
+    monkeypatch.setattr(ptt_module, "log", rec)
+    return rec
+
+
+def test_unreasonable_comment_time_logs_one_warning(rec_log):
+    crawled = datetime(2026, 10, 29, tzinfo=UTC)
+    (t,) = _parse(_taipei(2026, 10, 28), crawled, ["11/05 10:00"])
+    assert t is None
+    assert len(rec_log.warnings) == 1
+
+
+def test_normal_and_stepped_back_comment_time_logs_no_warning(rec_log):
+    crawled = datetime(2026, 10, 29, tzinfo=UTC)
+    _parse(_taipei(2026, 10, 7), crawled, ["10/08 10:00", "11/05 10:00"])
+    assert rec_log.warnings == []
