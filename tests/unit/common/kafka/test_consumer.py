@@ -485,3 +485,22 @@ def test_commit_exception_without_error_arg_raises():
 
     with pytest.raises(KafkaException):
         consumer.run()
+
+
+def test_sleep_interruptible_stopped_before_start_does_not_sleep():
+    sleeps: list[float] = []
+    clock = FakeClock()
+    c = BatchConsumer(
+        SETTINGS,
+        group_id="g",
+        topics=["in"],
+        model=Event,
+        handler=lambda items: None,
+        dlq=None,  # type: ignore[arg-type]
+        consumer=FakeConsumer(batches=[], clock=clock),
+        clock=clock,
+        sleep=sleeps.append,
+    )
+    c.stop()
+    c._sleep_interruptible(5.0)
+    assert sleeps == []
