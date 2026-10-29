@@ -72,6 +72,7 @@
 | grafana-readonly-verify | backend | done | 0 | PR #249（權限已夠緊；收斂權限另開 #251） |
 | subscription-toggle-latency | backend | done | 0 | PR #250（Telegram 往返待部署後從 bot log 實測） |
 | secret-placeholder-guard | backend | done | 0 | PR #253 |
+| infra-secret-guard | backend | done | 0 | PR #256 |
 
 ## 卡住／待甲方決定
 
