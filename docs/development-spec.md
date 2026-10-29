@@ -1540,11 +1540,11 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 | 誰查 PG | Scheduler：`make_list_task_sender` 每次送列表任務前查 `SELECT max(created_at) FROM posts WHERE board = :board`（Core `select()`，同 `DuePostDispatcher` 的 engine）。爬蟲照舊不碰 PG |
 | 查不到時 | 看板還沒有文章、或查詢失敗（記 WARNING）→ `since` 為 null，爬蟲只讀第一頁（手動觸發也是）；新看板不往回翻 |
 | 訊息格式 | `crawl.tasks` 加 `since`、`backfill_depth`，`reason` 加 `backfill`（3.1）；只加欄位，`schema_version` 仍為 1 |
-| 翻頁規則（取代 `cache_was_empty`） | 讀完一頁後，以下全部成立才往前翻：`since` 不是 null；這頁有連結的文章都不在列表快取（`all_new`）；這頁最舊文章的時間（檔名 epoch，`created_at_from_filename`）晚於 `since`；有上一頁 |
+| 翻頁規則（取代 `cache_was_empty`） | 讀完一頁後，以下全部成立才往前翻：`since` 不是 null；這頁最舊文章的時間（檔名 epoch，`created_at_from_filename`）晚於 `since`；有上一頁。不看頁面文章是否已在列表快取：補抓途中內頁暫時性錯誤、整批重試時，重讀的頁面已全進快取，若以此停止，續抓鏈會斷。正常運作時 `since`≈PG 最新－10 分鐘，第一頁通常就到 `since`，多翻一頁的內頁多數在快取不重抓 |
 | 每個任務最多幾頁 | 沿用 `max_list_pages=3`；3 頁約 63 次請求、約 3 分鐘，低於 `max.poll.interval.ms` 300 秒。3 頁後還要翻 → 送一個續抓任務，本任務結束 |
 | 續抓任務 | `type=list`、`reason=backfill`、`url`=下一個要讀的上一頁、`since` 照抄、`backfill_depth`=這條鏈已讀的頁數；key=`board`，不指定 partition（key hash）。和其他輸出一樣在 commit 前 flush |
 | 硬上限 | 一條鏈最多 80 頁（`CrawlHandler` 建構參數 `max_backfill_pages`，同 7.17 不開環境變數）。到上限記 ERROR（看板、`since`、停下那頁最舊文章的時間），更早的缺口不補 |
-| 略過積壓的列表任務 | 爬蟲記住每個看板最近一次開始處理列表任務的時間；`reason` 不是 `backfill` 且 `created_at` 早於這個時間的列表任務直接略過（同 7.12 的道理：之後已經讀過更新的列表）。重啟後清空 |
+| 略過積壓的列表任務 | 爬蟲記住每個看板最近一次開始處理列表任務的時間；`reason` 不是 `backfill` 且 `created_at` 早於這個時間的列表任務直接略過（同 7.12 的道理：之後已經讀過更新的列表）。續抓任務不更新這個時間：一條鏈最多約 2.4 小時，若更新，這段期間排入的一般任務都會被略過，看板最新文章要等補抓結束才抓。任務處理完（沒有拋例外）才寫入，值仍是開始處理的時間，整批重試時同一個任務不會被略過。重啟後清空 |
 | 正常運作時 | 快取接得上，第一頁就有見過的文章，只讀一頁，與現在相同；兩次輪詢間新文章超過一頁時，翻到 `since` 為止（約前一分鐘），取代原本固定最多 3 頁 |
 | 部署 | 舊爬蟲忽略新欄位（`extra="ignore"`），新舊 Scheduler 都相容；`reason=backfill` 只有新爬蟲會送，舊爬蟲收到會驗證失敗進 DLQ，3 個爬蟲要一起更新（`make up-app` 同一個 image） |
 
