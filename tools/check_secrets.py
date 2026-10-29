@@ -1,13 +1,32 @@
 """擋住還是範例值的密碼（#119）：只讀環境變數，只印變數名稱，不印值。
 
-`init` 最先跑；失敗時非 0 結束，後面的建表、建 topic、migration 不會執行。
+`init` 與 compose 的 `secret-check` 都先跑；失敗時非 0 結束，後面的服務不會啟動。
 """
 
 import os
 import sys
 from collections.abc import Mapping
 
-from radar.common.log import log, setup_logging
+try:
+    from radar.common.log import log, setup_logging
+except ImportError:  # NOTE: secret-check 跑在純 python image，沒有 radar 套件與 loggerhelper
+    from types import SimpleNamespace
+
+    def _emit(level: str):
+        def write(msg: str, *args: object) -> None:
+            sys.stderr.write(f"{level} check-secrets {msg % args}\n")
+
+        return write
+
+    log = SimpleNamespace(
+        info=_emit("INFO"),
+        error=_emit("ERROR"),
+        catch=lambda **_: lambda fn: fn,
+    )
+
+    def setup_logging(service: str) -> None:
+        return None
+
 
 SECRET_NAMES = (
     "POSTGRES_PASSWORD",

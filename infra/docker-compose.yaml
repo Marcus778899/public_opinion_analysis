@@ -99,13 +99,31 @@ services:
       - kafka_3_data:/var/lib/kafka/data
     healthcheck: *kafka-healthcheck
 
+  # ======= 密碼檢查（預設 profile）=======
+  # 一次性：密碼是空值或範例值就失敗，postgres、clickhouse、grafana 因此不啟動（#254）
+  # NOTE: 用純 python image 掛載腳本，不依賴 radar-app 的建置；腳本只用標準函式庫
+  secret-check:
+    image: python:3.12-slim
+    container_name: radar_secret_check
+    command: ["python", "/check/check_secrets.py"]
+    # NOTE: 只傳四個密碼，不帶整份 .env（含其他 token）；腳本不需網路
+    network_mode: none
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      CLICKHOUSE_GRAFANA_PASSWORD: ${CLICKHOUSE_GRAFANA_PASSWORD:-}
+      GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+    volumes:
+      - ../tools/check_secrets.py:/check/check_secrets.py:ro
+    restart: "no"
+
   # ======= PostgreSQL =======
   postgres:
     image: postgres:${POSTGRES_VERSION}
     container_name: radar_postgres
     restart: unless-stopped
     ports:
-      - "${POSTGRES_PORT}:5432"
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -119,6 +137,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    depends_on:
+      secret-check:
+        condition: service_completed_successfully
 
   # ======= 自寫服務（profile: app）=======
   # 一次性：建表與建立 topic（皆冪等），完成後其他服務才啟動
@@ -371,6 +392,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    depends_on:
+      secret-check:
+        condition: service_completed_successfully
 
   # ======= Grafana（開發規格 7.25）=======
   # 只綁本機並需登入；datasource 與 dashboard 以 provisioning 載入，plugin 在建置 image 時已裝好
@@ -402,6 +426,8 @@ services:
       timeout: 5s
       retries: 20
     depends_on:
+      secret-check:
+        condition: service_completed_successfully
       clickhouse:
         condition: service_healthy
 
