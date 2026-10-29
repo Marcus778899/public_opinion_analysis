@@ -61,6 +61,7 @@
 | pipeline-stall-alert | backend | done | 0 | PR #224 |
 | crawl-backfill-retry | backend | done | 0 | PR #230 |
 | kafka-version-upgrade | backend | done | 0 | PR #229；開發環境三台已逐台升 4.1.2，無 under-replicated |
+| import-model-hardening | backend | done | 0 | PR #233 |
 
 ## 卡住／待甲方決定
 
