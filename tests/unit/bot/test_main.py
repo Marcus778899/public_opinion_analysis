@@ -390,3 +390,59 @@ def test_poll_commands_forbidden_reply_advances_offset(forgotten):
     telegram, _ = run([[msg(1)]], error=TelegramForbiddenError(5))
 
     assert (telegram.offsets, forgotten) == ([None, 2], [5])
+
+
+# --- poll_commands 韌性（#79、#67） ---
+
+
+def _pg_down():
+    from sqlalchemy.exc import OperationalError
+
+    return OperationalError("SELECT 1", {}, Exception("refused"))
+
+
+def test_poll_commands_purge_pg_down_retries_next_round_and_handles_commands(monkeypatch):
+    calls: list[int] = []
+
+    def purge(_s, _set, _now):
+        calls.append(1)
+        if len(calls) == 1:
+            raise _pg_down()
+        return 0
+
+    monkeypatch.setattr(bot_main, "purge_muted", purge)
+
+    telegram, _ = run([[msg(1)], []])
+
+    assert len(calls) == 2
+    assert [c for c, _ in telegram.sent] == [5]
+
+
+def test_poll_commands_unexpected_update_error_skips_and_advances_offset(monkeypatch):
+    monkeypatch.setattr(bot_main, "purge_muted", lambda *_a: 0)
+
+    telegram, _ = run([[msg(1)], []], error=RuntimeError("bug"))
+
+    assert telegram.offsets[:2] == [None, 2]
+
+
+def test_poll_commands_update_pg_down_keeps_offset_and_waits(monkeypatch):
+    monkeypatch.setattr(bot_main, "purge_muted", lambda *_a: 0)
+
+    telegram, waits = run([[msg(1)], [msg(1)]], error=_pg_down())
+
+    assert telegram.offsets[:2] == [None, None]
+    assert len(waits) == 2
+
+
+@pytest.mark.parametrize("update_factory", [lambda: msg(1), lambda: button(1)])
+def test_poll_commands_reply_transient_error_retries_same_update(monkeypatch, update_factory):
+    monkeypatch.setattr(bot_main, "purge_muted", lambda *_a: 0)
+
+    telegram, waits = run(
+        [[update_factory()], [update_factory()]],
+        error=TransientError("429", retry_after_s=3),
+    )
+
+    assert telegram.offsets[:2] == [None, None]
+    assert waits[0] == 3
