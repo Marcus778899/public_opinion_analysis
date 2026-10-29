@@ -76,6 +76,7 @@
 
 - 發版前在 e2e 環境跑 test_crawler_restart_backfills_more_than_three_pages（#225 未實跑）
 - 發版前：部署後從 bot log（callback step=…ms=）取 #82 各步驟實測，甲方親手點「我的訂閱」確認 2 秒內
+- 甲方：跑 check_env.py（.env.example 四個密碼改 CHANGE_ME）；決定 #254 是否排進 v0.8.1
 
 ## 注意事項（踩過的坑）
 
