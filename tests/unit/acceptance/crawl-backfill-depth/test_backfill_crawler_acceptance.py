@@ -210,15 +210,17 @@ def test_oldest_post_equal_to_since_stops(fetcher, producer):
     assert fetcher.list_requests() == [index, page_url(4)]
 
 
-def test_stops_when_page_contains_a_cached_post(fetcher, producer):
+def test_cached_post_on_page_does_not_stop_paging_when_since_set(fetcher, producer):
+    # crawl-backfill-retry：since 不是 null 時，快取文章不單獨使翻頁停止
     index = make_board(fetcher, 5)
     cache = ListPushCache()
     seed(cache, post_id(4, 1))
 
     build(fetcher, producer, cache)([task(index, since=at(1) - timedelta(days=1))])
 
-    assert fetcher.list_requests() == [index, page_url(4)]
-    assert follow_ups(producer) == []
+    assert fetcher.list_requests() == [index, page_url(4), page_url(3)]
+    [cont] = follow_ups(producer)
+    assert cont.url == page_url(2)
 
 
 def test_normal_poll_with_seen_first_page_reads_one_page(fetcher, producer):
@@ -226,7 +228,8 @@ def test_normal_poll_with_seen_first_page_reads_one_page(fetcher, producer):
     cache = ListPushCache()
     seed(cache, post_id(5, 0))
 
-    build(fetcher, producer, cache)([task(index, since=at(1) - timedelta(days=1))])
+    # 正常運作時 since 約等於 PG 最新文章：第一頁最舊文章已不晚於 since，讀一頁就停
+    build(fetcher, producer, cache)([task(index, since=at(5))])
 
     assert fetcher.list_requests() == [index]
     assert follow_ups(producer) == []
@@ -319,7 +322,7 @@ def test_continuation_stops_when_since_reached_mid_chain(fetcher, producer):
     assert fetcher.list_requests()[-1] == page_url(4)
 
 
-def test_backfill_task_stops_on_cached_post(fetcher, producer):
+def test_backfill_task_continues_past_cached_post(fetcher, producer):
     make_board(fetcher, 8)
     cache = ListPushCache()
     seed(cache, post_id(4, 1))
@@ -329,8 +332,10 @@ def test_backfill_task_stops_on_cached_post(fetcher, producer):
         [task(page_url(5), since=since, reason=CrawlReason.BACKFILL, depth=3)]
     )
 
-    assert fetcher.list_requests() == [page_url(5), page_url(4)]
-    assert follow_ups(producer) == []
+    assert fetcher.list_requests() == [page_url(5), page_url(4), page_url(3)]
+    [cont] = follow_ups(producer)
+    assert cont.url == page_url(2)
+    assert cont.backfill_depth == 6
 
 
 # ---------- 上限 ----------

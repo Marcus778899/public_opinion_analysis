@@ -93,11 +93,11 @@ class CrawlHandler:
         一個任務最多讀 max_list_pages 頁，還要翻就送續抓任務；一條鏈最多 max_backfill_pages 頁。
         """
         if task.reason is not CrawlReason.BACKFILL:
-            started = self._last_list_start.get(task.board)
-            if started is not None and task.created_at < started:
+            last = self._last_list_start.get(task.board)
+            if last is not None and task.created_at < last:
                 log.info("skip stale list task %s created at %s", task.board, task.created_at)
                 return 0
-            self._last_list_start[task.board] = self._clock()
+        started = self._clock()
         depth = task.backfill_depth
         read = 0
         fetched = 0
@@ -113,7 +113,6 @@ class CrawlHandler:
             depth += 1
             read += 1
             linked = [e for e in page.entries if e.post_id]
-            all_new = bool(linked) and all(e.post_id not in self._cache for e in linked)
             for entry in page.entries:
                 if entry.url and self._cache.should_fetch(entry):
                     outcome = self.fetch_and_publish_post(entry.url, task.board, task.task_id)
@@ -125,7 +124,6 @@ class CrawlHandler:
             oldest = _oldest_created_at(linked)
             if (
                 task.since is None
-                or not all_new
                 or oldest is None
                 or oldest <= task.since
                 or page.prev_page_url is None
@@ -135,6 +133,9 @@ class CrawlHandler:
             url = page.prev_page_url
         if url is not None and task.since is not None:
             self._continue_or_stop(task, url, depth, oldest)
+        # 處理完才記，值是開始時間；整批重試時同一任務不會被當積壓略過
+        if task.reason is not CrawlReason.BACKFILL:
+            self._last_list_start[task.board] = started
         log.info("list %s done, fetched %d posts", task.board, fetched)
         return fetched
 
