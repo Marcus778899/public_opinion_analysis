@@ -38,6 +38,7 @@
 | 2026-10-29 | D-031 | 多天驗收（階段 5 的 3 天、shadow 3 天＋compare、階段 9 的 7 天）往後擺，上雲後一起跑；階段 9 不等 3 天驗收 |
 | 2026-10-29 | D-032 | 停機漏抓的文章不補，開發規格記缺口日期 |
 | 2026-10-29 | D-033 | 未來時間推文所屬 55 篇重爬，依新規則覆寫 |
+| 2026-10-29 | D-034 | Kafka 升到 4.1.2（修 KAFKA-19888 停擺） |
 
 ## 任務狀態
 
@@ -54,7 +55,8 @@
 | init-exit-code | backend | done | 0 | PR #213（只加回歸測試，255 無法重現） |
 | ml-cli-usability | backend | done | 0 | PR #216 |
 | shadow-missing-model-exit | backend | done | 0 | PR #217 |
-| comment-time-recrawl | backend | in-progress | 0 |  |
+| comment-time-recrawl | backend | done | 0 | PR #220（剩 10 則在 3 篇已刪文，接受） |
+| pipeline-gap-design | architect | review | 0 |  |
 
 ## 卡住／待甲方決定
 
