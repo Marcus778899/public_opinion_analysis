@@ -59,11 +59,12 @@
 | pipeline-gap-design | architect | done | 0 | PR #221 |
 | crawl-backfill-depth | backend | done | 0 | PR #225（e2e 新測試待發版前在 e2e 環境實跑） |
 | pipeline-stall-alert | backend | done | 0 | PR #224 |
+| crawl-backfill-retry | backend | done | 0 | PR #230 |
+| kafka-version-upgrade | backend | done | 0 | PR #229；開發環境三台已逐台升 4.1.2，無 under-replicated |
 
 ## 卡住／待甲方決定
 
 - 發版前在 e2e 環境跑 test_crawler_restart_backfills_more_than_three_pages（#225 未實跑）
-- 待甲方：.env 改 KAFKA_VERSION=4.1.2 並跑 check_env.py（D-034，之後逐台升級）
 
 ## 注意事項（踩過的坑）
 
