@@ -106,7 +106,13 @@ services:
     image: python:3.12-slim
     container_name: radar_secret_check
     command: ["python", "/check/check_secrets.py"]
-    env_file: ../.env
+    # NOTE: 只傳四個密碼，不帶整份 .env（含其他 token）；腳本不需網路
+    network_mode: none
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      CLICKHOUSE_GRAFANA_PASSWORD: ${CLICKHOUSE_GRAFANA_PASSWORD:-}
+      GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
     volumes:
       - ../tools/check_secrets.py:/check/check_secrets.py:ro
     restart: "no"
