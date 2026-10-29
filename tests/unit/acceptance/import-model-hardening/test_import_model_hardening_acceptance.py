@@ -185,10 +185,17 @@ def test_encrypted_member_raises_package_error(make_model_package: MakePackage, 
     bad = tmp_path / "enc.zip"
     with zipfile.ZipFile(bad, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for name, data in members.items():
-            info = zipfile.ZipInfo(name)
-            info.compress_type = zipfile.ZIP_DEFLATED
-            info.flag_bits |= 0x1
-            zf.writestr(info, data)
+            zf.writestr(name, data)
+    # writestr 會重設 flag_bits，所以寫完再改位元組：中央目錄旗標在 +8，本地檔頭在 +6
+    raw = bytearray(bad.read_bytes())
+    for sig, off in ((b"PK\x01\x02", 8), (b"PK\x03\x04", 6)):
+        pos = raw.find(sig)
+        while pos != -1:
+            raw[pos + off] |= 0x1
+            pos = raw.find(sig, pos + 4)
+    bad.write_bytes(raw)
+    with zipfile.ZipFile(bad) as zf:
+        assert all(i.flag_bits & 0x1 for i in zf.infolist())
     models = tmp_path / "models"
     with pytest.raises(ModelPackageError):
         import_model(bad, models)

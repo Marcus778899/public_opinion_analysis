@@ -19,7 +19,7 @@ def params(func) -> list[str]:
         (classifier.load_classifier, ["model_dir", "threads", "max_batch_tokens"]),
         (classifier.top_class, ["scores"]),
         (evaluate.measure_runtime, ["classifier", "texts", "batch_size", "threads"]),
-        (import_model.import_model, ["zip_path", "models_dir"]),
+        (import_model.import_model, ["zip_path", "models_dir", "sha256"]),
         (compare.fetch_pairs, ["client", "a", "b", "since", "labeler", "label_version"]),
         (compare.fetch_latency, ["client", "model_version", "role", "since"]),
         (compare.agreement, ["pairs"]),
@@ -34,6 +34,12 @@ def test_cross_task_function_signatures(func, expected):
 def test_max_batch_tokens_is_keyword_only_for_loading():
     kind = inspect.signature(classifier.load_classifier).parameters["max_batch_tokens"].kind
     assert kind is inspect.Parameter.KEYWORD_ONLY
+
+
+def test_import_model_sha256_is_keyword_only_and_defaults_to_none():
+    param = inspect.signature(import_model.import_model).parameters["sha256"]
+    assert param.kind is inspect.Parameter.KEYWORD_ONLY
+    assert param.default is None
 
 
 def test_threads_is_keyword_only_for_loading_and_runtime():
