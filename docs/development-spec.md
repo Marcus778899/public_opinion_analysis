@@ -720,7 +720,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - **ClickHouse schema**：`infra/clickhouse/migrations/NNNN_<name>.sql`，`tools/migrate_clickhouse.py` 透過 HTTP 介面依序執行，已執行的版本記在 ClickHouse 的 `schema_migrations` 表
 - **Image 內容**：`init` 在 container 內執行上述腳本，`Dockerfile` 必須 COPY `infra/clickhouse/migrations/` 與 `infra/debezium/radar-cdc.json`；migration 資料夾不存在或沒有檔案時直接報錯，不可當成「沒有待執行的 migration」默默略過
 - **等待 connector 啟動**：PUT 建立後狀態是非同步產生的，剛建立時查 `/status` 會先回 404，視為尚未就緒繼續輪詢，逾時才報錯
-- **執行順序**（`init` 服務）：Alembic → topic → ClickHouse migration → 註冊 connector。ClickHouse 先建好才開始產生 CDC 事件；Kafka engine 表從最早的 offset 讀，順序顛倒也不會掉資料
+- **執行順序**（`init` 服務）：密碼檢查（`tools/check_secrets.py`，用 `&&` 串接，失敗就不做後面）→ Alembic → topic → ClickHouse migration → 註冊 connector。ClickHouse 先建好才開始產生 CDC 事件；Kafka engine 表從最早的 offset 讀，順序顛倒也不會掉資料
 - Apicurio、Kafka Connect、ClickHouse 放在預設 profile（`make up` 就啟動），階段 2 起它們是資料流的一部分
 
 ### 7.10 列表任務的 partition 分配（fix，2026-10-07）
@@ -1086,6 +1086,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | 資產 | 威脅 | 對策 |
 |---|---|---|
 | Grafana 管理權限 | 預設帳密 admin/admin 被登入、改 datasource | 密碼必填、只綁本機、關閉匿名與註冊；上雲前（階段 9）重新評估對外存取 |
+| 四個密碼（`POSTGRES_PASSWORD`、`CLICKHOUSE_PASSWORD`、`CLICKHOUSE_GRAFANA_PASSWORD`、`GRAFANA_ADMIN_PASSWORD`）（M-4，#119） | `.env` 沿用範例值 `change-me`，compose 的 `:?` 只擋空值 | `.env.example` 範例值為 `CHANGE_ME`（`check_env.py` 列為必填）；`init` 最先跑 `tools/check_secrets.py`，空值或不分大小寫的 change-me／changeme／change_me 就非 0 結束，只印變數名稱 |
 | ClickHouse 資料與設定 | datasource 帳號能執行任意 SQL（DROP、讀 named collection） | 唯讀帳號、只能 SELECT `radar.*`、無 named collection 權限 |
 | ClickHouse 資源 | 拉長時間範圍讓 `FINAL` 查詢吃滿記憶體 | 唯讀帳號的 profile 設執行時間與記憶體上限 |
 | 看 dashboard 的人 | PTT 標題（外部文字）含 HTML、連結被換成 `javascript:` | 不用會渲染 HTML 的 Text 面板顯示資料；連結限 `https://www.ptt.cc/` 開頭 |
