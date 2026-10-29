@@ -94,7 +94,7 @@
 | `make human-label` | 本機人工標註頁（http://127.0.0.1:8090） |
 | `make ch-migrate` | 套用 ClickHouse 尚未執行的 migration |
 | `make api` | 本機啟動管理 API（http://localhost:8000/docs） |
-| `make seed` | 透過 API 建立初始看板（冪等，需先 `make api`） |
+| `make seed` | 透過 API 建立初始看板（冪等；api 已在跑即可，本機 `make api` 或 docker 啟動的 api 都可以） |
 | `make up-app` | 基礎設施加上 api、scheduler、crawler ×3、ingest；`init` 自動建表、建 topic、ClickHouse migration、註冊 connector |
 | `make e2e-up` / `make e2e` | 啟動端到端環境（假 PTT、e2e 專用 volume）/ 執行端到端測試 |
 | `make e2e-down` | 停止端到端環境並刪除其資料 volume |
@@ -1313,6 +1313,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 
 - 骨架（`bert-skeleton`）的驗收：`uv lock` 後在 arm64 主機以 `docker compose -f infra/docker-compose.yaml --env-file .env --profile app build init` 建 image（`radar-app` 只由 `init` 建置），再以 `--profile app run --rm --no-deps inference python -c "import onnxruntime, tokenizers"` 檢查（worktree 沒有 `.env`，`run` 用主目錄的 compose 檔，image 相同），容器內 `import onnxruntime, tokenizers` 成功；`tokenizers` 只有 `cp310-abi3` wheel、沒有 cp312 專屬的（調查 3），要實際裝過才算數。x86_64 由 CI 驗證
 - 測試用小模型：共用 helper `tests/helpers/onnx_model.py`（`bert-skeleton` 完整實作，不是骨架；之後各單只呼叫、不修改），提供以小字典建立的 `tokenizers` tokenizer、以 `onnx.helper` 產生的 fp32 與 int8 小 ONNX 模型（輸入輸出同「模型包格式」），以及打包成模型包 zip（含正確的 `model_card.files` 雜湊）；檔案寫在 pytest 的 `tmp_path`，`*.onnx` 不進 git。helper 自己的單元測試 `tests/unit/helpers/test_onnx_model_helper.py`。驗收測試的共用 fixture（`tests/unit/acceptance/conftest.py`、`tests/integration/acceptance/conftest.py`）：`tiny_model_dir`、`tiny_int8_model_dir`（import 後的資料夾）、`make_model_package`（產生模型包 zip）；單元測試的 `Classifier` 替身為 `tests/unit/ml/fakes.py` 的 `FakeClassifier`
+- 介面簽名：`import_model(zip_path, models_dir, *, sha256=None)`（`sha256` 為 keyword-only，預設 None 不比對）。改這類跨單的函式簽名時，同步修改 `tests/unit/ml/test_stage8_interfaces.py`，並把該檔列入該單的負責檔案
 - 單元測試（不需容器）：用上面的 helper；notebook 靜態檢查（沒有輸出、類別順序、card 欄位）；`import_model` 的雜湊不符、多餘檔名、路徑穿越、超過大小上限、目標已存在
 - 整合測試（compose `test` 服務）：shadow 推論只寫 `predictions.shadow`、`predictions_shadow` 有資料、`predictions` 沒有；重啟從 `predictions_shadow` 載入快取；`compare` 的查詢對預先寫入的資料算出預期值
 - notebook 本身不在 CI 執行（需要 GPU 與下載）；由甲方第一次執行時確認，ONNX 與 PyTorch 的 logits 差異在 notebook 內檢查
@@ -1577,9 +1578,12 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 #### C. Kafka 4.1.0 的 coordinator 故障
 
 - 就是 KAFKA-19888（症狀相同：時鐘跳動後 `CoordinatorRuntimeMetricsImpl` 記到負值，`__consumer_offsets` 寫入持續逾時、group 無限重新平衡；只有重啟該 broker 才恢復，coordinator 回到同一個 broker 後可能再發生）。修正版本 4.1.2（2026-03-17）、4.2.0；Docker Hub 有 `apache/kafka:4.1.2`
-- 升到 4.1.2：待甲方決定（D-034）
+- 升到 4.1.2：已定案（D-034）；開發環境於 2026-10-29 照下列步驟升完
 - 升級前的處理：找出 log 有 `Histogram recorded value cannot be negative` 的 broker，`docker compose -f infra/docker-compose.yaml --env-file .env restart kafka_N`
-- 升級步驟：`.env` 的 `KAFKA_VERSION` 改 4.1.2，一次一個 broker `docker compose … up -d kafka_N`，等 healthy 再換下一個（3 節點、`min.insync.replicas=2`，一次停一個不影響寫入）
+- 升級步驟：`.env` 的 `KAFKA_VERSION` 改 4.1.2，一次一個 broker，依序 kafka_1、kafka_2、kafka_3（3 節點、`min.insync.replicas=2`）
+  1. `docker compose -f infra/docker-compose.yaml --env-file .env up -d kafka_1`（kafka_2、kafka_3 同寫法；不可用 `down -v`，資料在具名 volume `kafka_N_data`）
+  2. `docker compose -f infra/docker-compose.yaml --env-file .env ps kafka_1` 顯示 `(healthy)`
+  3. `docker compose -f infra/docker-compose.yaml --env-file .env exec kafka_1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --describe --under-replicated-partitions` 沒有輸出，才換下一台；healthcheck 只確認 broker 有回應，副本還沒追上就停下一台，ISR 會低於 `min.insync.replicas`，`acks=all` 的寫入會失敗
 
 #### 派工順序
 
