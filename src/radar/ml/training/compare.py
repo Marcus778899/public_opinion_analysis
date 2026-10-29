@@ -12,13 +12,16 @@ from pathlib import Path
 
 from sklearn.metrics import f1_score
 
+from radar.common.cli import load_settings
 from radar.common.clickhouse import ClickHouseClient
+from radar.common.csv_safe import csv_safe
 from radar.common.enums import Polarity
 from radar.common.log import log, setup_logging
 from radar.common.settings import ClickHouseSettings, InferenceRole, LabelingSettings
 from radar.ml.inference.roles import ROLE_TARGETS
 from radar.ml.labeling.factory import build_labeler
 from radar.ml.labeling.prompt import PROMPT_VERSION
+from radar.ml.training.import_model import MODEL_VERSION_RE
 
 REVIEW_DIR = Path("data/review")
 REPORT_FILE = "comparison.md"
@@ -27,14 +30,25 @@ CONFIDENCE_THRESHOLDS = (0.4, 0.5, 0.6, 0.7)
 MODELS_DIR = Path("models")
 
 
+def model_version_arg(value: str) -> str:
+    if not MODEL_VERSION_RE.fullmatch(value):
+        raise argparse.ArgumentTypeError(f"版本格式不符 {MODEL_VERSION_RE.pattern}：{value!r}")
+    return value
+
+
 def _latest_prediction(table: str, version_param: str) -> str:
-    """每版每篇取最新一筆；信心為該筆的最高分。table 只來自 ROLE_TARGETS 常數。"""
+    """每版每篇取最新一筆；polarity 與信心（最高分）用 tuple 取同一列。
+
+    table 只來自 ROLE_TARGETS 常數。
+    """
     return (
-        "SELECT post_id, argMax(polarity, predicted_at) AS polarity,\n"
-        "       argMax(arrayMax(mapValues(scores)), predicted_at) AS score\n"
-        f"FROM {table}\n"
-        f"WHERE model_version = {{{version_param}:String}}\n"
-        "GROUP BY post_id"
+        "SELECT post_id, pick.1 AS polarity, pick.2 AS score FROM (\n"
+        "  SELECT post_id,\n"
+        "         argMax((polarity, arrayMax(mapValues(scores))), predicted_at) AS pick\n"
+        f"  FROM {table}\n"
+        f"  WHERE model_version = {{{version_param}:String}}\n"
+        "  GROUP BY post_id\n"
+        ")"
     )
 
 
@@ -297,8 +311,8 @@ def write_disagreements(path: Path, pairs: list[PairedPrediction]) -> int:
             writer.writerow(
                 [
                     p.post_id,
-                    p.board,
-                    p.title,
+                    csv_safe(p.board),
+                    csv_safe(p.title),
                     p.polarity_a.value,
                     f"{p.score_a:.3f}",
                     p.polarity_b.value,
@@ -321,17 +335,31 @@ def _conf_scores(pairs: list[PairedPrediction], use_b: bool) -> list[tuple[float
 def main() -> None:
     setup_logging("compare")
     parser = argparse.ArgumentParser(description="比較現行與 shadow 模型（S8-03）")
-    parser.add_argument("--a", required=True, help="現行版本（predictions）")
-    parser.add_argument("--b", required=True, help="shadow 版本（predictions_shadow）")
-    parser.add_argument("--since", type=datetime.fromisoformat, required=True)
+    parser.add_argument(
+        "--a", type=model_version_arg, required=True, help="現行版本（predictions 的版本）"
+    )
+    parser.add_argument(
+        "--b",
+        type=model_version_arg,
+        required=True,
+        help="shadow 版本（predictions_shadow 的 model_version）",
+    )
+    parser.add_argument(
+        "--since",
+        type=datetime.fromisoformat,
+        required=True,
+        help="只比較此時間之後建立的文章，ISO 格式，例如 2026-10-27T00:00:00+00:00；"
+        "沒寫時區視為 UTC",
+    )
     args = parser.parse_args()
+    ch_settings = load_settings(ClickHouseSettings)
 
     labeling = LabelingSettings()
     built = build_labeler(labeling.primary, labeling.max_chars)
     labeler = built.name
     built.close()
 
-    ch = ClickHouseClient(ClickHouseSettings())
+    ch = ClickHouseClient(ch_settings)
     try:
         pairs = fetch_pairs(ch, args.a, args.b, args.since, labeler, PROMPT_VERSION)
         latency = {

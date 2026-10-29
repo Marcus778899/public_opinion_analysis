@@ -278,3 +278,13 @@ def test_render_markdown_zero_overlap_labeler_gets_note_not_row(examples):
     assert "`groq:q` 在人工測試集沒有 `prompt-v6` 的標註" in md
     assert "| `groq:q` |" not in md
     assert "## 模型分數" in md
+
+
+def test_check_model_dir_rejects_missing_dir(tmp_path):
+    import pytest
+
+    from radar.ml.training.evaluate import check_model_dir
+
+    with pytest.raises(SystemExit):
+        check_model_dir(tmp_path / "nope")
+    check_model_dir(tmp_path)
