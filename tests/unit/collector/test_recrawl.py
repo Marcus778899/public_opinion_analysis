@@ -110,3 +110,15 @@ def test_dispatcher_nothing_due_sends_nothing(session, monkeypatch):
     assert dispatcher(NOW) == 0
     assert producer.produced == []
     assert session.commits == 0
+
+
+def test_is_query_timeout_true_only_for_query_canceled():
+    import psycopg.errors
+    from sqlalchemy.exc import OperationalError
+
+    cancelled = OperationalError("q", {}, psycopg.errors.QueryCanceled("x"))
+    other = OperationalError("q", {}, psycopg.errors.OperationalError("x"))
+
+    assert recrawl.is_query_timeout(cancelled) is True
+    assert recrawl.is_query_timeout(other) is False
+    assert recrawl.is_query_timeout(RuntimeError("x")) is False

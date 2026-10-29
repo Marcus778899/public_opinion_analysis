@@ -18,7 +18,7 @@ from sqlalchemy import Connection, Engine, func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from radar.api.schemas import BoardOut
-from radar.collector.recrawl import DuePostDispatcher
+from radar.collector.recrawl import DuePostDispatcher, is_query_timeout
 from radar.common.db.models import Post
 from radar.common.db.session import make_engine, make_session_factory
 from radar.common.enums import CrawlReason
@@ -100,7 +100,10 @@ def enabled_board_names(boards: list[BoardOut]) -> list[str]:
 
 
 def latest_post_since(engine: Engine | None, board: str) -> datetime | None:
-    """該看板 PG 最新文章時間減 10 分鐘；沒有文章、沒有 engine 或查詢失敗回傳 None。"""
+    """該看板 PG 最新文章時間減 10 分鐘；沒有文章、沒有 engine 或查詢失敗回傳 None。
+
+    查詢逾時（statement_timeout）例外照拋，由呼叫端略過這一輪。
+    """
     if engine is None:
         return None
     try:
@@ -108,7 +111,10 @@ def latest_post_since(engine: Engine | None, board: str) -> datetime | None:
             latest = conn.execute(
                 select(func.max(Post.created_at)).where(Post.board == board)
             ).scalar_one()
-    except Exception as e:  # 查不到就退回只讀第一頁，不讓計時器停掉
+    except Exception as e:
+        if is_query_timeout(e):
+            raise
+        # 查不到就退回只讀第一頁，不讓計時器停掉
         log.warning("query latest post of %s failed, since=null: %r", board, e)
         return None
     return None if latest is None else latest - SINCE_MARGIN
@@ -126,7 +132,12 @@ def make_list_task_sender(
     """
 
     def send_list_task(board: str) -> None:
-        task = make_list_task(board, CrawlReason.SCHEDULE, since=latest_post_since(engine, board))
+        try:
+            since = latest_post_since(engine, board)
+        except DBAPIError as e:
+            log.warning("query latest post of %s timed out, skipping this round: %r", board, e)
+            return
+        task = make_list_task(board, CrawlReason.SCHEDULE, since=since)
         try:
             partition = resolve_list_partition(
                 board, enabled_boards(), lambda: producer.partition_count(names.CRAWL_TASKS)
@@ -220,7 +231,9 @@ def _logged(fn: Callable[[], object]) -> Callable[[], None]:
 def main() -> None:
     setup_logging("scheduler")
     settings = SchedulerSettings()
-    engine = make_engine(get_postgres_settings())
+    engine = make_engine(
+        get_postgres_settings(), statement_timeout_sec=settings.statement_timeout_sec
+    )
     lock = AdvisoryLock(engine)
     stopping = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):

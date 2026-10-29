@@ -3,8 +3,10 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+import psycopg.errors
 from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from radar.common.db.models import Board, CrawlState, Post
@@ -97,6 +99,11 @@ def record_dispatch(
     session.execute(stmt)
 
 
+def is_query_timeout(exc: BaseException) -> bool:
+    """PG statement_timeout 取消查詢（QueryCanceled）。"""
+    return isinstance(exc, DBAPIError) and isinstance(exc.orig, psycopg.errors.QueryCanceled)
+
+
 class DuePostDispatcher:
     """每輪：查到期文章 → 送 post 任務並 flush → 寫 crawl_state → commit。
 
@@ -120,7 +127,13 @@ class DuePostDispatcher:
         """回傳派發數量。"""
         now = now or datetime.now(UTC)
         with self._session_factory() as session:
-            due = find_due_posts(session, now, limit=self._limit)
+            try:
+                due = find_due_posts(session, now, limit=self._limit)
+            except DBAPIError as e:
+                if not is_query_timeout(e):
+                    raise
+                log.warning("find due posts timed out, skipping this round: %r", e)
+                return 0
             if not due:
                 return 0
             for post in due:
