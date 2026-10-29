@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
-from radar.bot.callbacks import CallbackResult, handle_callback
+from radar.bot.callbacks import CallbackResult, handle_callback, timed
 from radar.bot.commands import COMMANDS, handle, parse_command
 from radar.bot.notify import AlertNotifier, safe_stats, stats_post_ids
 from radar.bot.repository import PreferenceRepository, SubscriptionRepository
@@ -78,6 +78,7 @@ def on_callback(
     queries: Queries,
     min_score: float,
     now: datetime,
+    answer: Callable[[str | None], None] | None = None,
 ) -> CallbackResult:
     """parse_callback → callbacks.handle_callback；callback.chat_id 已由呼叫端檢查過。"""
     assert callback.chat_id is not None
@@ -90,6 +91,7 @@ def on_callback(
             queries,
             min_score=min_score,
             now=now,
+            answer=answer,
         )
 
 
@@ -118,13 +120,23 @@ def handle_update(
     callback = update.callback
     if callback is None or not is_allowed(callback.chat_id, allowed):
         return
-    result = on_callback(callback, sessions, queries, min_score, now)
+
+    def answer(toast: str | None) -> None:
+        telegram.answer_callback_query(callback.id, toast)
+
     try:
-        telegram.answer_callback_query(callback.id, result.toast)
+        result = on_callback(callback, sessions, queries, min_score, now, answer)
+        if not result.answered:
+            with timed("answerCallbackQuery", callback.chat_id or 0):
+                answer(result.toast)
         if result.screen is not None and callback.chat_id is not None and callback.message_id:
-            telegram.edit_message_text(
-                callback.chat_id, callback.message_id, result.screen.text, result.screen.keyboard
-            )
+            with timed("editMessageText", callback.chat_id):
+                telegram.edit_message_text(
+                    callback.chat_id,
+                    callback.message_id,
+                    result.screen.text,
+                    result.screen.keyboard,
+                )
     except TelegramBadRequestError as e:
         # 例如按鈕回呼超過 Telegram 的期限、原訊息已刪除
         log.warning("callback %s from chat %s rejected: %s", callback.data, callback.chat_id, e)
