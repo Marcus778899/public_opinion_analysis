@@ -57,12 +57,13 @@
 | shadow-missing-model-exit | backend | done | 0 | PR #217 |
 | comment-time-recrawl | backend | done | 0 | PR #220（剩 10 則在 3 篇已刪文，接受） |
 | pipeline-gap-design | architect | done | 0 | PR #221 |
-| crawl-backfill-depth | backend | in-progress | 0 |  |
+| crawl-backfill-depth | backend | done | 0 | PR #225（e2e 新測試待發版前在 e2e 環境實跑） |
 | pipeline-stall-alert | backend | done | 0 | PR #224 |
 
 ## 卡住／待甲方決定
 
-- （無）
+- 發版前在 e2e 環境跑 test_crawler_restart_backfills_more_than_three_pages（#225 未實跑）
+- 待甲方：.env 改 KAFKA_VERSION=4.1.2 並跑 check_env.py（D-034，之後逐台升級）
 
 ## 注意事項（踩過的坑）
 
