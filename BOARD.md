@@ -57,6 +57,8 @@
 | shadow-missing-model-exit | backend | done | 0 | PR #217 |
 | comment-time-recrawl | backend | done | 0 | PR #220（剩 10 則在 3 篇已刪文，接受） |
 | pipeline-gap-design | architect | done | 0 | PR #221 |
+| crawl-backfill-depth | backend | in-progress | 0 |  |
+| pipeline-stall-alert | backend | done | 0 | PR #224 |
 
 ## 卡住／待甲方決定
 
