@@ -181,3 +181,15 @@ def test_write_disagreements_none_writes_header_only(tmp_path):
 
     assert compare.write_disagreements(path, [pair("1", "S", P, P)]) == 0
     assert len(path.read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_model_version_arg_rejects_bad_format():
+    import argparse
+
+    import pytest
+
+    from radar.ml.training.compare import model_version_arg
+
+    assert model_version_arg("bert-a-1") == "bert-a-1"
+    with pytest.raises(argparse.ArgumentTypeError):
+        model_version_arg("Bad Version")
