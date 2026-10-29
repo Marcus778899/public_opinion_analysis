@@ -6,7 +6,7 @@
 import signal
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 import httpx2
@@ -14,6 +14,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy import Connection, Engine, create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
+from radar.common.clickhouse import ClickHouseClient, ClickHouseError
 from radar.common.kafka.connect import (
     ConnectError,
     ConnectorNotFoundError,
@@ -22,7 +23,12 @@ from radar.common.kafka.connect import (
     restart_failed,
 )
 from radar.common.log import log, setup_logging
-from radar.common.settings import CdcWatchdogSettings, ConnectSettings, get_postgres_settings
+from radar.common.settings import (
+    CdcWatchdogSettings,
+    ClickHouseSettings,
+    ConnectSettings,
+    get_postgres_settings,
+)
 
 
 class ConnectorTransition(StrEnum):
@@ -205,8 +211,68 @@ def check_slot(
     return changes
 
 
-def is_cdc_healthy(connector: ConnectorWatch, slot: SlotWatch) -> bool:
+class FreshnessTransition(StrEnum):
+    STALLED = "stalled"
+    RECOVERED = "recovered"
+
+
+class FreshnessWatch:
+    """ClickHouse 最新 changed_at 太久沒前進就算停擺（開發規格 7.28 B）；只在狀態改變時回報。"""
+
+    def __init__(self, stale_alert_s: float, started_at: datetime) -> None:
+        self._stale_alert = timedelta(seconds=stale_alert_s)
+        self._started_at = started_at
+        self._latest: datetime | None = None
+        self.stalled = False
+
+    def observe(self, latest: datetime | None, now: datetime) -> FreshnessTransition | None:
+        # NOTE: latest 為 None（查詢失敗或空表）時沿用舊值；啟動時間當下限，避免一開機就告警
+        if latest is not None and (self._latest is None or latest > self._latest):
+            self._latest = latest
+        baseline = self._started_at if self._latest is None else max(self._latest, self._started_at)
+        stalled = now - baseline > self._stale_alert
+        if stalled == self.stalled:
+            return None
+        self.stalled = stalled
+        return FreshnessTransition.STALLED if stalled else FreshnessTransition.RECOVERED
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def read_latest_changed_at(client: ClickHouseClient) -> datetime | None:
+    """posts_history 最新的 changed_at（UTC）；空表（ClickHouse 回 epoch）回 None。"""
+    rows = client.query_rows("SELECT max(changed_at) AS latest FROM posts_history")
+    if not rows:
+        return None
+    latest = datetime.fromisoformat(str(rows[0]["latest"])).replace(tzinfo=UTC)
+    return None if latest <= _EPOCH else latest
+
+
+def check_freshness(
+    client: ClickHouseClient, watch: FreshnessWatch, now: datetime
+) -> FreshnessTransition | None:
+    """查最新資料時間並記 log；查詢失敗記 WARNING、沿用上次的值。"""
+    latest: datetime | None = None
+    try:
+        latest = read_latest_changed_at(client)
+    except (ClickHouseError, httpx2.HTTPError, KeyError, ValueError) as e:
+        log.warning("read latest changed_at failed: %r", e)
+
+    transition = watch.observe(latest, now)
+    if transition is FreshnessTransition.STALLED:
+        log.error("pipeline stalled: no new posts_history rows (latest changed_at %s)", latest)
+    elif transition is FreshnessTransition.RECOVERED:
+        log.info("pipeline recovered: posts_history is receiving new rows again")
+    return transition
+
+
+def is_cdc_healthy(
+    connector: ConnectorWatch, slot: SlotWatch, freshness: FreshnessWatch | None = None
+) -> bool:
     # NOTE: Connect 連不上不算異常；停太久時 slot 會 inactive，由 slot 警示涵蓋（開發規格 7.16）
+    if freshness is not None and freshness.stalled:
+        return False
     return connector.failed_since is None and not slot.raised
 
 
@@ -237,8 +303,12 @@ def run_once(
     slot_watch: SlotWatch,
     settings: CdcWatchdogSettings,
     now: float,
+    *,
+    clickhouse: ClickHouseClient | None = None,
+    freshness_watch: FreshnessWatch | None = None,
+    wall_now: datetime | None = None,
 ) -> None:
-    """一輪檢查：connector → slot → heartbeat；heartbeat 為 None 時不送。"""
+    """一輪檢查：connector → slot → 資料新鮮度 → heartbeat；heartbeat 為 None 時不送。"""
     check_connector(connect, settings.connector_name, connector_watch, now)
     check_slot(
         engine,
@@ -247,8 +317,10 @@ def run_once(
         now,
         statement_timeout_ms=int(settings.request_timeout_s * 1000),
     )
+    if clickhouse is not None and freshness_watch is not None:
+        check_freshness(clickhouse, freshness_watch, wall_now or datetime.now(UTC))
     if heartbeat is not None and settings.heartbeat_url:
-        healthy = is_cdc_healthy(connector_watch, slot_watch)
+        healthy = is_cdc_healthy(connector_watch, slot_watch, freshness_watch)
         send_heartbeat(heartbeat, settings.heartbeat_url, healthy)
 
 
@@ -270,11 +342,21 @@ def main() -> None:
         settings.restart_backoff_initial_s, settings.restart_backoff_max_s
     )
     slot_watch = SlotWatch(settings.slot_inactive_alert_s, settings.slot_lag_alert_bytes)
+    clickhouse = ClickHouseClient(ClickHouseSettings(), timeout_s=timeout_s)
+    freshness_watch = FreshnessWatch(settings.stale_alert_s, datetime.now(UTC))
 
     def tick() -> None:
         try:
             run_once(
-                connect, engine, heartbeat, connector_watch, slot_watch, settings, time.monotonic()
+                connect,
+                engine,
+                heartbeat,
+                connector_watch,
+                slot_watch,
+                settings,
+                time.monotonic(),
+                clickhouse=clickhouse,
+                freshness_watch=freshness_watch,
             )
         except Exception:
             # 不讓單輪的意外錯誤停掉 watchdog；這一輪不送 heartbeat，持續發生時外部服務會通知
@@ -303,6 +385,7 @@ def main() -> None:
         connect.close()
         if heartbeat is not None:
             heartbeat.close()
+        clickhouse.close()
         engine.dispose()
 
 

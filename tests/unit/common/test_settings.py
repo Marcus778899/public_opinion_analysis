@@ -304,3 +304,10 @@ def test_telegram_sentiment_min_score_out_of_range_rejected(monkeypatch, value):
 
     with pytest.raises(ValidationError):
         TelegramSettings()
+
+
+def test_cdc_watchdog_stale_alert_default_is_1800_seconds(monkeypatch):
+    from radar.common.settings import CdcWatchdogSettings
+
+    monkeypatch.delenv("CDC_WATCHDOG_STALE_ALERT_S", raising=False)
+    assert CdcWatchdogSettings().stale_alert_s == 1800
