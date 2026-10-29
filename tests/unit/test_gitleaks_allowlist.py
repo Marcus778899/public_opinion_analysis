@@ -27,7 +27,6 @@ def _revision_regex() -> re.Pattern[str]:
         f"sha: {HEX40}",
         f"commit_sha={HEX40}",
         f"COMMIT_SHA='{HEX40}'",
-        f'"revision": "{HEX40}"',
     ],
 )
 def test_revision_variable_with_hex40_is_allowed(line: str) -> None:
@@ -43,6 +42,9 @@ def test_revision_variable_with_hex40_is_allowed(line: str) -> None:
         f"SHARED_SECRET_SHA_KEY={HEX40}",
         f"SECRETSHA={HEX40}",
         f"revision_token={HEX40}",
+        f'"revision": "{HEX40}"',
+        f'"api_key_sha": "{HEX40}"',
+        f"'secret_token_rev' = '{HEX40}'",
     ],
 )
 def test_secret_name_containing_rev_substring_is_not_allowed(line: str) -> None:
@@ -52,3 +54,28 @@ def test_secret_name_containing_rev_substring_is_not_allowed(line: str) -> None:
 def test_revision_value_not_40_hex_is_not_allowed() -> None:
     assert not _revision_regex().search(f"rev={HEX40[:39]}")
     assert not _revision_regex().search(f"rev={HEX40}0")
+
+
+OLD_REGEX = re.compile(
+    r"""(?i:rev|revision|commit|sha)[a-zA-Z0-9_]*\s*[:=]+\s*"""
+    r"""(?:"[0-9a-f]{40}"|'[0-9a-f]{40}'|[0-9a-f]{40}(?:[^0-9a-zA-Z]|$))"""
+)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f'MACBERT_REV = "{HEX40}"',
+        f"x.sha={HEX40}",
+        f"token-rev: {HEX40}",
+        f'"revision": "{HEX40}"',
+        f'"api_key_sha": "{HEX40}"',
+        f"'secret_token_rev' = '{HEX40}'",
+        f'rev"={HEX40}',
+        f"SHARED_SECRET={HEX40}",
+        f"SECRET_SHA={HEX40}",
+    ],
+)
+def test_new_regex_match_implies_old_regex_match(line: str) -> None:
+    if _revision_regex().search(line):
+        assert OLD_REGEX.search(line)
