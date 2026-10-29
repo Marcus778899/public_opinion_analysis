@@ -44,12 +44,11 @@
 | shadow-restart-investigate | backend | done | 0 | reports/shadow-restart-investigate.json（只調查，已作廢 PR） |
 | bert-derive-max-len | backend | done | 0 | PR #203 |
 | shadow-memory-measure | backend | done | 0 | reports/shadow-memory-measure.json（只量測，已作廢 PR） |
+| bert-batch-tokens-default | backend | done | 0 | PR #206 |
 
 ## 卡住／待甲方決定
 
-- v0.8.0 待甲方驗收（README 階段 8 小節）
-- BERT 進 shadow 順序 1、2 已合併（#195、#197）；待甲方重跑 ckip fp32 evaluate（順序 3）
-- image 已重建；待甲方 .env 加 INFERENCE_MAX_BATCH_TOKENS=2048 後重啟 shadow（512 版）；7.27 預設 4096→2048 待開單
+- shadow（ckip 512、2048）10-29 02:07 起觀察 3 天，之後跑 compare（#178）
 
 ## 注意事項（踩過的坑）
 
