@@ -12,8 +12,8 @@ CRAWLED_AT = datetime(2026, 10, 7, 5, 0, tzinfo=UTC)
 TASK_ID = uuid.uuid4()
 
 
-def parse(html, url=URL, board="Stock"):
-    return parse_post_page(html, board=board, url=url, crawled_at=CRAWLED_AT, task_id=TASK_ID)
+def parse(html, url=URL, board="Stock", crawled_at=CRAWLED_AT):
+    return parse_post_page(html, board=board, url=url, crawled_at=crawled_at, task_id=TASK_ID)
 
 
 def test_post_header_fields(fixture_html):
@@ -81,7 +81,8 @@ def test_post_comment_with_ip_parses_time(fixture_html):
 
 
 def test_post_cross_year_comment_time(fixture_html):
-    comments = parse(fixture_html("post_cross_year.html")).comments
+    later = datetime(2027, 1, 2, tzinfo=UTC)
+    comments = parse(fixture_html("post_cross_year.html"), crawled_at=later).comments
 
     assert comments[0].commented_at == datetime(2026, 12, 31, 15, 55, tzinfo=UTC)
     assert comments[-1].commented_at == datetime(2026, 12, 31, 16, 5, tzinfo=UTC)
