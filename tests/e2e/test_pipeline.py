@@ -68,3 +68,18 @@ def test_crawler_restart_resumes_pending_tasks(api, fake_ptt, db, board):
         subprocess.run([*COMPOSE, "start", "crawler"], check=True, capture_output=True)
 
     wait_until(lambda: post_row(db, post_id), timeout_s=90)
+
+
+def test_crawler_restart_backfills_more_than_three_pages(api, fake_ptt, db, board):
+    # 列表頁縮成 2 篇，9 篇文章共 5 頁，超過一個任務最多讀的 3 頁（開發規格 7.28 A）
+    fake_ptt.put(f"/_control/boards/{board}/page_size", json={"size": 2}).raise_for_status()
+    first = new_post(fake_ptt, board)
+    wait_until(lambda: post_row(db, first), timeout_s=60)  # 之後 Scheduler 才有 since
+
+    subprocess.run([*COMPOSE, "stop", "crawler"], check=True, capture_output=True)
+    try:
+        missed = [new_post(fake_ptt, board) for _ in range(8)]
+    finally:
+        subprocess.run([*COMPOSE, "start", "crawler"], check=True, capture_output=True)
+
+    wait_until(lambda: all(post_row(db, p) for p in missed), timeout_s=240)

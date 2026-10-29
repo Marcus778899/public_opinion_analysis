@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx2
 import pytest
@@ -10,11 +10,13 @@ from radar.collector.scheduler import (
     BOARD_JOB_PREFIX,
     BoardsClient,
     enabled_board_names,
+    latest_post_since,
     make_list_task_sender,
     sync_board_jobs,
 )
 from radar.common.kafka import names
 from radar.common.kafka.producer import JsonProducer
+from radar.common.schemas import CrawlTask
 from radar.common.settings import KafkaSettings
 from tests.unit.common.kafka.fakes import FakeProducer
 
@@ -193,3 +195,63 @@ def test_enabled_board_names_keeps_only_enabled():
     boards = [board("Stock"), board("Gossiping", enabled=False), board("Tech_Job")]
 
     assert enabled_board_names(boards) == ["Stock", "Tech_Job"]
+
+
+class FakeResult:
+    def __init__(self, value) -> None:
+        self._value = value
+
+    def scalar_one(self):
+        return self._value
+
+
+class FakeEngine:
+    def __init__(self, value=None, error: Exception | None = None) -> None:
+        self._value, self._error = value, error
+
+    def connect(self):
+        if self._error:
+            raise self._error
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> None:
+        return None
+
+    def execute(self, _stmt):
+        return FakeResult(self._value)
+
+
+def test_latest_post_since_subtracts_ten_minutes():
+    latest = datetime(2026, 10, 29, 6, 0, tzinfo=UTC)
+
+    assert latest_post_since(FakeEngine(latest), "Stock") == latest - timedelta(minutes=10)
+
+
+def test_latest_post_since_without_posts_is_none():
+    assert latest_post_since(FakeEngine(None), "Stock") is None
+
+
+def test_latest_post_since_without_engine_is_none():
+    assert latest_post_since(None, "Stock") is None
+
+
+def test_latest_post_since_query_failure_is_none():
+    assert latest_post_since(FakeEngine(error=RuntimeError("down")), "Stock") is None
+
+
+def test_list_task_sender_puts_since_into_task():
+    fake = FakeProducer()
+    latest = datetime(2026, 10, 29, 6, 0, tzinfo=UTC)
+    send = make_list_task_sender(
+        JsonProducer(KafkaSettings(bootstrap_servers="x"), producer=fake),
+        lambda: [],
+        FakeEngine(latest),
+    )
+
+    send("Stock")
+
+    task = CrawlTask.model_validate_json(fake.produced[0]["value"])
+    assert task.since == latest - timedelta(minutes=10)
