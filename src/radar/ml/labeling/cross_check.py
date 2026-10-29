@@ -11,7 +11,9 @@ from pathlib import Path
 
 from sklearn.metrics import cohen_kappa_score
 
+from radar.common.cli import load_settings
 from radar.common.clickhouse import ClickHouseClient
+from radar.common.csv_safe import csv_safe
 from radar.common.enums import Polarity
 from radar.common.ids import PTT_BASE_URL, split_post_id
 from radar.common.log import log, setup_logging
@@ -99,8 +101,8 @@ def write_disagreements_csv(
             writer.writerow(
                 {
                     "post_id": d.post_id,
-                    "board": post.board if post else split_post_id(d.post_id)[0],
-                    "title": post.title if post else "",
+                    "board": csv_safe(post.board if post else split_post_id(d.post_id)[0]),
+                    "title": csv_safe(post.title) if post else "",
                     "primary": d.primary.value,
                     "secondary": d.secondary.value,
                     "human": "",
@@ -118,6 +120,7 @@ def main() -> None:
     parser.add_argument("--version", default=PROMPT_VERSION)
     parser.add_argument("--out", type=Path, default=Path("data/review/disagreements.csv"))
     args = parser.parse_args()
+    ch_settings = load_settings(ClickHouseSettings)
     primary_name = args.primary
     if primary_name is None:
         settings = LabelingSettings()
@@ -125,7 +128,7 @@ def main() -> None:
         primary_name = labeler.name
         labeler.close()
 
-    ch = ClickHouseClient(ClickHouseSettings())
+    ch = ClickHouseClient(ch_settings)
     try:
         primary = fetch_whole_post_labels(ch, primary_name, args.version)
         secondary = fetch_whole_post_labels(ch, args.secondary, args.version)
