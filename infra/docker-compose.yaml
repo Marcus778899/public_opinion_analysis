@@ -220,6 +220,8 @@ services:
     <<: *app
     container_name: radar_inference_shadow
     profiles: ["shadow"]
+    # 缺模型版本時以 78 結束（#215）；不自動重啟，up --wait 才會報錯而非顯示 Healthy
+    restart: "no"
     command: ["python", "-m", "radar.ml.inference.main"]
     environment:
       <<: *app-env

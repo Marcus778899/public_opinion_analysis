@@ -5,12 +5,17 @@
 """
 
 import hashlib
+import os
+import sys
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import NoReturn
 
 from confluent_kafka.schema_registry import SchemaRegistryClient
+from pydantic import ValidationError
 
 from radar.common.clickhouse import ClickHouseClient
 from radar.common.kafka import names
@@ -22,6 +27,7 @@ from radar.common.log import log, setup_logging
 from radar.common.schemas import CdcPost, Prediction
 from radar.common.settings import (
     ClickHouseSettings,
+    InferenceRole,
     InferenceSettings,
     SchemaRegistrySettings,
     get_kafka_settings,
@@ -175,11 +181,42 @@ class Predictor:
             self._cache.put(post_id, digest)
 
 
+def check_shadow_model(model_dir: Path | None) -> str | None:
+    """shadow 缺模型時回傳要記的訊息，沒問題回傳 None。"""
+    hint = "請在 .env 設定 INFERENCE_SHADOW_MODEL_VERSION 為 models/ 底下已有的版本"
+    if model_dir is None or not str(model_dir).strip():
+        return f"shadow 沒有模型資料夾：INFERENCE_MODEL_DIR 未設；{hint}"
+    if not (model_dir / "model_card.json").is_file():
+        return f"shadow 找不到模型 {model_dir}/model_card.json；{hint}"
+    return None
+
+
+def exit_missing_model(problem: str) -> NoReturn:
+    log.error(problem)
+    # NOTE: 結束碼 78（EX_CONFIG）；compose 不重啟，up --wait 會回報容器已結束
+    sys.exit(78)
+
+
 @log.catch(level="CRITICAL")
 def main() -> None:
     setup_logging("inference")
-    settings = InferenceSettings()
+    try:
+        settings = InferenceSettings()
+    except ValidationError as exc:
+        # NOTE: 只有 shadow 缺 model_dir 才印設定提示；其他設定錯誤照常丟出（#215）
+        only_model_dir_missing = all(
+            e["loc"] == ("model_dir",) and e["type"] == "missing" for e in exc.errors()
+        )
+        if os.environ.get("INFERENCE_ROLE") != InferenceRole.SHADOW.value or not (
+            only_model_dir_missing
+        ):
+            raise
+        exit_missing_model(check_shadow_model(None) or "")
     targets = ROLE_TARGETS[settings.role]
+    if settings.role is InferenceRole.SHADOW:
+        problem = check_shadow_model(settings.model_dir)
+        if problem:
+            exit_missing_model(problem)
     classifier, card = load_classifier(
         settings.model_dir, threads=settings.threads, max_batch_tokens=settings.max_batch_tokens
     )
