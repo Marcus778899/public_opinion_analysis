@@ -63,9 +63,12 @@
 | kafka-version-upgrade | backend | done | 0 | PR #229；開發環境三台已逐台升 4.1.2，無 under-replicated |
 | import-model-hardening | backend | done | 0 | PR #233 |
 | scheduler-statement-timeout | backend | done | 0 | PR #239 |
-| bot-poll-resilience | backend | in-progress | 0 | PR #242 qa B 中 |
+| bot-poll-resilience | backend | done | 0 | PR #242 |
 | ci-tool-checksum | backend | done | 0 | PR #238 |
-| gitleaks-allowlist-boundary | backend | in-progress | 0 | PR #241 qa PASS，待 architect review |
+| gitleaks-allowlist-boundary | backend | done | 0 | PR #241 |
+| spec-docs-sync | backend | in-progress | 1 |  |
+| bot-push-allowlist | backend | done | 0 | PR #247 |
+| grafana-readonly-verify | backend | in-progress | 0 |  |
 
 ## 卡住／待甲方決定
 
