@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from radar.bot import main as bot_main
+from radar.bot.callbacks import CallbackResult
 from radar.bot.commands import COMMANDS
 from radar.bot.main import (
     PURGE_INTERVAL,
@@ -23,6 +24,7 @@ from radar.bot.telegram import (
     TelegramForbiddenError,
     Update,
 )
+from radar.bot.views import Screen
 from radar.common.kafka.consumer import TransientError
 from radar.common.settings import TelegramSettings
 
@@ -237,10 +239,41 @@ def test_handle_update_edit_bad_request_is_skipped():
     assert telegram.answered == [("cb1", None)]
 
 
-def test_handle_update_answer_bad_request_inside_callback_is_skipped():
-    telegram = handle(button(1), error=TelegramBadRequestError("query is too old"))
+def _sub_press(monkeypatch, error):
+    """SUB 回呼：on_callback 內（寫入後）呼叫 answer，answer 丟 error。"""
+
+    def fake_on_callback(callback, sessions, queries, min_score, now, answer=None):
+        assert answer is not None
+        answer("已訂閱 Stock")
+        return CallbackResult(Screen("x", []), "已訂閱 Stock", answered=True)
+
+    class AnswerFails(FakeTelegram):
+        def answer_callback_query(self, callback_id, text=None):
+            raise error
+
+    monkeypatch.setattr("radar.bot.main.on_callback", fake_on_callback)
+    telegram = AnswerFails()
+    handle_update(
+        button(1, chat_id=8, data="1:sub:Stock"),
+        telegram,  # type: ignore[arg-type]
+        settings(()),
+        lambda: FakeSession(),  # type: ignore[arg-type, return-value]
+        FakeQueries(),
+        NOW,
+    )
+    return telegram
+
+
+def test_handle_update_sub_answer_bad_request_skips_edit(monkeypatch):
+    telegram = _sub_press(monkeypatch, TelegramBadRequestError("query is too old"))
 
     assert telegram.edited == []
+
+
+def test_handle_update_sub_answer_forbidden_forgets_chat(monkeypatch, forgotten):
+    telegram = _sub_press(monkeypatch, TelegramForbiddenError(8))
+
+    assert (telegram.edited, forgotten) == ([], [8])
 
 
 def test_handle_update_other_update_type_is_noop():
