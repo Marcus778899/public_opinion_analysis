@@ -940,8 +940,9 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
   - `record`：依時間範圍把 topic 的原始訊息（key、value 的 bytes，base64）存成 JSONL（`data/replay/`，不進 repo）
   - `replay`：把檔案依原本的間隔（可加速）重送到 `replay.cdc.comments`；Avro bytes 原封不動，schema ID 在同一個 Apicurio 仍有效
   - `surge`：人工製造暴增：對指定文章在 N 分鐘內送 M 則 `op=c` 推文事件到 `replay.cdc.comments`，用 Apicurio 上 `cdc.public.comments-value` 的最新 schema 序列化；`commented_at` 與 `__source_ts_ms` 都分散在到當下為止的 N 分鐘
-  - 回放與驗收時另開一個 heat：`HEAT_INPUT_TOPIC=replay.cdc.comments`、consumer group `heat-replay`，state 與正式的分開
-  - `replay.cdc.comments` 列在 `topics.yaml`，保留 24 小時
+  - `surge` 的 `--count` 預設是 `HEAT_POST_MIN_COUNT`（文章門檻，否則觸發不了文章警示）；注入完會在下一分鐘補一筆事件，讓最後一分鐘結算（回放 topic 沒有後續事件）
+  - 回放與驗收時另開一個 heat：`HEAT_INPUT_TOPIC=replay.cdc.comments`、`HEAT_OUTPUT_TOPIC=replay.alerts`、`HEAT_CONSUMER_GROUP=heat-replay-$(date +%s)`，state 與正式的分開；consumer group 每次用新的（沿用舊 offset 會出現 DESTRUCTIVE STATE RECOVERY，#80），警示寫到 `replay.alerts`，bot 不訂閱，不會推到 Telegram
+  - `replay.cdc.comments`、`replay.alerts` 列在 `topics.yaml`，保留 24 小時
 
 ### 7.21 Telegram bot 的實作選擇（S5-06～S5-07）
 

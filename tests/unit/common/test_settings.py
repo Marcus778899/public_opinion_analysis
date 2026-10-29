@@ -244,6 +244,7 @@ def test_heat_settings_defaults_match_dev_spec(monkeypatch):
     s = HeatSettings()
 
     assert (s.input_topic, s.consumer_group) == ("cdc.public.comments", "heat")
+    assert s.output_topic == "alerts"
     assert (s.window_min, s.grace_min, s.max_delay_min, s.stale_after_min) == (10, 2, 30, 60)
     assert (s.z_threshold, s.min_count, s.cooldown_min, s.warmup_min) == (3.0, 30, 30, 60)
 

@@ -137,6 +137,8 @@ class HeatSettings(BaseSettings):
     # 回放與驗收時改成 replay.cdc.comments，並換 consumer_group，state 才不會和正式的混在一起
     input_topic: str = "cdc.public.comments"
     consumer_group: str = "heat"
+    # 回放時改成 replay.alerts，警示才不會進正式 alerts 而推到 Telegram
+    output_topic: str = "alerts"
     state_dir: Path = Path("state")
     window_min: int = 10
     grace_min: int = 2
