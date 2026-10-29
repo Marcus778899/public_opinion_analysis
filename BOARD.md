@@ -69,11 +69,13 @@
 | spec-docs-sync | backend | done | 1 | PR #246 |
 | bot-push-allowlist | backend | done | 0 | PR #247 |
 | grafana-readonly-verify | backend | done | 0 | PR #249（權限已夠緊；收斂權限另開 #251） |
-| subscription-toggle-latency | backend | in-progress | 0 |  |
+| subscription-toggle-latency | backend | done | 0 | PR #250（Telegram 往返待部署後從 bot log 實測） |
+| secret-placeholder-guard | backend | done | 0 | PR #253 |
 
 ## 卡住／待甲方決定
 
 - 發版前在 e2e 環境跑 test_crawler_restart_backfills_more_than_three_pages（#225 未實跑）
+- 發版前：部署後從 bot log（callback step=…ms=）取 #82 各步驟實測，甲方親手點「我的訂閱」確認 2 秒內
 
 ## 注意事項（踩過的坑）
 
