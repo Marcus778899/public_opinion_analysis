@@ -66,9 +66,10 @@
 | bot-poll-resilience | backend | done | 0 | PR #242 |
 | ci-tool-checksum | backend | done | 0 | PR #238 |
 | gitleaks-allowlist-boundary | backend | done | 0 | PR #241 |
-| spec-docs-sync | backend | in-progress | 1 |  |
+| spec-docs-sync | backend | done | 1 | PR #246 |
 | bot-push-allowlist | backend | done | 0 | PR #247 |
-| grafana-readonly-verify | backend | in-progress | 0 |  |
+| grafana-readonly-verify | backend | done | 0 | PR #249（權限已夠緊；收斂權限另開 #251） |
+| subscription-toggle-latency | backend | in-progress | 0 |  |
 
 ## 卡住／待甲方決定
 

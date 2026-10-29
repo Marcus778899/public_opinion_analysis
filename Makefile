@@ -53,7 +53,7 @@ connector:  ## 註冊或更新 Debezium connector（冪等，需先 make migrate
 ch-migrate:  ## 套用 ClickHouse 尚未執行的 migration
 	$(UV_ENV) python tools/migrate_clickhouse.py
 
-seed:  ## 透過 API 建立初始看板（需先 make api）
+seed:  ## 透過 API 建立初始看板（api 已在跑即可：本機 make api 或 docker 的 api）
 	$(UV_ENV) python tools/seed_boards.py
 
 testset:  ## 依看板配額抽出 300 篇人工測試集（S3-04，只能抽一次；配額見開發規格 7.11）
