@@ -115,6 +115,8 @@ class CdcWatchdogSettings(BaseSettings):
     heartbeat_url: str | None = None
     # Connect、heartbeat、PG 查詢共用；卡住時 heartbeat 會停，外部服務才會發現
     request_timeout_s: float = 10.0
+    # posts_history 最新 changed_at 超過這麼久沒前進就告警（開發規格 7.28 B）
+    stale_alert_s: float = 1800.0
 
     @field_validator("heartbeat_url", mode="before")
     @classmethod
