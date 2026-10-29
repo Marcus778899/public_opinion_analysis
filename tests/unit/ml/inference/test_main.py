@@ -390,3 +390,23 @@ def test_load_cache_unknown_table_is_rejected():
         load_cache(ch, "v", HashCache(10), "posts; DROP TABLE x")
 
     assert ch.calls == []
+
+
+def test_check_shadow_model_none_dir_names_env_var() -> None:
+    from radar.ml.inference.main import check_shadow_model
+
+    assert "INFERENCE_SHADOW_MODEL_VERSION" in (check_shadow_model(None) or "")
+
+
+def test_check_shadow_model_empty_dir_returns_message(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from radar.ml.inference.main import check_shadow_model
+
+    msg = check_shadow_model(tmp_path)
+    assert msg is not None and str(tmp_path) in msg
+
+
+def test_check_shadow_model_with_card_returns_none(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from radar.ml.inference.main import check_shadow_model
+
+    (tmp_path / "model_card.json").write_text("{}")
+    assert check_shadow_model(tmp_path) is None
