@@ -446,3 +446,15 @@ def test_poll_commands_reply_transient_error_retries_same_update(monkeypatch, up
 
     assert telegram.offsets[:2] == [None, None]
     assert waits[0] == 3
+
+
+def test_filter_recipients_drops_unlisted_chats():
+    assert bot_main.filter_recipients([1, 2, 3], [2]) == [2]
+
+
+def test_filter_recipients_empty_allowlist_keeps_all():
+    assert bot_main.filter_recipients([1, 2], []) == [1, 2]
+
+
+def test_filter_recipients_no_subscribers_returns_empty():
+    assert bot_main.filter_recipients([], [1]) == []
