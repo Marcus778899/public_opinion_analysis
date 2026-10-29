@@ -11,6 +11,7 @@ from radar.bot import main as bot_main
 from radar.bot.main import poll_commands
 from radar.bot.telegram import IncomingMessage, TelegramClient, Update
 from radar.common.kafka.consumer import TransientError
+from radar.common.log import log
 from radar.common.settings import TelegramSettings
 
 NOW = datetime(2026, 10, 18, 3, 0, tzinfo=UTC)
@@ -94,6 +95,8 @@ def run(batches, send_errors=()):
 
 @pytest.fixture
 def warnings(caplog):
+    # loggerhelper 第一次寫 log 才建 logger；先建好 caplog 才掛得上（見仲裁檔）
+    log.debug("init logger")
     caplog.set_level("WARNING")
     return caplog
 
