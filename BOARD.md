@@ -46,10 +46,11 @@
 | bert-derive-max-len | backend | done | 0 | PR #203 |
 | shadow-memory-measure | backend | done | 0 | reports/shadow-memory-measure.json（只量測，已作廢 PR） |
 | bert-batch-tokens-default | backend | done | 0 | PR #206 |
-| comment-year-infer | backend | qa-fail | 0 |  |
+| comment-year-infer | backend | done | 0 | PR #211 |
 | consumer-commit-wait | backend | done | 0 | PR #210 |
 | gossiping-gap-investigate | backend | done | 0 | reports/gossiping-gap-investigate.json（只調查，已作廢 PR） |
 | init-exit-code | backend | done | 0 | PR #213（只加回歸測試，255 無法重現） |
+| ml-cli-usability | backend | in-progress | 0 |  |
 
 ## 卡住／待甲方決定
 
