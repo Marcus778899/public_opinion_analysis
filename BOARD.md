@@ -62,6 +62,10 @@
 | crawl-backfill-retry | backend | done | 0 | PR #230 |
 | kafka-version-upgrade | backend | done | 0 | PR #229；開發環境三台已逐台升 4.1.2，無 under-replicated |
 | import-model-hardening | backend | done | 0 | PR #233 |
+| scheduler-statement-timeout | backend | done | 0 | PR #239 |
+| bot-poll-resilience | backend | in-progress | 0 | PR #242 qa B 中 |
+| ci-tool-checksum | backend | done | 0 | PR #238 |
+| gitleaks-allowlist-boundary | backend | in-progress | 0 | PR #241 qa PASS，待 architect review |
 
 ## 卡住／待甲方決定
 

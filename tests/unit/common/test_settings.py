@@ -311,3 +311,9 @@ def test_cdc_watchdog_stale_alert_default_is_1800_seconds(monkeypatch):
 
     monkeypatch.delenv("CDC_WATCHDOG_STALE_ALERT_S", raising=False)
     assert CdcWatchdogSettings().stale_alert_s == 1800
+
+
+def test_scheduler_statement_timeout_default_is_30_seconds(monkeypatch):
+    monkeypatch.delenv("SCHEDULER_STATEMENT_TIMEOUT_SEC", raising=False)
+
+    assert SchedulerSettings().statement_timeout_sec == 30
