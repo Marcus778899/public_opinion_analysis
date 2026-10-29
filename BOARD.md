@@ -53,7 +53,7 @@
 | gossiping-gap-investigate | backend | done | 0 | reports/gossiping-gap-investigate.json（只調查，已作廢 PR） |
 | init-exit-code | backend | done | 0 | PR #213（只加回歸測試，255 無法重現） |
 | ml-cli-usability | backend | done | 0 | PR #216 |
-| shadow-missing-model-exit | backend | qa-fail | 0 |  |
+| shadow-missing-model-exit | backend | done | 0 | PR #217 |
 | comment-time-recrawl | backend | in-progress | 0 |  |
 
 ## 卡住／待甲方決定
