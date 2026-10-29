@@ -10,7 +10,7 @@ description = "tasks/ 封存派工單、qa／review 紀錄（D-018）"
 paths = ['''^tasks/''']
 
 [[allowlists]]
-description = "Git／Hugging Face revision：變數名含 rev/revision/commit/sha 且值為 40 位小寫 hex（D-026）"
+description = "Git／Hugging Face revision：變數名最後一段是 rev/revision/commit/sha（整段比對）且值為 40 位小寫 hex（D-026）"
 targetRules = ["generic-api-key"]
 regexTarget = "match"
-regexes = ['''(?i:rev|revision|commit|sha)[a-zA-Z0-9_]*\s*[:=]+\s*(?:"[0-9a-f]{40}"|'[0-9a-f]{40}'|[0-9a-f]{40}(?:[^0-9a-zA-Z]|$))''']
+regexes = ['''(?i:(?:^|[^a-z0-9])(?:rev|revision|commit|sha)["']?)\s*[:=]+\s*(?:"[0-9a-f]{40}"|'[0-9a-f]{40}'|[0-9a-f]{40}(?:[^0-9a-zA-Z]|$))''']
