@@ -142,3 +142,42 @@ def test_main_existing_version_exits_with_message(
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, tmp_path, "--zip", str(zip_path))
     assert "already exists" in str(exc.value.code)
+
+
+def _corrupt_first_member_data(zip_path: Path) -> None:
+    data = bytearray(zip_path.read_bytes())
+    # 本地檔頭 30 bytes 固定長度加檔名、extra 之後才是壓縮資料
+    name_len = int.from_bytes(data[26:28], "little")
+    extra_len = int.from_bytes(data[28:30], "little")
+    start = 30 + name_len + extra_len
+    data[start + 2] ^= 0xFF
+    zip_path.write_bytes(bytes(data))
+
+
+def test_corrupted_member_data_raises_package_error(tmp_path: Path) -> None:
+    import zipfile
+
+    members = package_members(tmp_path / "w")
+    bad = tmp_path / "c.zip"
+    with zipfile.ZipFile(bad, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+    _corrupt_first_member_data(bad)
+    with pytest.raises(ModelPackageError, match="corrupted"):
+        import_model(bad, tmp_path / "models")
+    assert not (tmp_path / "models").exists()
+
+
+def test_main_corrupted_zip_exits_with_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import zipfile
+
+    bad = tmp_path / "c.zip"
+    with zipfile.ZipFile(bad, "w", compression=zipfile.ZIP_STORED) as zf:
+        for name, data in package_members(tmp_path / "w").items():
+            zf.writestr(name, data)
+    _corrupt_first_member_data(bad)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, tmp_path, "--zip", str(bad))
+    assert "corrupted" in str(exc.value.code)

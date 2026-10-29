@@ -1,6 +1,6 @@
 """[一次性] 匯入 notebook 產生的模型包（開發規格 7.27 步驟 3、威脅與對策）。
 
-用法：python -m radar.ml.training.import_model --zip <model_version>.zip
+用法：python -m radar.ml.training.import_model --zip <model_version>.zip [--sha256 <hex>]
 只解出白名單的三個檔，比對 model_card.files 的 SHA-256 後才寫入 models/<model_version>/。
 """
 
@@ -12,6 +12,7 @@ import shutil
 import sys
 import tempfile
 import zipfile
+import zlib
 from pathlib import Path
 
 from radar.common.log import log, setup_logging
@@ -58,8 +59,11 @@ def _read_members(zip_path: Path) -> dict[str, bytes]:
         members: dict[str, bytes] = {}
         total = 0
         for name in sorted(ALLOWED_FILES):
-            with zf.open(name) as fh:
-                data = fh.read(MAX_TOTAL_BYTES - total + 1)
+            try:
+                with zf.open(name) as fh:
+                    data = fh.read(MAX_TOTAL_BYTES - total + 1)
+            except (zipfile.BadZipFile, zlib.error, EOFError) as exc:
+                raise ModelPackageError(f"corrupted zip member: {name}") from exc
             total += len(data)
             if total > MAX_TOTAL_BYTES:
                 raise ModelPackageError("uncompressed size exceeds limit")
