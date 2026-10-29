@@ -9,13 +9,14 @@ import hashlib
 import json
 import re
 import shutil
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
 
 from radar.common.log import log, setup_logging
 from radar.ml.training.classifier import ONNX_MODEL_FILE, TOKENIZER_FILE
-from radar.ml.training.train import CARD_FILE, MODELS_DIR, ModelCard
+from radar.ml.training.train import CARD_FILE, MODELS_DIR, ModelCard, ModelKind
 
 ALLOWED_FILES = frozenset({ONNX_MODEL_FILE, TOKENIZER_FILE, CARD_FILE})
 # 解壓後的總大小上限（zip bomb）；以 zip 內實際讀出的位元組計，不信任標頭宣稱的大小
@@ -31,6 +32,14 @@ class ModelExistsError(FileExistsError):
     """models/<model_version>/ 已存在；不覆寫。"""
 
 
+def package_sha256(zip_path: Path) -> str:
+    digest = hashlib.sha256()
+    with zip_path.open("rb") as fh:
+        while chunk := fh.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _read_members(zip_path: Path) -> dict[str, bytes]:
     try:
         zf = zipfile.ZipFile(zip_path)
@@ -41,6 +50,11 @@ def _read_members(zip_path: Path) -> dict[str, bytes]:
         # 檔名必須逐字等於白名單：路徑、多餘、重複、缺少都拒絕
         if len(names) != len(set(names)) or set(names) != ALLOWED_FILES:
             raise ModelPackageError(f"zip members must be exactly {sorted(ALLOWED_FILES)}")
+        for info in zf.infolist():
+            if info.flag_bits & 0x1:
+                raise ModelPackageError(f"encrypted member not supported: {info.filename}")
+            if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                raise ModelPackageError(f"unsupported compression for {info.filename}")
         members: dict[str, bytes] = {}
         total = 0
         for name in sorted(ALLOWED_FILES):
@@ -61,13 +75,21 @@ def _parse_card(raw: bytes) -> ModelCard:
     if not isinstance(version, str) or not MODEL_VERSION_RE.fullmatch(version):
         raise ModelPackageError("invalid model_version")
     try:
-        return ModelCard.model_validate_json(raw)
+        card = ModelCard.model_validate_json(raw)
     except ValueError as exc:
         raise ModelPackageError("invalid model_card.json") from exc
+    if card.kind is not ModelKind.ONNX:
+        raise ModelPackageError("model_card kind must be onnx")
+    return card
 
 
-def import_model(zip_path: Path, models_dir: Path) -> Path:
-    """驗證通過才寫入 models_dir/<model_version>/ 並回傳該路徑；失敗時不留下半成品。"""
+def import_model(zip_path: Path, models_dir: Path, *, sha256: str | None = None) -> Path:
+    """驗證通過才寫入 models_dir/<model_version>/ 並回傳該路徑；失敗時不留下半成品。
+
+    sha256 給了就先比對整包 zip（大小寫不分），不符丟 ModelPackageError。
+    """
+    if sha256 is not None and package_sha256(zip_path) != sha256.strip().lower():
+        raise ModelPackageError(f"package sha256 mismatch, actual {package_sha256(zip_path)}")
     members = _read_members(zip_path)
     card = _parse_card(members[CARD_FILE])
     for name in (ONNX_MODEL_FILE, TOKENIZER_FILE):
@@ -93,9 +115,20 @@ def import_model(zip_path: Path, models_dir: Path) -> Path:
 def main() -> None:
     setup_logging("import_model")
     parser = argparse.ArgumentParser(description="匯入 BERT 模型包（S8-01）")
-    parser.add_argument("--zip", type=Path, required=True)
+    parser.add_argument("--zip", type=Path, required=True, help="notebook 產生的模型包 zip 路徑")
+    parser.add_argument(
+        "--sha256",
+        help="預期的整包 zip SHA-256（hex，大小寫不分）；給了就比對，不符拒絕匯入",
+    )
     args = parser.parse_args()
-    target = import_model(args.zip, MODELS_DIR)
+    try:
+        digest = package_sha256(args.zip)
+        log.info("package sha256 %s", digest)
+        target = import_model(args.zip, MODELS_DIR, sha256=args.sha256)
+    except ModelExistsError as exc:
+        sys.exit(f"error: model version already exists: {exc}")
+    except (ModelPackageError, OSError) as exc:
+        sys.exit(f"error: {args.zip}: {exc}")
     log.info("imported %s; next: python -m radar.ml.training.evaluate --model %s", target, target)
 
 

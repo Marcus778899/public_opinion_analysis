@@ -1246,7 +1246,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 |---|---|---|---|
 | 1. 匯出訓練資料 | 甲方 | `python -m radar.ml.training.export`（與 baseline 相同，S3-06） | `data/datasets/<名稱>.jsonl` 與同名的 meta 檔：每列 `post_id`、`board`、`text`（已用 `post_text` 截斷到 `max_chars`）、`polarity`；不含作者、推文、人工測試集 |
 | 2. fine-tune | 甲方在 Colab 執行 `notebooks/bert_finetune.ipynb`，第一格參數 `BASE` 選預訓練模型（`macbert`＝`hfl/chinese-macbert-base`、`ckip`＝`ckiplab/bert-base-chinese`，D-021），兩個各執行一次 | 工作階段上傳步驟 1 的兩個檔（D-024） | 每次執行兩個模型包：fp32 `<model_version>.zip` 與 int8 動態量化 `<model_version>-int8.zip`（格式見下表），兩次共四個；notebook 最後一格印出各檔的 SHA-256 |
-| 3. 匯入 | 甲方 `python -m radar.ml.training.import_model --zip <路徑>` | 模型包 | `models/<model_version>/`（不進 git，`.gitignore` 已含 `/models/`、`*.onnx`） |
+| 3. 匯入 | 甲方 `python -m radar.ml.training.import_model --zip <路徑> [--sha256 <整包 SHA-256>]`；一律印出整包 SHA-256，給了 `--sha256` 就比對（大小寫不分），不符拒絕；檔案不存在、不是 zip、版本已存在、驗證失敗都印一行說明並以非 0 結束（無 traceback） | 模型包 | `models/<model_version>/`（不進 git，`.gitignore` 已含 `/models/`、`*.onnx`） |
 | 4. 測試集評估 | 甲方 `python -m radar.ml.training.evaluate --model models/<model_version>`，四個模型包各跑一次 | 人工測試集（只在本機） | `models/<model_version>/evaluation.md`（與 baseline 同格式），另加 CPU 推論耗時（每篇 p50／p95、每批 `INFERENCE_BATCH_SIZE` 篇的耗時，記下 `INFERENCE_THREADS`）與程序記憶體峰值；依「自行決定」選一個進 shadow |
 | 5. shadow 並行 | 甲方 `make up-shadow`（`.env` 設 `INFERENCE_SHADOW_MODEL_VERSION`） | `cdc.public.posts` | `predictions.shadow` → ClickHouse `predictions_shadow` |
 | 6. 比較 | 甲方 `python -m radar.ml.training.compare --a <現行版本> --b <shadow 版本> --since <shadow 開始時間>` | ClickHouse | `models/<b>/comparison.md`、`data/review/disagreements-<a>-vs-<b>.csv` |
@@ -1322,7 +1322,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 
 | 資產 | 威脅 | 對策 |
 |---|---|---|
-| 推論主機（載入模型的程序） | 模型包在下載或傳遞途中被換掉；pickle 格式載入即執行任意程式 | 只接受 ONNX、JSON；`import_model` 比對 `model_card.files` 的 SHA-256，甲方對照 notebook 最後一格印出的值；`model_card` 用 pydantic 驗證，`labels` 必須恰好是三個 `Polarity` |
+| 推論主機（載入模型的程序） | 模型包在下載或傳遞途中被換掉；pickle 格式載入即執行任意程式 | 只接受 ONNX、JSON；`import_model` 比對 `model_card.files` 的 SHA-256，並可用 `--sha256` 比對整包 zip（甲方對照 notebook 印出的整包值）；`kind` 必須是 `onnx`，加密成員與 STORED／DEFLATED 以外的壓縮法拒絕；甲方對照 notebook 最後一格印出的值；`model_card` 用 pydantic 驗證，`labels` 必須恰好是三個 `Polarity` |
 | 本機檔案系統 | 模型包的 zip slip、zip bomb；`model_version` 帶路徑字元 | 只解出白名單的三個檔名，不依 zip 內路徑；解壓總大小上限 2 GB；`model_version` 限 `^[a-z0-9][a-z0-9-]{0,63}$`；目標資料夾已存在就拒絕 |
 | 預訓練模型的授權 | `ckiplab/bert-base-chinese` 為 GPL-3.0，散布模型或相關程式要負擔 GPL 義務；GPL 是否及於權重查不到判定（調查 1） | 甲方接受，只在自己的機器與 VM 使用、不對外散布（D-021）；`models/` 不進 git、模型包不對外提供；日後要對外提供須重新評估 |
 | 預訓練模型的來源 | Hugging Face 上同名模型被改、含自訂程式；權重是 pickle 格式，載入即執行程式 | notebook 釘 `revision`（commit hash，含 `ckip` 用的 Google tokenizer repo）、`trust_remote_code=False`；`base_model` 連同 revision 記進 card，tokenizer 的來源與 revision 一併記入。兩個模型的 main 都只有 `pytorch_model.bin`（調查「模型 revision」節），依 D-025：`ckip` 釘 safetensors 轉換 PR 的 commit、只載 safetensors（`use_safetensors=True`）；`macbert` 無 safetensors，載 `.bin`，第一格檢查 `torch>=2.6`（`weights_only` 預設）不符就停止；pickle 只在用完即丟的 Colab VM 解開 |
