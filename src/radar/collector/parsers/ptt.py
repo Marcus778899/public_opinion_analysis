@@ -194,15 +194,17 @@ _FUTURE_TOLERANCE = timedelta(days=1)
 def _bounded_comment_time(
     when: datetime | None, post_created_at: datetime, crawled_at: datetime
 ) -> datetime | None:
-    """補年份的結果晚於爬取時間時，退一年（文章跨很久才被推）；仍不合理回 None 並記 log。"""
+    """補成隔年而落在未來的推文，視為轉錄／修改帶入的舊推文，退回文章年份；其餘未來時間回 None。"""
     if when is None or when <= crawled_at + _FUTURE_TOLERANCE:
         return when
-    try:
-        earlier = when.astimezone(PTT_TZ).replace(year=when.astimezone(PTT_TZ).year - 1)
-    except ValueError:
-        earlier = None
-    if earlier is not None and post_created_at <= earlier <= crawled_at + _FUTURE_TOLERANCE:
-        return earlier.astimezone(UTC)
+    local = when.astimezone(PTT_TZ)
+    if local.year > post_created_at.astimezone(PTT_TZ).year:
+        try:
+            earlier = local.replace(year=local.year - 1).astimezone(UTC)
+        except ValueError:
+            earlier = None
+        if earlier is not None and earlier <= crawled_at + _FUTURE_TOLERANCE:
+            return earlier
     log.warning(f"comment time in the future, set to None: {when} (crawled {crawled_at})")
     return None
 
