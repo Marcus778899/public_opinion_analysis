@@ -6,8 +6,8 @@
 
 ## 目標與範圍
 
-- 本輪：處理 backlog（階段 9 暫緩，甲方 10-29）；項目待甲方確認
-- 不做：階段 9 上雲；階段 10 以後；多天驗收（D-031）
+- 本輪：處理 backlog（階段 9 暫緩）：第 1 批 #179 #180 #172 #146 #66；第 2 批 #173 #174 #175 #176 #177 #162 #168
+- 不做：階段 9 上雲；階段 10 以後；多天驗收（D-031）；其餘 backlog
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
@@ -46,10 +46,14 @@
 | bert-derive-max-len | backend | done | 0 | PR #203 |
 | shadow-memory-measure | backend | done | 0 | reports/shadow-memory-measure.json（只量測，已作廢 PR） |
 | bert-batch-tokens-default | backend | done | 0 | PR #206 |
+| comment-year-infer | backend | qa-fail | 0 |  |
+| consumer-commit-wait | backend | done | 0 | PR #210 |
+| gossiping-gap-investigate | backend | done | 0 | reports/gossiping-gap-investigate.json（只調查，已作廢 PR） |
+| init-exit-code | backend | done | 0 | PR #213（只加回歸測試，255 無法重現） |
 
 ## 卡住／待甲方決定
 
-- （無）
+- 待甲方決定 D-032（漏抓文章要不要補）、D-033（246 則未來時間推文要不要重爬修正）
 
 ## 注意事項（踩過的坑）
 

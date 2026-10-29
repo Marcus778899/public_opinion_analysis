@@ -1,6 +1,5 @@
 import itertools
 import json
-import threading
 
 import pytest
 from confluent_kafka import KafkaError, KafkaException, TopicPartition
@@ -451,14 +450,8 @@ def test_commit_succeeds_on_last_allowed_retry():
 
 
 def test_stop_during_commit_retry_wait_leaves_batch_uncommitted():
-    consumer, fake, _ = build([[msg(1)]], lambda items: None)
-
-    class StopOnWait(threading.Event):
-        def wait(self, timeout=None):
-            self.set()
-            return True
-
-    consumer._stop = StopOnWait()  # noqa: SLF001 - 模擬等待期間收到 SIGTERM
+    consumer, fake, _ = build([[msg(1)]], lambda items: None, backoff=lambda: itertools.repeat(5.0))
+    consumer._sleep = lambda _s: consumer.stop()  # noqa: SLF001 - 模擬等待期間收到 SIGTERM
     fake.on_exhausted = consumer.stop
     fake.commit_errors = [KafkaException(FakeError(KafkaError.COORDINATOR_LOAD_IN_PROGRESS))]
 
@@ -485,3 +478,22 @@ def test_commit_exception_without_error_arg_raises():
 
     with pytest.raises(KafkaException):
         consumer.run()
+
+
+def test_sleep_interruptible_stopped_before_start_does_not_sleep():
+    sleeps: list[float] = []
+    clock = FakeClock()
+    c = BatchConsumer(
+        SETTINGS,
+        group_id="g",
+        topics=["in"],
+        model=Event,
+        handler=lambda items: None,
+        dlq=None,  # type: ignore[arg-type]
+        consumer=FakeConsumer(batches=[], clock=clock),
+        clock=clock,
+        sleep=sleeps.append,
+    )
+    c.stop()
+    c._sleep_interruptible(5.0)
+    assert sleeps == []
