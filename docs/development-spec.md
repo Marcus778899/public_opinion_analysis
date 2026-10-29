@@ -131,7 +131,7 @@
 |---|---|
 | 序列化 | 自寫 topic 用 JSON（pydantic model 定義在 `common/schemas.py`）；CDC topic 用 Avro + Apicurio |
 | 版本 | 每則 JSON 訊息帶 `schema_version`，只做向後相容的變更（加欄位） |
-| Key | 依設計文件：`post_id`；`crawl.tasks` 的列表任務例外，用 `board`（見 7.1），且 partition 由送出端明確指定（見 7.10） |
+| Key | 依設計文件：`post_id`；`crawl.tasks` 的列表任務例外，用 `board`（見 7.1），且 partition 由送出端明確指定（見 7.10；爬蟲送的續抓任務不指定，見 7.28） |
 | Producer | `acks=all`、`enable.idempotence=true`、`compression.type=zstd`、`message.max.bytes=5MB`（`raw.html` 爆文可能超過預設 1MB） |
 | Consumer | 關閉 auto commit，處理完（含寫入下游）才 commit，at-least-once |
 | 錯誤處理 | 暫時性錯誤（網路、DB 斷線）：指數退避重試，不 commit；資料錯誤（解析、驗證失敗，或 handler 回報寫不進下游的訊息）：寫入 `dlq` 後 commit（7.13） |
@@ -182,12 +182,15 @@
   "board": "Stock",
   "url": "https://www.ptt.cc/bbs/Stock/index.html",
   "post_id": null,                // type=post 時必填
-  "reason": "schedule",           // schedule | manual | recrawl
+  "reason": "schedule",           // schedule | manual | recrawl | backfill
+  "since": null,                  // type=list 選填：往前翻到不晚於此時間的文章（7.28）
+  "backfill_depth": 0,            // reason=backfill：這條續抓鏈已讀的頁數
   "created_at": "..."
 }
 ```
 
 - `type=post` 必須帶屬於 `board` 的 `post_id`；`type=list` 不可帶
+- `since`、`backfill_depth` 只用於 `type=list`（post 任務必須是 null、0）；`reason=backfill` 只用於 `type=list`，由爬蟲送出（7.28）
 - Kafka key：list 任務用 `board`、post 任務用 `post_id`（`CrawlTask.kafka_key()`，見 7.1）
 - list 任務的 partition 依啟用中看板的名稱排序輪流指定，不靠 key hash（`resolve_list_partition`，見 7.10）
 
@@ -367,6 +370,7 @@
 | 階段 7 規劃：Dashboard 呈現方式（7.25） | ✅ 實作完成（2026-10-21）；呈現方式已定案：全用 Grafana（D-014）；`dashboard-grafana-infra`、`dashboard-views`、`dashboard-panels`、`dashboard-integration` 完成（畫面截圖由階段收尾的 uat 做） | — |
 | 階段 8 規劃：BERT 與 shadow 比較（7.27） | ✅ 文件完成（2026-10-21，`bert-design`）；D-020～D-024 定案；骨架 `bert-skeleton` | — |
 | 整合測試改用 compose `test` 服務、CI 加速（7.26，#78） | ✅ `test-infra-compose`、`test-infra-fast-waits` 完成（2026-10-20；本機 150 個全過、連跑兩次、`-n 0` 也過；CI Integration Test 1 分 56 秒） | — |
+| 停機後補抓深度、管線停擺偵測、Kafka coordinator 故障（7.28，#180） | ⬜ 文件完成（2026-10-29，`pipeline-gap-design`）；待實作 `crawl-backfill-depth`、`pipeline-stall-alert`，Kafka 升級待甲方決定。10-08～10-29 的停機缺口依 D-032 不補，記在 7.29 | — |
 | S5-06～S5-07 Telegram bot（7.21） | ✅ 完成；2026-10-16 在開發環境以真的 Telegram 實測指令與推送，修正 compose 漏掉 `app-env`。階段 5 驗收第 1 項（人工暴增約 10 秒收到通知）通過 | — |
 
 階段 1 拆成 5 個 PR；全部完成後依下方「驗收」逐項驗證，通過才把 `develop` 合進 `main` 並打 `stage-1` tag；階段 2 相同。階段 3 起的發版方式見 D-003。
@@ -377,7 +381,7 @@
 |---|---|---|
 | 1 | #59 文章警示門檻 | 不修的話警示多到無法使用，也會干擾階段 6 的實機測試 |
 | 2 | #52 晚到的舊快照刪掉較新的推文 | 資料正確性 |
-| 3 | ✅ 調查 Stock、Boy-Girl、Tech_Job 每天文章數偏少（2026-10-17 近 24 小時各 34、3、2 篇） | **結論：PTT 上本來就少，沒有漏抓**（2026-10-17）。三個看板列表前 3 頁共 139 篇，PG 全部都有；PTT 上 Stock 約 30 小時 42 篇（每天約 34）、Boy-Girl 15 天 51 篇（約 3.4）、Tech_Job 21 天 46 篇（約 2.2）。10/13～10/14 數字更低是開發環境停機（10/13 02Z～10/15 06Z）。看板保留；Stock 標註照「累積到 400 篇」進行 |
+| 3 | ✅ 調查 Stock、Boy-Girl、Tech_Job 每天文章數偏少（2026-10-17 近 24 小時各 34、3、2 篇） | **結論：PTT 上本來就少，沒有漏抓**（2026-10-17）。三個看板列表前 3 頁共 139 篇，PG 全部都有；PTT 上 Stock 約 30 小時 42 篇（每天約 34）、Boy-Girl 15 天 51 篇（約 3.4）、Tech_Job 21 天 46 篇（約 2.2）。10/13～10/14 數字更低是開發環境停機（10/13 02Z～10/15 06Z；所有停機缺口見 7.29）。看板保留；Stock 標註照「累積到 400 篇」進行 |
 | 4 | 階段 6：Telegram 互動與情緒呈現 | 先合併文件，再依骨架、實作兩輪進行 |
 | 5 | 階段 7：Dashboard | |
 | 6 | 階段 8：BERT 與 shadow 比較 | |
@@ -1521,6 +1525,117 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 | 每批耗時門檻的統計量 | p50 < 30 s 管吞吐量、最大 ≤ 60 s 管 `max.poll.interval.ms`（理由見「順序 3 判定」） |
 | 補資料每批耗時的量法 | 從 `predictions_shadow` 相鄰 `predicted_at` 推算，不為此加 log 或改程式；只算 ≥ 50 篇的批（補資料的滿批） |
 
+### 7.28 停機後補抓深度與管線停擺偵測（規劃，2026-10-29，#180、#219）
+
+#180 的調查（`reports/gossiping-gap-investigate.json`）找到兩個程式問題：
+
+- **補抓深度不足**：`CrawlHandler.handle_list` 在快取為空（重啟後）時只讀第一頁；快取有內容時也最多 `max_list_pages=3` 頁。Gossiping 每小時約 33 篇，停機 1 小時以上，第一頁以前的文章都不會被抓，10-08～10-28 Gossiping、HatePolitics 共漏約 1 萬篇（7.29）
+- **靜默停擺**：10-28 16:18Z 起 kafka_3 的 group coordinator 故障，crawler、ingest 等 consumer group 無限重新平衡，管線停了約 10 小時；容器都是 Up、Scheduler 照常派工，`cdc-watchdog` 只看 CDC，沒有任何警告
+
+#### A. 補抓深度
+
+| 項目 | 決定 |
+|---|---|
+| 要補到哪裡 | 該看板在 PG 最新一篇文章的時間（`posts.created_at` 最大值）減 10 分鐘，叫 `since`；爬蟲翻頁直到遇到不晚於 `since` 的文章 |
+| 誰查 PG | Scheduler：`make_list_task_sender` 每次送列表任務前查 `SELECT max(created_at) FROM posts WHERE board = :board`（Core `select()`，同 `DuePostDispatcher` 的 engine）。爬蟲照舊不碰 PG |
+| 查不到時 | 看板還沒有文章、或查詢失敗（記 WARNING）→ `since` 為 null，爬蟲只讀第一頁（手動觸發也是）；新看板不往回翻 |
+| 訊息格式 | `crawl.tasks` 加 `since`、`backfill_depth`，`reason` 加 `backfill`（3.1）；只加欄位，`schema_version` 仍為 1 |
+| 翻頁規則（取代 `cache_was_empty`） | 讀完一頁後，以下全部成立才往前翻：`since` 不是 null；這頁有連結的文章都不在列表快取（`all_new`）；這頁最舊文章的時間（檔名 epoch，`created_at_from_filename`）晚於 `since`；有上一頁 |
+| 每個任務最多幾頁 | 沿用 `max_list_pages=3`；3 頁約 63 次請求、約 3 分鐘，低於 `max.poll.interval.ms` 300 秒。3 頁後還要翻 → 送一個續抓任務，本任務結束 |
+| 續抓任務 | `type=list`、`reason=backfill`、`url`=下一個要讀的上一頁、`since` 照抄、`backfill_depth`=這條鏈已讀的頁數；key=`board`，不指定 partition（key hash）。和其他輸出一樣在 commit 前 flush |
+| 硬上限 | 一條鏈最多 80 頁（`CrawlHandler` 建構參數 `max_backfill_pages`，同 7.17 不開環境變數）。到上限記 ERROR（看板、`since`、停下那頁最舊文章的時間），更早的缺口不補 |
+| 略過積壓的列表任務 | 爬蟲記住每個看板最近一次開始處理列表任務的時間；`reason` 不是 `backfill` 且 `created_at` 早於這個時間的列表任務直接略過（同 7.12 的道理：之後已經讀過更新的列表）。重啟後清空 |
+| 正常運作時 | 快取接得上，第一頁就有見過的文章，只讀一頁，與現在相同；兩次輪詢間新文章超過一頁時，翻到 `since` 為止（約前一分鐘），取代原本固定最多 3 頁 |
+| 部署 | 舊爬蟲忽略新欄位（`extra="ignore"`），新舊 Scheduler 都相容；`reason=backfill` 只有新爬蟲會送，舊爬蟲收到會驗證失敗進 DLQ，3 個爬蟲要一起更新（`make up-app` 同一個 image） |
+
+**請求量估算**（Gossiping 每天約 790 篇＝每小時 1.65 頁、HatePolitics 每小時約 22.5 篇＝1.1 頁；一頁＝1 次列表＋最多 20 次內頁＝21 次；爬蟲每次請求平均 3 秒）
+
+| 停機時間 | 兩看板補抓頁數 | 請求數 | 耗時（兩條鏈落在同一個爬蟲時） |
+|---|---|---|---|
+| 1 小時 | 約 3 頁 | 約 60 | 約 3 分鐘 |
+| 24 小時 | 約 66 頁 | 約 1,400 | 約 70 分鐘 |
+| 53 小時（10-13～10-15，最長的一次） | Gossiping 達上限 80 頁、HatePolitics 約 60 頁 | 約 2,900 | 約 2.4 小時；Gossiping 最早約 5 小時補不回 |
+
+- **最高速率不變**：每個爬蟲的 `RateLimiter` 不動，3 個爬蟲合計仍 ≤ 1 次/秒（階段 1 驗收的預算）；補抓只是讓爬蟲在上表的時間內維持最高速率。上限 80 頁＝一條鏈最多 1,680 次請求
+- **同一個 partition 的其他任務**：續抓任務排在 partition 尾端，與一般任務輪流處理，每輪最多多等一個續抓任務（約 3 分鐘）；這段期間累積的重複重爬由 7.12 略過
+- **下游**：補回的推文多數比觀測時間早 30 分鐘以上，熱度偵測不計入（7.20 `HEAT_MAX_DELAY_MIN`）；推論、串流標註把補回的文章當新文章處理一次
+
+#### B. 管線停擺偵測
+
+| 項目 | 決定 |
+|---|---|
+| 訊號 | ClickHouse `posts_history` 最新的 `changed_at`：端到端，爬蟲、Kafka、ingest、PG、CDC、ClickHouse 任一段停住都會停止前進 |
+| 門檻 | 超過 `CDC_WATCHDOG_STALE_ALERT_S`（預設 1800 秒）沒有新資料。實測 09-29～10-29 全部看板合計「有變化的分鐘」之間的間隔：超過 30 分鐘 37 次，全部落在 7.29 的停機區間、10-16 的主機間歇休眠、10-22～10-23 每 20～90 分鐘一段的間歇中斷（原因未確認，10-23 文章數也只有平常一半）與 10-20 01:45～02:45Z 一次（台北上午，原因未確認）；其餘時段的間隔都在 30 分鐘內，多數不到 10 分鐘 |
+| 誰做 | `cdc-watchdog` 加一項檢查（已有 PG、heartbeat、只跑 1 個 instance；7.16）。狀態判斷照 7.16 寫成純函式 `FreshnessWatch.observe(latest, now)`，單元測試不需要 ClickHouse |
+| 怎麼算 | `落後 = now − max(最後一次查到的 max(changed_at), watchdog 啟動時間)`；用牆上時鐘（要和資料時間比）。查詢失敗記 WARNING、沿用上次的值，ClickHouse 停太久也會在門檻後告警 |
+| 通知 | 進入停擺記一次 ERROR（loggerhelper 送 Slack）、恢復記一次 INFO；停擺期間 heartbeat 改 ping `/fail`，healthchecks.io 寄 email。沿用 7.16 的管道，不新增 |
+| 連線 | 沿用 `ClickHouseSettings`（`CLICKHOUSE_*`，compose 已有）；`ClickHouseClient` 加 `timeout_s` 參數（預設 30 秒不變），watchdog 傳 `CDC_WATCHDOG_REQUEST_TIMEOUT_S` |
+| 不自動處理 | 告警後人工處理（下方 C）；watchdog 沒有 Docker 權限，也不該有 |
+| 已知限制 | 開發機休眠醒來到管線補上前，會有一次停擺告警（heartbeat 中斷本來就會寄信）；上雲後（階段 9）不會發生 |
+
+#### C. Kafka 4.1.0 的 coordinator 故障
+
+- 就是 KAFKA-19888（症狀相同：時鐘跳動後 `CoordinatorRuntimeMetricsImpl` 記到負值，`__consumer_offsets` 寫入持續逾時、group 無限重新平衡；只有重啟該 broker 才恢復，coordinator 回到同一個 broker 後可能再發生）。修正版本 4.1.2（2026-03-17）、4.2.0；Docker Hub 有 `apache/kafka:4.1.2`
+- 升到 4.1.2：待甲方決定（D-034）
+- 升級前的處理：找出 log 有 `Histogram recorded value cannot be negative` 的 broker，`docker compose -f infra/docker-compose.yaml --env-file .env restart kafka_N`
+- 升級步驟：`.env` 的 `KAFKA_VERSION` 改 4.1.2，一次一個 broker `docker compose … up -d kafka_N`，等 healthy 再換下一個（3 節點、`min.insync.replicas=2`，一次停一個不影響寫入）
+
+#### 派工順序
+
+| 順序 | task_id | 負責 | 相依／平行 | 負責檔案 | 驗收測試 |
+|---|---|---|---|---|---|
+| 1 | `crawl-backfill-depth` | backend | 可與 2 平行 | `src/radar/common/schemas.py`（`CrawlTask`）、`src/radar/common/enums.py`（`CrawlReason`）、`src/radar/common/tasks.py`（`make_list_task` 加 `since`、續抓任務）、`src/radar/collector/crawler.py`、`src/radar/collector/scheduler.py`、`tests/unit/collector/`、`tests/unit/common/`、`tests/integration/collector/`（Scheduler 查 PG）、`tests/e2e/fake_ptt.py`、`tests/e2e/test_pipeline.py`（假 PTT 放超過 3 頁新文章再重啟爬蟲，全部補到） | `tests/unit/acceptance/crawl-backfill-depth/`（翻頁規則、續抓任務內容、80 頁上限、略過積壓的列表任務、訊息驗證）；`tests/integration/acceptance/crawl-backfill-depth/`（真的 PG：`since` 取該看板最新文章、沒有文章時為 null） |
+| 2 | `pipeline-stall-alert` | backend | 可與 1 平行 | `src/radar/cdc/watchdog.py`、`src/radar/common/settings.py`（`CdcWatchdogSettings`）、`src/radar/common/clickhouse.py`（`timeout_s`）、`.env.example`（選填註解 `# CDC_WATCHDOG_STALE_ALERT_S=1800`）、`tests/unit/cdc/`、`tests/unit/common/`、`tests/integration/cdc/` | `tests/unit/acceptance/pipeline-stall-alert/`（門檻前後、只在狀態改變時記、查詢失敗沿用舊值、停擺時 heartbeat 送 `/fail`）；`tests/integration/acceptance/pipeline-stall-alert/`（真的 ClickHouse：讀到 `posts_history` 最新 `changed_at`） |
+| 3 | `kafka-upgrade-4-1-2` | backend | 待甲方核可；在 2 之後（同改 `.env.example`） | `.env.example`（`KAFKA_VERSION=4.1.2`） | 無；CI 以 `.env.example` 的版本跑全部整合測試即為驗證，開發環境由甲方改 `.env` 後照上方步驟逐台升級 |
+
+- 1、2 的 `tests/unit/common/` 不可平行改同一個檔：1 改 `test_schemas.py`、`test_tasks.py`，2 改 `test_clickhouse.py`、`test_settings.py`
+- 本節與設計文件（4.2、4.4、4.6、6.4）已先寫成目標行為；實作單不改文件，實作與文件不符時回報 manager
+- 1、2 互不相干、沒有跨模組流程，不另開整合單；各自的 compose 專案跟著 worktree，DB 不互撞
+
+#### 自行決定
+
+| 項目 | 理由 |
+|---|---|
+| 缺口終點用 PG 最新 `created_at`，不讓爬蟲記 watermark | 爬蟲不碰 PG、沒有持久狀態；PG 本來就是「已收到哪些文章」的唯一來源 |
+| `since` 減 10 分鐘 | `posts.created_at` 取文章標頭時間（只到分、作者可改），列表用檔名時間；差一點只會多讀一頁 |
+| 續抓走 Kafka，不在一個任務裡翻完 | 一次翻完 24 小時的缺口要 70 分鐘，遠超過 `max.poll.interval.ms`；續抓任務在 Kafka 裡，爬蟲中途重啟也不會斷 |
+| 續抓任務不指定 partition | handler 拿不到來源 partition，爬蟲也不知道啟用看板清單（7.10）；舊頁面不在任何爬蟲的快取，換一個爬蟲處理結果相同。代價是兩個看板的續抓可能落在同一個 partition，耗時以上表最壞情況估 |
+| 上限 80 頁、不開環境變數 | ≈ Gossiping 48 小時；與 7.17 的門檻一致寫成建構參數；最高速率不變，上限只限制持續時間 |
+| 手動觸發（API）不帶 `since` | 手動是「現在立刻爬一次」；不改 API |
+| 略過積壓的列表任務 | 10-28 停擺 10 小時，Gossiping 積了約 600 個列表任務，各 1 次請求、約 30 分鐘，續抓任務還要排在它們後面 |
+| 停擺訊號用 ClickHouse，不用 consumer lag | coordinator 故障時查 lag 本身也要走 coordinator；lag 要逐個 group 設門檻；ClickHouse 是 Dashboard 看到的終點 |
+| 不分看板偵測 | Tech_Job 一天約 2 篇，分看板要各設門檻；全部看板合計已能抓到 10-08～10-28 每一次停擺 |
+| 門檻 30 分鐘 | 實測正常時段的間隔都在 30 分鐘內（上方 B） |
+| 放在 `cdc-watchdog` | 已有 heartbeat 與 email 管道、單一 instance；另開服務要多一個 healthchecks check |
+
+#### 需調查
+
+| 項目 | 現況 |
+|---|---|
+| 10-13 01:17～06:31Z、10-20 01:45～02:45Z、10-22～10-23 間歇、10-24 21:08～23:46Z 的靜默原因 | ClickHouse 活著但全管線沒有新資料；容器已重建、沒有當時的 log。要查需開發環境保留 log（compose 的 logging 設定或 Loki），另開單 |
+| 4.1.0 → 4.1.2 其他變更的影響 | patch 版；以 CI 整合測試與開發環境升級後的 `/status`、本節 B 的告警確認 |
+
+### 7.29 開發環境停機缺口（2026-10-08～10-29，D-032）
+
+依 D-032 不回頭補，只記錄。PG 與 ClickHouse 逐日逐板一致（CDC 沒有遺漏）；細節與查詢見 `reports/gossiping-gap-investigate.json`。時間為 UTC，依 ClickHouse `posts_history` 全部看板都沒有新事件的區間。
+
+| # | 區間（UTC） | 長度 | 原因 |
+|---|---|---|---|
+| 1 | 10-08 09:52 → 10-09 08:20 | 22.5 h | 環境停機（主機休眠或關機） |
+| 2 | 10-10 11:32 → 10-12 05:06 | 41.6 h | 環境停機 |
+| 3 | 10-13 01:17 → 10-15 06:26 | 53.2 h | 前 5.2 h ClickHouse 活著但管線靜默（原因未確認），之後環境停機 |
+| 4 | 10-16 11:04 → 14:52 | 3.8 h | 疑似主機間歇休眠 |
+| 5 | 10-18 17:43 → 10-19 16:59 | 23.3 h | 環境停機 |
+| 6 | 10-21 08:53 → 10-22 07:00 | 22.1 h | 環境停機 |
+| 7 | 10-24 21:08 → 23:46 | 2.6 h | 原因未確認（ClickHouse 活著） |
+| 8 | 10-27 00:36 → 10-28 07:27 | 30.8 h | 環境停機 |
+| 9 | 10-28 16:18 → 10-29 02:35 | 10.3 h | Kafka coordinator 故障（KAFKA-19888，7.28 C），重啟 kafka_3 後恢復 |
+
+- **遺失量**（估計，區間 1～8）：Gossiping 約 6,200 篇、約 22 萬則推文；HatePolitics 約 4,300 篇；區間 9 另約 340、230 篇。重啟後只補回第一頁（7.28 A），停機日這兩個看板的文章數明顯偏低（異常日：10-11、10-13、10-14、10-19、10-22、10-27）
+- **其他看板沒有遺失**：Stock、Boy-Girl、Tech_Job 每天不到 100 篇，重啟後前 1～3 頁就補完；停機日的推文是重爬補進來的最終狀態，不是當時的快照
+- **用到這段資料時**：逐日、逐小時的統計與趨勢圖，這些區間要排除或標示；不可當成「當天討論少」。訓練與標註資料只是少了樣本，不受影響
+- 另有 246 則推文的 `commented_at` 落在未來（年份推斷錯誤），由 D-033 重爬修正，與本節無關
+
 ## 8. 風險清單
 
 ### 8.1 技術風險
@@ -1530,7 +1645,7 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 | ~~ClickHouse 讀不了 Apicurio 的 Avro 格式~~ | 階段 2 卡住 | **已排除（S2-01，2026-10-07）**：可直接讀，條件見設計文件 6.2 |
 | Debezium / Apicurio 升級後行為改變 | CDC 或 ClickHouse 讀取中斷 | 版本固定在 `.env.example`；升級時重跑設計文件 6.2 的檢查（2.x → 3.x 時就發現設定名稱被移除且不報錯） |
 | Connect task 失敗後停止 | ClickHouse 停止更新、WAL 累積 | Converter 快取設定減少失敗；`cdc-watchdog` 自動重啟並監看 replication slot（7.16） |
-| PTT 封鎖 IP | 資料中斷 | 請求速率預算（≤ 1 次/秒）、隨機間隔、7.2 的重爬門檻 |
+| PTT 封鎖 IP | 資料中斷 | 請求速率預算（≤ 1 次/秒）、隨機間隔、7.2 的重爬門檻；停機後補抓不提高速率，一條續抓鏈最多 80 頁（7.28 A） |
 | PTT 版面改版 | parser 失效 | `raw.html` 保留 3 天可重新解析；parser 失敗記 ERROR（可送 Slack），驗證失敗的訊息進 DLQ，`/status` 可看到 DLQ 數量 |
 | PTT 恢復伺服器端的 over18 檢查 | 列表頁變成確認頁 | 2026-10 實測伺服器端已不檢查（只在瀏覽器以 JS 導向）；爬蟲仍帶 `over18=1` cookie，parser 遇到確認頁會拋 `ParseError` |
 | LLM 免費額度不足或政策改變 | 標註進度變慢或成本上升 | 實測 `gemini-3.5-flash` 免費只有 20 次/天、`gemini-3.1-pro` 為 0；`Labeler` 介面可換服務商（Groq、OpenRouter、Gemini）或改付費 Batch API；backfill 可中斷續跑 |
@@ -1538,7 +1653,8 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 | PTT 回 HTTP 520（Cloudflare） | 該篇內頁本輪略過 | 24 小時驗收：520 ×23、525 ×14、521 ×4，佔請求 < 0.1%；**決定維持不重試**（重試會增加觸發 #11 的機會）。已在 PG 的文章由重爬補抓；新文章不記進列表快取，下一輪列表輪詢再抓（7.17）；單次記 WARNING，連續 20 次失敗才記 ERROR |
 | 使用者把文章情緒誤讀成推文的風向 | 錯誤解讀輿情 | 介面寫「文章情緒」並附信心，低於門檻顯示「不確定」；推噓、爭議度分開呈現（設計文件 15.8）；推文層級情緒列入「後續階段」14 |
 | Telegram 選單的回呼資料超過 64 bytes 或格式改版 | 按鈕失效 | `callback_data` 帶版本號，解析失敗時重送主選單；單元測試檢查最長的 post_id 在上限內（7.23） |
-| 開發機休眠 | 長時間驗收中斷、數據缺一段 | 驗收期間 `caffeinate -dims` 並接電源、不闔上螢幕（闔上仍會強制睡眠）；`cdc-watchdog` 的外部 heartbeat 停止時會寄 email（7.16）；上雲後（階段 9）不再依賴開發機 |
+| 開發機休眠 | 長時間驗收中斷、數據缺一段 | 驗收期間 `caffeinate -dims` 並接電源、不闔上螢幕（闔上仍會強制睡眠）；`cdc-watchdog` 的外部 heartbeat 停止時會寄 email（7.16）；重啟後由列表任務補抓到 PG 最新文章為止，最多 80 頁（7.28 A）；10-08～10-29 的缺口見 7.29；上雲後（階段 9）不再依賴開發機 |
+| 容器都在跑，但管線靜默停擺（例：Kafka coordinator 故障，KAFKA-19888） | 沒有新資料、沒有任何警告（10-28 停 10 小時） | `cdc-watchdog` 檢查 ClickHouse 最新資料時間，超過 30 分鐘記 ERROR 並讓 heartbeat 送 `/fail`（7.28 B）；Kafka 升 4.1.2 待甲方決定（7.28 C） |
 | 標註的系統性偏差 | 模型學到錯誤標準，資料越多越確定 | 固定主要標註者、改 prompt 修偏差、兩個不同家族的標註者交叉比對、人工測試集裁決（7.11） |
 | Grafana 的 ClickHouse plugin 與 Grafana、ClickHouse 版本不相容 | 升級後 dashboard 全部失效 | 版本釘完整 patch 號、plugin 在建置 image 時裝好（執行時不下載、不自動更新）；升級任一方都要過 `test_grafana_infra.py` 與 `tests/integration/dashboard/`（7.25） |
 | Python 端讀不了 CDC 的 Avro | S3-08 串流標註、階段 4 推論卡住 | 採用 `confluent-kafka[avro]`（fastavro + 官方 schema registry client，打 Apicurio 的 ccompat API）；已用 mock schema registry 與 S2-01 實測的欄位驗證解碼，待以實際 CDC 訊息確認 |
