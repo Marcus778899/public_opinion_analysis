@@ -79,7 +79,6 @@
 
 - 發版前在 e2e 環境跑 test_crawler_restart_backfills_more_than_three_pages（#225 未實跑）
 - 發版前：部署後從 bot log（callback step=…ms=）取 #82 各步驟實測，甲方親手點「我的訂閱」確認 2 秒內
-- 甲方：換掉開發環境 POSTGRES_PASSWORD、CLICKHOUSE_PASSWORD 的範例值（PG 先 ALTER USER），之後 manager 重新部署進入 v0.8.1 UAT
 
 ## 注意事項（踩過的坑）
 
