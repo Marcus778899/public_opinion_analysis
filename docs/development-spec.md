@@ -941,7 +941,19 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
   - `replay`：把檔案依原本的間隔（可加速）重送到 `replay.cdc.comments`；Avro bytes 原封不動，schema ID 在同一個 Apicurio 仍有效
   - `surge`：人工製造暴增：對指定文章在 N 分鐘內送 M 則 `op=c` 推文事件到 `replay.cdc.comments`，用 Apicurio 上 `cdc.public.comments-value` 的最新 schema 序列化；`commented_at` 與 `__source_ts_ms` 都分散在到當下為止的 N 分鐘
   - `surge` 的 `--count` 預設是 `HEAT_POST_MIN_COUNT`（文章門檻，否則觸發不了文章警示）；注入完會在下一分鐘補一筆事件，讓最後一分鐘結算（回放 topic 沒有後續事件）
-  - 回放與驗收時另開一個 heat：`HEAT_INPUT_TOPIC=replay.cdc.comments`、`HEAT_OUTPUT_TOPIC=replay.alerts`、`HEAT_CONSUMER_GROUP=heat-replay-$(date +%s)`，state 與正式的分開；consumer group 每次用新的（沿用舊 offset 會出現 DESTRUCTIVE STATE RECOVERY，#80），警示寫到 `replay.alerts`，bot 不訂閱，不會推到 Telegram
+  - **為什麼 surge 前一定要暖機**（F-1，#261）：看板基準累積滿 `HEAT_WARMUP_MIN`（60）個結算分鐘才會評估（7.20「觸發」）；新的 heat 狀態是空的，只跑 `surge` 一定是 0 則警示，不是壞掉。暖機資料要是同一個看板（`surge --post-id` 的看板）的 ≥ 75 分鐘真實推文：每則的推文時間（`commented_at`）要比進 PG 時間（`__source_ts_ms`）早不超過 `HEAT_MAX_DELAY_MIN`（30），超過的不計入，實測 90 分鐘錄製只有約 4 成可用，仍累積到 60 個以上結算分鐘。錄製範圍不能是系統停擺的時段
+  - **事件時間只能往前**（F-1 的根本原因，2026-10-30 實跑重現）：watermark 是該看板看過最大的觀測分鐘，比它早超過寬限（2 分鐘）的事件丟棄；新的 consumer group 從 topic 開頭按到達順序讀。`replay.cdc.comments` 若殘留上一輪的 `surge`（時間是當時的「現在」），這一輪的暖機資料（時間在過去）就全被當成遲到而丟掉，基準累積不到 60 個分鐘，警示 0 則、heat 也不報錯。UAT 第二種做法（record、replay 後再 surge）失敗就是這個原因：實測殘留時只累積 23 個樣本，topic 清乾淨後同樣步驟收到 2 則警示
+  - **完整步驟**（在專案根目錄；`UV` 代表 `uv run --env-file .env`）：
+    1. 清狀態：刪掉 `replay.cdc.comments`、`replay.alerts`（Kafka UI 或 Admin API）後執行 `make topics` 重建；刪掉上一輪的 `HEAT_STATE_DIR` 目錄。工具啟動時若發現 `replay.cdc.comments` 有舊訊息會印一行警告
+    2. 錄製：`UV python -m radar.streaming.replay record --since 2026-10-30T02:30:00+00:00 --until 2026-10-30T04:00:00+00:00 --out data/replay/x.jsonl`（時間帶時區；只讀正式 topic）
+    3. 另開終端機啟動回放用 heat（前景執行）：`HEAT_INPUT_TOPIC=replay.cdc.comments HEAT_OUTPUT_TOPIC=replay.alerts HEAT_CONSUMER_GROUP=heat-replay-$(date +%s) HEAT_STATE_DIR=/tmp/heat-replay UV python -m radar.streaming.heat`（本機執行 `KAFKA_BOOTSTRAP_SERVERS` 用 `localhost:9092,…`，`SCHEMA_REGISTRY_URL` 用 `http://localhost:8080/apis/ccompat/v7`；compose 的 heat 覆寫檔由 #259 處理）。log 出現 `heat consuming replay.cdc.comments as heat-replay-…` 才算起來
+    4. 暖機：`UV python -m radar.streaming.replay replay --file data/replay/x.jsonl --speed 1000`，等 heat 追上（consumer group 的 lag 剩 0～3，約 30 秒）
+    5. 暴增：`UV python -m radar.streaming.replay surge --post-id <暖機資料裡同一看板的 post_id>`（預設 80 則、3 分鐘，並補一筆收尾事件）
+    6. 看結果：約 1 分鐘內，`replay.alerts` 預期收到 1 則文章警示（`unit_type=post`、`value=80`，z-score 約 5～8）；另可能有 1 則看板警示（暖機與暴增合起來超過看板門檻 30）。看法：Kafka UI 的 `replay.alerts` Messages 頁，或 `UV python -c` 以 `isolation.level=read_committed` 的 consumer 讀（heat 是 exactly-once，沒提交的不會出現）。bot 不訂閱，不會推到 Telegram
+    7. 停掉回放 heat：在它的終端機按 Ctrl-C（背景執行就 `kill <PID>`）；不要動 compose 的正式 `heat`。自動化執行時改用會自己結束的方式（例如 Python `subprocess.run(timeout=…)`），避免留下殘留程序
+  - **沒看到警示時的查法**：①heat log 有沒有錯誤；②`replay.cdc.comments` 在步驟 1 前是否乾淨（殘留是最常見原因）；③暖機資料是否 ≥ 75 分鐘且包含 surge 的看板；④surge 的 post_id 看板是否與暖機相同；⑤同一 post_id 30 分鐘內不重複警示（`HEAT_COOLDOWN_MIN`），重做要清 state 並換 consumer group
+  - **做完要清**：回放用 heat 的 `HEAT_STATE_DIR`；consumer group `heat-replay-*`；Quix 為該 group 建的 changelog、repartition 內部 topic（名稱含 group 名稱）；`replay.cdc.comments`、`replay.alerts` 的殘留訊息（24 小時後也會自己清掉，但下一輪開始前要先清）
+  - **工具的錯誤處理**（比照 `import_model`）：每個參數都有 `--help` 說明；缺 Kafka 位址、檔案不存在或格式錯、`--since`／`--until` 格式或時區錯、`--since` 晚於 `--until`、`--speed`／`--count`／`--minutes` 非正數、post_id 格式錯，都只印一行說明並以非 0 結束
   - `replay.cdc.comments`、`replay.alerts` 列在 `topics.yaml`，保留 24 小時
 
 ### 7.21 Telegram bot 的實作選擇（S5-06～S5-07）
