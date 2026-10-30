@@ -406,3 +406,18 @@ def test_warn_if_dirty_closes_consumer_and_survives_kafka_error(monkeypatch):
     warn_if_replay_topic_dirty(MagicMock())
 
     consumer.close.assert_called_once()
+
+
+def test_main_surge_does_not_check_topic_for_leftovers(monkeypatch):
+    checked = []
+    monkeypatch.setattr(replay_mod, "warn_if_replay_topic_dirty", lambda k: checked.append(k))
+    monkeypatch.setattr(replay_mod, "kafka_settings_or_fail", lambda: MagicMock())
+    monkeypatch.setattr(replay_mod, "setup_logging", lambda *_a, **_k: None)
+    monkeypatch.setattr(replay_mod, "Producer", MagicMock())
+    monkeypatch.setattr(replay_mod, "SchemaRegistryClient", MagicMock())
+    monkeypatch.setattr(replay_mod, "surge", lambda *_a: 1)
+    monkeypatch.setattr(sys, "argv", ["replay", "surge", "--post-id", PID, "--count", "1"])
+
+    replay_mod.main()
+
+    assert checked == []

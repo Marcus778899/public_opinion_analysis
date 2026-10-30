@@ -385,7 +385,9 @@ def main() -> None:
             consumer.close()
         log.info("recorded %d messages to %s", n, args.out)
         return
-    warn_if_replay_topic_dirty(kafka)
+    # NOTE: 只在暖機的 replay 前檢查；surge 在暖機之後，topic 本來就有資料
+    if args.command == "replay":
+        warn_if_replay_topic_dirty(kafka)
     producer = Producer(producer_config(kafka))
     if args.command == "replay":
         n = replay(producer, messages, args.speed, time.sleep)
