@@ -74,6 +74,8 @@
 | secret-placeholder-guard | backend | done | 0 | PR #253 |
 | infra-secret-guard | backend | done | 0 | PR #256 |
 | heat-replay-align | backend | done | 0 | PR #258 |
+| comments-cdc-gap-investigate | backend | in-progress | 0 |  |
+| replay-alert-repro | backend | in-progress | 0 |  |
 
 ## 卡住／待甲方決定
 
