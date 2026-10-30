@@ -1,18 +1,32 @@
+import argparse
 import base64
+import sys
 from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock
 
 import pytest
+from confluent_kafka import KafkaException
 
 from radar.common.kafka import names
 from radar.common.schemas import CdcComment
+from radar.common.settings import KafkaSettings
+from radar.streaming import replay as replay_mod
 from radar.streaming.replay import (
     RecordedMessage,
+    build_parser,
+    kafka_settings_or_fail,
+    parse_time,
+    positive_float,
+    positive_int,
+    post_id_arg,
     read_file,
     record,
     replay,
     replay_delays,
+    replay_topic_has_messages,
     surge_events,
     surge_tail_event,
+    warn_if_replay_topic_dirty,
     write_file,
 )
 
@@ -270,3 +284,140 @@ def test_surge_tail_event_is_one_minute_after_last_and_parses():
     assert parsed.floor == 99
     assert event["__source_ts_ms"] == int((NOW + timedelta(minutes=1)).timestamp() * 1000)
     assert event["__op"] == "c"
+
+
+# --- 指令列（#261）---
+
+
+@pytest.mark.parametrize("text", ["2026-10-30T02:30:00", "2026-10-30"])
+def test_parse_time_without_timezone_rejected(text):
+    with pytest.raises(argparse.ArgumentTypeError, match="時區"):
+        parse_time(text)
+
+
+def test_parse_time_with_timezone_accepted():
+    assert parse_time("2026-10-30T02:30:00+00:00") == datetime(2026, 10, 30, 2, 30, tzinfo=UTC)
+
+
+def test_parse_time_garbage_rejected():
+    with pytest.raises(argparse.ArgumentTypeError, match="ISO 8601"):
+        parse_time("yesterday")
+
+
+@pytest.mark.parametrize("text", ["0", "-1", "abc", "1.5"])
+def test_positive_int_invalid_rejected(text):
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_int(text)
+
+
+def test_positive_int_valid_accepted():
+    assert positive_int("3") == 3
+
+
+@pytest.mark.parametrize("text", ["0", "-1", "abc", "nan", "inf"])
+def test_positive_float_invalid_rejected(text):
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_float(text)
+
+
+def test_positive_float_valid_accepted():
+    assert positive_float("1000") == 1000.0
+
+
+def test_post_id_arg_without_dot_rejected():
+    with pytest.raises(argparse.ArgumentTypeError, match="post_id"):
+        post_id_arg("bad")
+
+
+def test_post_id_arg_valid_accepted():
+    assert post_id_arg(PID) == PID
+
+
+def test_build_parser_every_option_has_help():
+    parser = build_parser()
+    subparsers = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    for name, sub in subparsers.choices.items():
+        for action in sub._actions:
+            assert action.help, f"{name} {action.option_strings} lacks help"
+
+
+def _run_main(monkeypatch, *argv):
+    monkeypatch.setattr(sys, "argv", ["replay", *argv])
+    monkeypatch.setattr(replay_mod, "setup_logging", lambda *_a, **_k: None)
+    with pytest.raises(SystemExit) as exc:
+        replay_mod.main()
+    return exc.value.code
+
+
+def test_main_replay_missing_file_exits_with_one_line(monkeypatch, tmp_path, capsys):
+    code = _run_main(monkeypatch, "replay", "--file", str(tmp_path / "nope.jsonl"))
+
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "nope.jsonl" in err and "Traceback" not in err
+
+
+def test_main_record_since_after_until_exits_nonzero(monkeypatch, tmp_path, capsys):
+    code = _run_main(
+        monkeypatch,
+        "record",
+        "--since=2026-10-30T10:00:00+00:00",
+        "--until=2026-10-30T09:00:00+00:00",
+        f"--out={tmp_path / 'o.jsonl'}",
+    )
+
+    assert code == 2
+    assert "--since" in capsys.readouterr().err
+
+
+def test_kafka_settings_missing_env_exits_with_variable_name(monkeypatch, capsys):
+    monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+    monkeypatch.setattr(replay_mod, "get_kafka_settings", KafkaSettings)
+
+    with pytest.raises(SystemExit) as exc:
+        kafka_settings_or_fail()
+
+    assert exc.value.code == 1
+    assert "KAFKA_BOOTSTRAP_SERVERS" in capsys.readouterr().err
+
+
+def _consumer_with_marks(marks: list[tuple[int, int]]) -> MagicMock:
+    consumer = MagicMock()
+    topic = names.REPLAY_COMMENTS
+    consumer.list_topics.return_value.topics = {topic: MagicMock(partitions=dict(enumerate(marks)))}
+    consumer.get_watermark_offsets.side_effect = lambda tp, timeout: marks[tp.partition]
+    return consumer
+
+
+def test_replay_topic_has_messages_true_when_any_partition_nonempty():
+    assert replay_topic_has_messages(_consumer_with_marks([(0, 0), (5, 9), (0, 0)]))
+
+
+def test_replay_topic_has_messages_false_when_all_empty():
+    assert not replay_topic_has_messages(_consumer_with_marks([(0, 0), (7, 7)]))
+
+
+def test_warn_if_dirty_closes_consumer_and_survives_kafka_error(monkeypatch):
+    consumer = MagicMock()
+    consumer.list_topics.side_effect = KafkaException("down")
+    monkeypatch.setattr(replay_mod, "Consumer", lambda _conf: consumer)
+    monkeypatch.setattr(replay_mod, "consumer_config", lambda *_a: {})
+
+    warn_if_replay_topic_dirty(MagicMock())
+
+    consumer.close.assert_called_once()
+
+
+def test_main_surge_does_not_check_topic_for_leftovers(monkeypatch):
+    checked = []
+    monkeypatch.setattr(replay_mod, "warn_if_replay_topic_dirty", lambda k: checked.append(k))
+    monkeypatch.setattr(replay_mod, "kafka_settings_or_fail", lambda: MagicMock())
+    monkeypatch.setattr(replay_mod, "setup_logging", lambda *_a, **_k: None)
+    monkeypatch.setattr(replay_mod, "Producer", MagicMock())
+    monkeypatch.setattr(replay_mod, "SchemaRegistryClient", MagicMock())
+    monkeypatch.setattr(replay_mod, "surge", lambda *_a: 1)
+    monkeypatch.setattr(sys, "argv", ["replay", "surge", "--post-id", PID, "--count", "1"])
+
+    replay_mod.main()
+
+    assert checked == []

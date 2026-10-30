@@ -1,32 +1,40 @@
 """[一次性] 熱度偵測的錄製、回放與人工暴增（S5-05，開發規格 7.20）。
 
-用法：
+用法（前綴 `uv run --env-file .env`，才讀得到 KAFKA_BOOTSTRAP_SERVERS）：
   python -m radar.streaming.replay record --since <ISO> --until <ISO> --out data/replay/x.jsonl
   python -m radar.streaming.replay replay --file data/replay/x.jsonl [--speed 10]
   python -m radar.streaming.replay surge --post-id <post_id> [--count N] --minutes 3
-（--count 預設 HEAT_POST_MIN_COUNT）
+（--count 預設 HEAT_POST_MIN_COUNT；完整步驟見開發規格 7.20）
 """
 
 import argparse
 import base64
 import binascii
 import json
+import math
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from confluent_kafka import Consumer, Producer, TopicPartition
+from confluent_kafka import Consumer, KafkaException, Producer, TopicPartition
 from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.avro import AvroSerializer
 from confluent_kafka.serialization import MessageField, SerializationContext
+from pydantic import ValidationError
 
+from radar.common.cli import ENV_FILE_HINT, fail, missing_env_names
 from radar.common.ids import split_post_id
 from radar.common.kafka import names
 from radar.common.kafka.config import consumer_config, producer_config
 from radar.common.log import log, setup_logging
-from radar.common.settings import HeatSettings, SchemaRegistrySettings, get_kafka_settings
+from radar.common.settings import (
+    HeatSettings,
+    KafkaSettings,
+    SchemaRegistrySettings,
+    get_kafka_settings,
+)
 
 # NOTE: 回放與人工暴增一律送到 REPLAY_COMMENTS，不碰正式的 cdc.public.comments
 SCHEMA_SUBJECT = f"{names.CDC_COMMENTS}-value"
@@ -226,25 +234,149 @@ def read_file(path: Path) -> list[RecordedMessage]:
     return messages
 
 
+def parse_time(text: str) -> datetime:
+    """帶時區的 ISO 8601 時間；沒帶時區會被當成本機時間而錄錯範圍，所以直接拒絕。"""
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"'{text}' 不是 ISO 8601 時間，例 2026-10-30T02:30:00+00:00"
+        ) from None
+    if parsed.tzinfo is None:
+        raise argparse.ArgumentTypeError(f"'{text}' 沒有時區，請加上，例 +00:00 代表 UTC")
+    return parsed
+
+
+def positive_int(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"'{text}' 不是整數") from None
+    if value <= 0:
+        raise argparse.ArgumentTypeError(f"'{text}' 必須大於 0")
+    return value
+
+
+def positive_float(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"'{text}' 不是數字") from None
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError(f"'{text}' 必須大於 0")
+    return value
+
+
+def post_id_arg(text: str) -> str:
+    try:
+        split_post_id(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"'{text}' 不是 post_id，格式 <board>.<檔名>，例 Gossiping.M.1792058026.A.0AE"
+        ) from None
+    return text
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m radar.streaming.replay",
+        description="熱度偵測的錄製、回放與人工暴增（S5-05，步驟見開發規格 7.20）。"
+        f"要用 `{ENV_FILE_HINT}` 執行，才讀得到 KAFKA_BOOTSTRAP_SERVERS。",
+    )
+    sub = parser.add_subparsers(dest="command", required=True, metavar="{record,replay,surge}")
+    rec = sub.add_parser("record", help="把正式 cdc.public.comments 某段時間的訊息存成檔案（唯讀）")
+    rec.add_argument(
+        "--since",
+        type=parse_time,
+        required=True,
+        help="起點，帶時區的 ISO 8601，例 2026-10-30T02:30:00+00:00",
+    )
+    rec.add_argument(
+        "--until", type=parse_time, required=True, help="終點（含），格式同 --since，要晚於 --since"
+    )
+    rec.add_argument(
+        "--out", type=Path, required=True, help="輸出的 JSONL 檔，例 data/replay/x.jsonl"
+    )
+    rep = sub.add_parser(
+        "replay", help="把錄好的檔案依原間隔重送到 replay.cdc.comments（用來暖機）"
+    )
+    rep.add_argument("--file", type=Path, required=True, help="record 產生的 JSONL 檔")
+    rep.add_argument(
+        "--speed",
+        type=positive_float,
+        default=1.0,
+        help="加速倍數，大於 0；預設 1（原速），暖機常用 1000",
+    )
+    sg = sub.add_parser("surge", help="對指定文章人工製造推文暴增，送到 replay.cdc.comments")
+    sg.add_argument(
+        "--post-id",
+        type=post_id_arg,
+        required=True,
+        help="暴增的文章，例 Gossiping.M.1792058026.A.0AE",
+    )
+    sg.add_argument(
+        "--count",
+        type=positive_int,
+        default=None,
+        help="推文則數；預設 HEAT_POST_MIN_COUNT（文章警示門檻）",
+    )
+    sg.add_argument("--minutes", type=positive_int, default=3, help="暴增分散在幾分鐘內，預設 3")
+    sg.add_argument("--start-floor", type=int, default=10_000, help="第一則的樓層號，預設 10000")
+    return parser
+
+
+def kafka_settings_or_fail() -> KafkaSettings:
+    try:
+        return get_kafka_settings()
+    except ValidationError as exc:
+        missing = missing_env_names(exc, "KAFKA_")
+        if not missing:
+            raise
+        fail(f"缺少環境變數 {', '.join(missing)}；請用 `{ENV_FILE_HINT}` 執行以載入 .env")
+
+
+def replay_topic_has_messages(consumer: Consumer) -> bool:
+    """replay.cdc.comments 是否還留著舊訊息（任一 partition 的結尾大於開頭）。"""
+    topic = names.REPLAY_COMMENTS
+    partitions = consumer.list_topics(topic, timeout=10).topics[topic].partitions
+    marks = (
+        consumer.get_watermark_offsets(TopicPartition(topic, p), timeout=10) for p in partitions
+    )
+    return any(high > low for low, high in marks)
+
+
+def warn_if_replay_topic_dirty(kafka: KafkaSettings) -> None:
+    """舊訊息會被新的 consumer group 一起讀入，時間較早的新資料被當遲到丟掉（7.20）。"""
+    consumer = Consumer(consumer_config(kafka, "replay-check"))
+    try:
+        dirty = replay_topic_has_messages(consumer)
+    except KafkaException as e:
+        log.warning("cannot check %s: %s", names.REPLAY_COMMENTS, e)
+        return
+    finally:
+        consumer.close()
+    if dirty:
+        log.warning(
+            "%s still has old messages; a new heat group reads them too and drops "
+            "earlier-timed replay data as late. Delete and recreate the topic first (spec 7.20)",
+            names.REPLAY_COMMENTS,
+        )
+
+
 @log.catch(level="CRITICAL")
 def main() -> None:
     setup_logging("replay")
-    parser = argparse.ArgumentParser(description="熱度偵測的錄製、回放與人工暴增（S5-05）")
-    sub = parser.add_subparsers(dest="command", required=True)
-    rec = sub.add_parser("record")
-    rec.add_argument("--since", type=datetime.fromisoformat, required=True)
-    rec.add_argument("--until", type=datetime.fromisoformat, required=True)
-    rec.add_argument("--out", type=Path, required=True)
-    rep = sub.add_parser("replay")
-    rep.add_argument("--file", type=Path, required=True)
-    rep.add_argument("--speed", type=float, default=1.0)
-    sg = sub.add_parser("surge")
-    sg.add_argument("--post-id", required=True)
-    sg.add_argument("--count", type=int, default=None)
-    sg.add_argument("--minutes", type=int, default=3)
-    sg.add_argument("--start-floor", type=int, default=10_000)
+    parser = build_parser()
     args = parser.parse_args()
-    kafka = get_kafka_settings()
+    if args.command == "record" and args.since > args.until:
+        parser.error("--since 必須早於 --until")
+    messages: list[RecordedMessage] = []
+    if args.command == "replay":
+        try:
+            messages = read_file(args.file)
+        except (OSError, ValueError) as e:
+            fail(f"讀不了 {args.file}：{e}")
+    kafka = kafka_settings_or_fail()
     if args.command == "record":
         consumer = Consumer(consumer_config(kafka, "replay-record"))
         try:
@@ -253,9 +385,12 @@ def main() -> None:
             consumer.close()
         log.info("recorded %d messages to %s", n, args.out)
         return
+    # NOTE: 只在暖機的 replay 前檢查；surge 在暖機之後，topic 本來就有資料
+    if args.command == "replay":
+        warn_if_replay_topic_dirty(kafka)
     producer = Producer(producer_config(kafka))
     if args.command == "replay":
-        n = replay(producer, read_file(args.file), args.speed, time.sleep)
+        n = replay(producer, messages, args.speed, time.sleep)
     else:
         registry = SchemaRegistryClient.new_client({"url": SchemaRegistrySettings().url})
         now = datetime.now(UTC)
