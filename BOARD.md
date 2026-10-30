@@ -74,8 +74,8 @@
 | secret-placeholder-guard | backend | done | 0 | PR #253 |
 | infra-secret-guard | backend | done | 0 | PR #256 |
 | heat-replay-align | backend | done | 0 | PR #258 |
-| comments-cdc-gap-investigate | backend | in-progress | 0 |  |
-| replay-alert-repro | backend | in-progress | 0 |  |
+| comments-cdc-gap-investigate | backend | done | 0 | reports/comments-cdc-gap-investigate.json（開發機休眠，非程式問題；watchdog 有記 ERROR） |
+| replay-alert-repro | backend | done | 1 | PR #265 |
 
 ## 卡住／待甲方決定
 
