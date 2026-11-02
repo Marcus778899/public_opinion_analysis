@@ -85,6 +85,7 @@
 | gap-record-update | backend | done | 0 | PR #267 |
 | agent-v1-cleanup | architect | done | 0 | PR #273 |
 | joserfc-vuln-upgrade | backend | done | 0 | PR #275 |
+| ci-v1-path-cleanup | architect | done | 0 | PR #279 |
 
 ## 卡住／待甲方決定
 
