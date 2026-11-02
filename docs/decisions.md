@@ -15,6 +15,18 @@
 
 ## 已決定
 
+### D-037 agent-v1-cleanup 卡在流程狀態：仲裁判 TEST_WRONG 後實作不用改，工具仍要求 worker 再 commit
+- 決定：A. 甲方在自己的終端機處理工具狀態（或回報 agent-engineering 修），之後照常派 qa
+- 理由：工具狀態判斷漏了「仲裁後實作不需修改」的情況，不用空 commit 繞過
+- 影響：agent-v1-cleanup（PR #273）等甲方處理完才派 qa「B」
+- 日期：2026-11-02
+
+### D-036 CI 要怎麼取得 agent-engineering 工具本體（工具 repo 是 private）
+- 決定：A. fine-grained token（只給 agent-engineering 的 Contents 唯讀、設到期日），存成 repo secret `AE_TOKEN`（甲方已設定）
+- 理由：權限最小、不公開工具、CI 跟著工具升級
+- 影響：agent-v1-cleanup 的 ci.yml、sync_branch.yml 用 `AE_TOKEN` checkout 工具；token 到期要續
+- 日期：2026-11-02
+
 <!-- 範本：
 ### D-001 一句話問題
 - 決定：A. …
