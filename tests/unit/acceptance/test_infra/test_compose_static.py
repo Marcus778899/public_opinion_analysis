@@ -257,12 +257,13 @@ def test_ci_check_job_only_runs_make_check(ci: dict) -> None:
     assert "make check" in joined
     assert "make coverage" not in joined
     assert "coverage_gate" not in joined
+    assert "coverage-gate" not in joined
 
 
 def test_ci_integration_job_runs_coverage_and_gate_only_for_pr_to_develop(ci: dict) -> None:
     steps = _steps(ci, "integration")
     cov = [s for s in steps if "make coverage" in _step_text(s)]
-    gate = [s for s in steps if "coverage_gate.py" in _step_text(s)]
+    gate = [s for s in steps if "coverage-gate" in _step_text(s)]
     assert len(cov) == 1 and gate
     for s in gate:
         cond = s.get("if", "")

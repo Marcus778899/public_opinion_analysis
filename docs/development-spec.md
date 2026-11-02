@@ -36,7 +36,7 @@
 | 套件管理 | uv | `pyproject.toml` + `uv.lock` |
 | Lint / format | ruff | 已在 pre-commit |
 | 安全掃描 | bandit；CI 另跑 gitleaks、osv-scanner、semgrep | bandit 在 pre-commit；誤判寫進 `.gitleaksignore` 等忽略檔並附理由；`tasks/` 由 `.gitleaks.toml` 整體排除（D-018） |
-| 測試 | pytest、pytest-asyncio、pytest-cov、pytest-xdist（D-015）；整合測試用 compose 的 `test` 服務（7.26） | 覆蓋率：PR 改到的程式碼 ≥ 80%（`scripts/coverage_gate.py`），不量的路徑列在 `.coverage-exempt` |
+| 測試 | pytest、pytest-asyncio、pytest-cov、pytest-xdist（D-015）；整合測試用 compose 的 `test` 服務（7.26） | 覆蓋率：PR 改到的程式碼 ≥ 80%（CI 的 `ae ci coverage-gate`），不量的路徑列在 `.coverage-exempt` |
 | 設定 | pydantic-settings | 全部從環境變數讀，提供 `.env.example` |
 | Kafka client | confluent-kafka | |
 | Web API | FastAPI + uvicorn | 依賴以 `Annotated` 注入，測試以 `dependency_overrides` 換成 fake |
@@ -70,7 +70,7 @@
 ├── docs/labeling-guideline.md  # 情緒標註準則（LLM、Claude、人工共用）
 ├── docs/reports/            # 實驗與模型評估報告（model-evaluation.md 由人撰寫；s3-05-push-ratio.md），進 repo
 ├── .claude/skills/label-posts/ # Claude 手動標註的 skill
-├── tools/                   # 營運腳本（建 topic、ClickHouse migration、註冊 connector、seed）；scripts/ 是 agent 流程腳本
+├── tools/                   # 營運腳本（建 topic、ClickHouse migration、註冊 connector、seed）；agent 流程工具在 .claude/skills/agent-engineering/（submodule）
 ├── tests/
 │   ├── unit/
 │   ├── integration/
@@ -108,8 +108,8 @@
 ### 1.4 分支與提交
 
 - `main`：可部署版本；`develop`：開發整合
-- 階段 7 起改用 agent 團隊流程（`scripts/` 的 `task.py`、`pr.py`、`release.py`；規則見 CLAUDE.md 與 `docs/decisions.md` D-001～D-006）：
-  - 功能分支：`<類型>/<task_id>`，例如 `feat/dashboard-board-trend`，PR 合進 `develop`；跟上 develop 用 `pr.py sync`（merge，不 rebase）
+- 階段 7 起改用 agent 團隊流程（v0.8.1 起為 agent-engineering v3 的 `ae` 指令，工具在 `.claude/skills/agent-engineering/`；規則見 CLAUDE.md 與 `docs/decisions.md` D-001～D-006）：
+  - 功能分支：`<類型>/<task_id>`，例如 `feat/dashboard-board-trend`，PR 合進 `develop`；跟上 develop 用 `ae pr sync`（merge，不 rebase）
   - 版本以 semver 發版：階段 1～6 由 `v0.6.0` 涵蓋（`stage-3`～`stage-6` 不補打），之後每階段一版（階段 7 = `v0.7.0`），見 D-003
   - Commit：`<類型>(<task_id>): ...`
 - 階段 6 以前：功能分支 `feat/s<階段>-<簡述>`；Commit 如 `feat(crawler): ...`；`stage-<n>` tag 只打到 `stage-2`，之後見 D-003
@@ -1099,7 +1099,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | 資產 | 威脅 | 對策 |
 |---|---|---|
 | Grafana 管理權限 | 預設帳密 admin/admin 被登入、改 datasource | 密碼必填、只綁本機、關閉匿名與註冊；上雲前（階段 9）重新評估對外存取 |
-| 四個密碼（`POSTGRES_PASSWORD`、`CLICKHOUSE_PASSWORD`、`CLICKHOUSE_GRAFANA_PASSWORD`、`GRAFANA_ADMIN_PASSWORD`）（M-4，#119） | `.env` 沿用範例值 `change-me`，compose 的 `:?` 只擋空值 | `.env.example` 範例值為 `CHANGE_ME`（`check_env.py` 列為必填）；`init` 與預設 profile 的一次性服務 `secret-check`（純 python image 掛載腳本，不需 build radar-app）都先跑 `tools/check_secrets.py`；postgres、clickhouse、grafana 以 `service_completed_successfully` 依賴 `secret-check`，所以只跑 `make up` 也擋得住。空值或不分大小寫的 change-me／changeme／change_me 就非 0 結束，只印變數名稱。postgres 的 port 只綁 127.0.0.1（#254、D-035） |
+| 四個密碼（`POSTGRES_PASSWORD`、`CLICKHOUSE_PASSWORD`、`CLICKHOUSE_GRAFANA_PASSWORD`、`GRAFANA_ADMIN_PASSWORD`）（M-4，#119） | `.env` 沿用範例值 `change-me`，compose 的 `:?` 只擋空值 | `.env.example` 範例值為 `CHANGE_ME`（`ae check-env` 列為必填）；`init` 與預設 profile 的一次性服務 `secret-check`（純 python image 掛載腳本，不需 build radar-app）都先跑 `tools/check_secrets.py`；postgres、clickhouse、grafana 以 `service_completed_successfully` 依賴 `secret-check`，所以只跑 `make up` 也擋得住。空值或不分大小寫的 change-me／changeme／change_me 就非 0 結束，只印變數名稱。postgres 的 port 只綁 127.0.0.1（#254、D-035） |
 | ClickHouse 資料與設定 | datasource 帳號能執行任意 SQL（DROP、讀 named collection） | 唯讀帳號、只能 SELECT `radar.*`、無 named collection 權限 |
 | ClickHouse 資源 | 拉長時間範圍讓 `FINAL` 查詢吃滿記憶體 | 唯讀帳號的 profile 設執行時間與記憶體上限 |
 | 看 dashboard 的人 | PTT 標題（外部文字）含 HTML、連結被換成 `javascript:` | 不用會渲染 HTML 的 Text 面板顯示資料；連結限 `https://www.ptt.cc/` 開頭 |

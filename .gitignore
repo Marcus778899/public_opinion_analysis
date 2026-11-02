@@ -75,10 +75,8 @@ Thumbs.db
 # ---------- Claude Code 本地設定 ----------
 .claude/settings.local.json
 
-# ---------- agent 流程（scripts/ 產生，不進 git；階段完成時封存到 tasks/<版本>/） ----------
+# ---------- agent 流程（ae 產生，不進 git） ----------
 .worktrees/
-tasks/
-reports/
 .hooklog/
 coverage-reports/
 node_modules/

@@ -1,9 +1,9 @@
 name: Sync main to develop
 
+# agent-engineering 範本（templates/project/sync_branch.yml）。保底：ae release finish 會在本機把 main 併回 develop，通常這裡已經沒事做
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
   contents: write
@@ -17,16 +17,26 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Sync develop from main
+      # 工具本體（ae）：submodule 指到的版本。agent-engineering 是 private 時，到 repo 的 secrets 設 AE_TOKEN
+      # （fine-grained token，只給 agent-engineering 的 Contents 唯讀）；public 不用設。不讓 checkout 順便抓 submodule：預設 token 讀不到別的 private repo
+      - name: Locate agent-engineering
+        id: ae
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B develop origin/develop
-          # 保底：release.py finish 會在本機併回 develop，通常這裡已經沒事做
-          if git merge-base --is-ancestor origin/main HEAD; then echo "develop 已包含 main"; exit 0; fi
-          git merge --ff-only origin/main || git merge --no-edit origin/main
-          if ! git push origin develop; then
-            # 被 release.py finish 搶先 push：develop 已包含 main 就算成功
-            git fetch origin develop
-            git merge-base --is-ancestor origin/main origin/develop
-          fi
+          url=$(git config -f .gitmodules --get submodule..claude/skills/agent-engineering.url)
+          repo=${url#https://github.com/}
+          echo "repo=${repo%.git}" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD:.claude/skills/agent-engineering)" >> "$GITHUB_OUTPUT"
+      - name: Checkout agent-engineering
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.ae.outputs.repo }}
+          ref: ${{ steps.ae.outputs.sha }}
+          path: .claude/skills/agent-engineering
+          token: ${{ secrets.AE_TOKEN || github.token }}
+          persist-credentials: false   # 後面會跑專案的程式，不留 token
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Sync
+        run: .claude/skills/agent-engineering/bin/ae ci sync-branch
