@@ -1,0 +1,11 @@
+{
+  "task_id": "bert-colab-record",
+  "status": "done",
+  "files_changed": ["docs/reports/model-evaluation.md"],
+  "verification": {
+    "command": "pre-commit run --files docs/reports/model-evaluation.md",
+    "exit_code": 0,
+    "tail": "trim trailing whitespace Passed; fix end of files Passed; ruff format Passed; others Skipped (no files)"
+  },
+  "open_questions": ["int8 一段寫了「採用的機會不大」，是依驗證集掉幅 0.0755 的推測，不是結論；若 reviewer 認為違反「不下結論」可刪"]
+}

@@ -1,0 +1,14 @@
+{
+  "task_id": "dashboard-min-score-select",
+  "status": "done",
+  "files_changed": ["infra/grafana/dashboards/radar.json", "docs/development-spec.md"],
+  "verification": {
+    "command": "docker compose --env-file .env -f .worktrees/dashboard-min-score-select/compose.yaml run --rm test pytest tests/integration/acceptance/dashboard tests/integration/dashboard -q; make check (ruff + 單元測試); down -v",
+    "exit_code": 0,
+    "tail": "179 passed in 17.64s (dashboard 整合與驗收); make check: 1114 passed; down -v 完成"
+  },
+  "open_questions": [
+    "Grafana 13.0.2 的 percentencode 對多選是否真的先包成 {a,b} 再編碼，是照 qa 的模擬實作，未在真畫面實測；uat 請用多選、All、含特殊字元的網址值確認",
+    "allowCustomValue:false 仍保留在 board、min_score（深度防禦）；PR 的 CI 尚未確認（未 push）"
+  ]
+}

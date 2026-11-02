@@ -1,0 +1,22 @@
+{
+  "task_id": "test-infra-design",
+  "kind": "docs",
+  "owner": "architect",
+  "lane": "full",
+  "title": "設計 compose `test` 服務（讓整合測試在 sandbox 外的容器裡跑）與 CI 整合測試加速（#78）",
+  "issue": 84,
+  "branch": "docs/test-infra-design",
+  "worktree": ".worktrees/test-infra-design",
+  "pr": 87,
+  "qa": {
+    "result": "pass",
+    "sha": "34535f62191acf6c1256679526ff96d1e682b3b5",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "34535f62191acf6c1256679526ff96d1e682b3b5",
+    "by": "甲方"
+  },
+  "merged": true
+}

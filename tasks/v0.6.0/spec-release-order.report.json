@@ -1,0 +1,13 @@
+{
+  "task_id": "spec-release-order",
+  "status": "done",
+  "files_changed": [
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "grep -n \"stage-\\|main\" docs/development-spec.md",
+    "exit_code": 0,
+    "tail": "111:  - 版本以 semver 發版：階段 1～6 由 `v0.6.0` 涵蓋（`stage-3`～`stage-6` 不補打），之後每階段一版（階段 7 = `v0.7.0`），見 D-003\n113:- 階段 6 以前：功能分支 `feat/s<階段>-<簡述>`；Commit 如 `feat(crawler): ...`；`stage-<n>` tag 只打到 `stage-2`，之後見 D-003\n366:...通過才把 `develop` 合進 `main` 並打 `stage-1` tag；階段 2 相同。階段 3 起的發版方式見 D-003。\n382:- 合進 `main` 與發版不等 Stock 補標與 3 天驗收：階段 1～6 以 `v0.6.0` 發版，之後每階段驗收後各發一版（見 D-003）；上表兩項仍照排序之後再做\n（其餘 108、114、300、301、511、541、855、920、930、942、964、984 行是 main 分支、main.py、main thread，與發版無關）"
+  },
+  "open_questions": []
+}

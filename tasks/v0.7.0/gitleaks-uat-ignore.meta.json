@@ -1,0 +1,24 @@
+{
+  "task_id": "gitleaks-uat-ignore",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "把 UAT v0.7.0 報告裡的 gitleaks 誤判加進忽略清單，讓 CI 的 Security 恢復綠燈",
+  "issue": 115,
+  "branch": "chore/gitleaks-uat-ignore",
+  "worktree": ".worktrees/gitleaks-uat-ignore",
+  "pr": 116,
+  "qa": {
+    "result": "pass",
+    "sha": "a34985ede1516e80adcba7af9896cd786a1d24ee",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "a34985ede1516e80adcba7af9896cd786a1d24ee",
+    "by": "architect"
+  },
+  "merged": true,
+  "qa_fails": 1,
+  "amend_sha": "95ef462c3de5f6cf78d4041b222c40ba3e457b36"
+}

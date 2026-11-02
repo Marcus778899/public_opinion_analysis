@@ -1,0 +1,22 @@
+{
+  "task_id": "gitleaks-archive-allowlist",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "gitleaks 不再掃 `tasks/` 底下的封存，封存派工單不再讓 CI Security 紅燈（D-018）",
+  "issue": 151,
+  "branch": "chore/gitleaks-archive-allowlist",
+  "worktree": ".worktrees/gitleaks-archive-allowlist",
+  "pr": 153,
+  "qa": {
+    "result": "pass",
+    "sha": "629b2efa4a2456e0d1efaa0a5cfba7dc419856e8",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "629b2efa4a2456e0d1efaa0a5cfba7dc419856e8",
+    "by": "architect"
+  },
+  "merged": true
+}

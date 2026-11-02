@@ -1,0 +1,4 @@
+{"task_id":"e2e-volume-regression","status":"done",
+"files_changed":["tests/unit/e2e_support/test_e2e_no_dev_volumes.py","docs/development-spec.md"],
+"verification":{"command":"make check","exit_code":0,"tail":"1127 passed in 4.54s; pre-commit hooks all Passed"},
+"open_questions":["違規抓得到的確認方式：測試內以假 compose 資料重現（未覆蓋的服務仍掛開發 volume、長語法掛載），offenders() 回傳違規項；未動 compose 檔做實際破壞。PR 的 CI 尚未推送，未確認。"]}

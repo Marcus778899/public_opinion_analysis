@@ -1,0 +1,18 @@
+{
+  "task_id": "it-helper-docs-align",
+  "kind": "test",
+  "owner": "backend",
+  "lane": "fast",
+  "title": "收尾整合測試的 review 建議，並修掉 #126 剩下的 retention 偶發失敗",
+  "issue": 147,
+  "branch": "test/it-helper-docs-align",
+  "worktree": ".worktrees/it-helper-docs-align",
+  "pr": 148,
+  "qa": {
+    "result": "pass",
+    "sha": "199cbe91f76116da3094073e57b000d83d25282a",
+    "by": "qa"
+  },
+  "review": null,
+  "merged": true
+}

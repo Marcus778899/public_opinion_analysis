@@ -1,0 +1,22 @@
+{
+  "task_id": "certifi-security-bump",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "把間接相依 certifi 升到修好 PYSEC-2026-4320 的版本（2026.10.19 以上），讓 CI 的 Security job（osv-scanner）恢復綠燈",
+  "issue": 102,
+  "branch": "chore/certifi-security-bump",
+  "worktree": ".worktrees/certifi-security-bump",
+  "pr": 103,
+  "qa": {
+    "result": "pass",
+    "sha": "158b463c8336bf51b013a999fb5ae41ed5df4cbb",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "158b463c8336bf51b013a999fb5ae41ed5df4cbb",
+    "by": "architect"
+  },
+  "merged": true
+}

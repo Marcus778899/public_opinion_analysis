@@ -1,0 +1,14 @@
+{
+  "task_id": "ci-sync-branch-update",
+  "status": "done",
+  "files_changed": [".github/workflows/sync_branch.yml"],
+  "verification": {
+    "command": "diff templates/github/workflows/sync_branch.yml .github/workflows/sync_branch.yml; make check",
+    "exit_code": 0,
+    "tail": "diff: 無差異（exit 0）\nmake check: ============================= 1114 passed in 5.11s ============================= (exit 0)\ncommit 0a51ac1"
+  },
+  "open_questions": [
+    "專案版 sync_branch.yml 與舊範本的差異只有範本新增的兩段保底（develop 已包含 main 就 exit 0；push 失敗時 fetch 後檢查 origin/develop 已包含 origin/main），沒有專案客製部分，因此整份照範本覆蓋",
+    "PR 的 CI 全綠尚未確認（PR 由 manager 透過 scripts/ 開立）"
+  ]
+}

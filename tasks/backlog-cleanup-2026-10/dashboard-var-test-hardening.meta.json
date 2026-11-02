@@ -1,0 +1,21 @@
+{
+  "task_id": "dashboard-var-test-hardening",
+  "kind": "test",
+  "owner": "backend",
+  "lane": "fast",
+  "title": "補強 Dashboard 變數的測試，讓「變數一律 percentencode 且在單引號內」真的被檢查到",
+  "issue": 142,
+  "branch": "test/dashboard-var-test-hardening",
+  "worktree": ".worktrees/dashboard-var-test-hardening",
+  "pr": 143,
+  "qa": {
+    "result": "pass",
+    "sha": "b78bb1e7b89e3d75454f167d6d233b524260d99b",
+    "by": "qa",
+    "carried_from": "86b09340638a017d1be93db750ff19a496d69ada"
+  },
+  "review": null,
+  "merged": true,
+  "qa_fails": 1,
+  "amend_sha": "37354bd09d150ec1192ed1eef4ba7cf4d101a1d3"
+}

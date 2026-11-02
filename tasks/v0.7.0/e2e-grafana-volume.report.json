@@ -1,0 +1,14 @@
+{
+  "task_id": "e2e-grafana-volume",
+  "status": "done",
+  "files_changed": ["infra/docker-compose.e2e.yaml", "docs/development-spec.md"],
+  "verification": {
+    "command": "make check; uv run pytest tests/unit/e2e_support -q",
+    "exit_code": 0,
+    "tail": "make check: 1114 passed in 4.15s; tests/unit/e2e_support: 20 passed (含驗收測試 test_e2e_grafana_volume.py 4 條)"
+  },
+  "open_questions": [
+    "docker compose ... --profile app config 未能跑：infra compose 檔引用的 env 檔會解析到 worktree 根目錄的 .env（worktree 沒有 .env，sandbox 也不連進去），報 'env file .worktrees/e2e-grafana-volume/.env not found'。改以驗收測試的合併邏輯驗證 grafana 掛 e2e_grafana_data；需要時請在主目錄對 develop 合併後再跑 config 確認。",
+    "commit d90d3f3 已完成；PR CI 未跑（agent 不可 push）"
+  ]
+}

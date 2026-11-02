@@ -1,0 +1,30 @@
+{
+  "task_id": "bert-shadow-inference",
+  "kind": "feat",
+  "owner": "backend",
+  "lane": "full",
+  "title": "推論服務支援 `INFERENCE_ROLE=shadow`：改用 `load_classifier`，shadow 寫 `predictions.shadow`、從 `predictions_shadow` 載入快取，移除骨架的 `require_primary`",
+  "issue": 159,
+  "branch": "feat/bert-shadow-inference",
+  "worktree": ".worktrees/bert-shadow-inference",
+  "pr": 165,
+  "qa": {
+    "result": "pass",
+    "sha": "d06e934558acd2a0a10eb2c6864d6ef7e30f062a",
+    "by": "qa",
+    "carried_from": "24b392aaf4b7a3ebcef05e834d713c00675dc8ce"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "d06e934558acd2a0a10eb2c6864d6ef7e30f062a",
+    "by": "architect",
+    "carried_from": "24b392aaf4b7a3ebcef05e834d713c00675dc8ce"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "f6f9039bfaf269936d4c9a745fa57ef5202fc35d",
+    "sha": "d06e934558acd2a0a10eb2c6864d6ef7e30f062a",
+    "carried_from": "24b392aaf4b7a3ebcef05e834d713c00675dc8ce"
+  },
+  "amend_sha": "be55ceb46e795cd35a9a1e997ec8efa6cedcfbf5"
+}

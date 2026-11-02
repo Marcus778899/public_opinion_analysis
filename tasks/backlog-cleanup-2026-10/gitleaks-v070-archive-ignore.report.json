@@ -1,0 +1,15 @@
+{
+  "task_id": "gitleaks-v070-archive-ignore",
+  "status": "done",
+  "files_changed": [".gitleaksignore"],
+  "verification": {
+    "command": "gitleaks git --redact --no-banner . (8.30.1, darwin_arm64)",
+    "exit_code": 0,
+    "tail": "INF 205 commits scanned.\nINF scanned ~7524906 bytes (7.52 MB) in 3.94s\nINF no leaks found"
+  },
+  "open_questions": [
+    "發現 1：482309a50911f7b57c35c7998c104352ee7b749d:tasks/v0.7.0/gitleaks-archive-ignore.review.md:generic-api-key:9。第 9 行是 review 敘述，引用 \"unit_key\": \"Gossiping.M.1759730000.A.1B2\"（PTT post_id 範例），不是密鑰；與既有 5a4d91f、06f7081 同類誤判。",
+    "發現 2：482309a50911f7b57c35c7998c104352ee7b749d:tasks/v0.7.0/gitleaks-archive-ignore.qa.md:generic-api-key:9。第 9 行是 qa 敘述，同樣引用 unit_key 的 PTT post_id 範例，不是密鑰。",
+    "PR 的 CI Security 是否轉綠需 push 後確認（我不能 push）。commit 0ddf461 在分支 chore/gitleaks-v070-archive-ignore。"
+  ]
+}

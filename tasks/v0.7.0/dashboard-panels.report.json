@@ -1,0 +1,21 @@
+{
+  "task_id": "dashboard-panels",
+  "status": "done",
+  "files_changed": [
+    "infra/grafana/dashboards/radar.json",
+    "infra/grafana/dashboards/.gitkeep (刪除)",
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "docker compose --env-file .env -f .worktrees/dashboard-panels/compose.yaml run --rm test pytest -q（另 make check 1110 passed；已 down -v）",
+    "exit_code": 0,
+    "tail": "1368 passed, 12 deselected in 131.41s；test_panels.py 66 passed。EXPLAIN indexes = 1（唯讀帳號）：面板 2、3 的 predictions、面板 4 的 comments_latest、面板 5 的 posts_latest（post_id in 2-element set）、面板 6 的 posts_latest／comments_latest／predictions，PrimaryKey Keys 都是 post_id，Condition 為 post_id in N-element set（空表 0-element）"
+  },
+  "open_questions": [
+    "radar.json 的 board 變數 query 用物件形式 {query, rawSql, editorType, format}，plugin 4.23.0 是否接受由 dashboard-integration 驗證",
+    "空字串 url 的標題仍會有 data link（點了停在原頁），Grafana 無法依欄位值隱藏單列連結；如要處理需 dashboard-integration 看實際畫面",
+    "min_score 以 toFloat64OrDefault('$min_score', 0.5) 轉型（非數字退回 0.5），7.25 已註記",
+    "review 4 個必改已處理並更新 7.25 註記；順手修了面板 4 同分第二鍵 post_id、面板 6 改 LEFT JOIN 文章（標題退回 post_id）",
+    "CI 綠燈尚未確認（未 push）"
+  ]
+}

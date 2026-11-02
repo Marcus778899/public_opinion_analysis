@@ -1,0 +1,22 @@
+{
+  "task_id": "gitleaks-archive-ignore",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "把 v0.6.0 封存派工單裡的 gitleaks 誤判加進忽略清單，讓 CI 的 Security 恢復綠燈",
+  "issue": 88,
+  "branch": "chore/gitleaks-archive-ignore",
+  "worktree": ".worktrees/gitleaks-archive-ignore",
+  "pr": 89,
+  "qa": {
+    "result": "pass",
+    "sha": "1e1e5f3e898fe5da07e0e4c04ac0447d273123b7",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "1e1e5f3e898fe5da07e0e4c04ac0447d273123b7",
+    "by": "architect"
+  },
+  "merged": true
+}

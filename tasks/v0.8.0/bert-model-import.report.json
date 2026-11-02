@@ -1,0 +1,11 @@
+{
+  "task_id": "bert-model-import",
+  "status": "done",
+  "files_changed": ["src/radar/ml/training/import_model.py", "tests/unit/ml/training/test_import_model.py"],
+  "verification": {
+    "command": "uv run pytest tests/unit/acceptance/bert-model-import tests/unit/ml/training/test_import_model.py; make check",
+    "exit_code": 0,
+    "tail": "32 passed in 0.18s; make check: 1246 passed in 5.48s (commit 16d7c02)"
+  },
+  "open_questions": ["PR 的 CI 尚未跑"]
+}

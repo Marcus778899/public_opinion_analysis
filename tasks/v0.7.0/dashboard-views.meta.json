@@ -1,0 +1,33 @@
+{
+  "task_id": "dashboard-views",
+  "kind": "feat",
+  "owner": "backend",
+  "lane": "full",
+  "title": "新增 ClickHouse migration 0005，建立 dashboard 用的兩個一般 view：post_votes、post_sentiment_latest（開發規格 7.25 派工順序 2）",
+  "issue": 104,
+  "branch": "feat/dashboard-views",
+  "worktree": ".worktrees/dashboard-views",
+  "pr": 105,
+  "qa": {
+    "result": "pass",
+    "sha": "7263cad21272621e1ba7659ac3e49fbf7e7cd65c",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "7263cad21272621e1ba7659ac3e49fbf7e7cd65c",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "964a4c275b9154fd1cb702b2cbe5237f6434c375",
+    "sha": "ecb0cc9ce303ba802945b20500ff0cf1dec53477"
+  },
+  "rulings": 1,
+  "ruling": {
+    "result": "test_ok",
+    "sha": "0cb8190e2f83852c2450a763935c242170849496",
+    "after_fails": 0
+  },
+  "amend_sha": "0cb8190e2f83852c2450a763935c242170849496"
+}

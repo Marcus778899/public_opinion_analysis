@@ -1,0 +1,22 @@
+{
+  "task_id": "dashboard-integration",
+  "status": "done",
+  "files_changed": [
+    "infra/clickhouse/users.d/grafana.xml",
+    "infra/grafana/provisioning/datasources/clickhouse.yaml",
+    "docs/development-spec.md",
+    "compose.yaml"
+  ],
+  "verification": {
+    "command": "make check；同堆疊不 down -v 連跑兩次 docker compose --env-file .env -f .worktrees/dashboard-integration/compose.yaml run --rm test；最後 down -v",
+    "exit_code": 0,
+    "tail": "make check 1110 passed；compose test 第一次 309 passed in 65.43s，同堆疊第二次 309 passed in 59.95s（含 test_zz_login_lockout）；review 退回三點（7.25 變數展開驗證範圍、派工第 4 列截圖分工、7.26 radar DB 使用者）已只改文件修正，make check 1110 passed"
+  },
+  "open_questions": [
+    "根因：Grafana ClickHouse plugin（native driver）每次查詢依 queryTimeout 帶 max_execution_time，readonly=1 拒絕任何修改（code 164）；放行後未設 queryTimeout 時值超過 60，被 constraints max 擋下（code 452）。修法兩部分：grafana.xml profile 加 constraints（max_execution_time min 1、max 60、changeable_in_readonly），datasource jsonData.queryTimeout='30'。未放寬 readonly、帳號、allow_databases、記憶體上限",
+    "7.25 已更正結論、記錄實測，xdist_group 句改為現況，進度表標實作完成；未改派工順序表第 4 列的負責欄（仍寫 qa、『另以 make up 截圖』），請 manager 視需要調整",
+    "尚未 push、PR CI 未跑；真正前端的 $board／$min_score 展開與畫面截圖仍待 uat",
+    "qa 問題 1 已處理：根目錄 compose.yaml 的 grafana 加 GF_SECURITY_DISABLE_BRUTE_FORCE_LOGIN_PROTECTION=true（僅測試環境；infra/docker-compose.yaml 未動，錯誤密碼仍回 401，acceptance 測試通過），7.25 測試環境表加『登入防護』列。問題 2（Kafka flake）依指示不處理（#110）",
+    "請 manager 決定是否開單由 qa 為已鎖定的 tests/integration/acceptance/dashboard/test_views.py、test_panels.py 補標 xdist_group('shared_radar_db')（種子資料在 radar，平行時可能被 cdc 模組 TRUNCATE）；真前端 $board／$min_score 展開（多選、All、沒有看板、含單引號）請列進階段 7 uat 檢查項"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "task_id": "notebook-onnx-export-fix",
+  "status": "done",
+  "files_changed": ["notebooks/bert_finetune.ipynb", "tests/unit/ml/notebook/test_notebook_cells.py"],
+  "verification": {
+    "command": "uv run pytest tests/unit/ml/notebook; make check",
+    "exit_code": 0,
+    "tail": "notebook tests 17 passed (before adding 2 more); make check: 1350 passed in 6.19s, ruff/bandit passed"
+  },
+  "open_questions": [
+    "做法：第一格 pip install 之後加 pip uninstall -y -q diffusers（本流程不用 diffusers，不新增套件）。尚未 import diffusers，所以不需重新啟動執行階段；若 Colab 已跑過舊版第一格、optimum 已 import 失敗，建議重新啟動後從第一格重跑。",
+    "未在真實 Colab 驗證：uninstall 後 optimum.onnxruntime（第 5 部分）是否也正常，要等甲方實跑；甲方先前手動 uninstall 的結果也待回報。",
+    "README 用語：不需改；第一格提示文字沿用『裝了不同版本請重新啟動執行階段』。若 README 有列第一格會做的事，可補一句『移除 Colab 預裝的 diffusers』，由 manager 決定。"
+  ]
+}

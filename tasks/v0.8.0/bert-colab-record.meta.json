@@ -1,0 +1,18 @@
+{
+  "task_id": "bert-colab-record",
+  "kind": "docs",
+  "owner": "backend",
+  "lane": "fast",
+  "title": "在 `docs/reports/model-evaluation.md` 新增「階段 8 BERT：Colab fine-tune 紀錄」一節，記下 macbert 這次執行的結果（ckip 之後補在同一節）",
+  "issue": 188,
+  "branch": "docs/bert-colab-record",
+  "worktree": ".worktrees/bert-colab-record",
+  "pr": 189,
+  "qa": {
+    "result": "pass",
+    "sha": "8e6de085eadbebf534419b1c0a8ea83f29c25ec5",
+    "by": "qa"
+  },
+  "review": null,
+  "merged": true
+}

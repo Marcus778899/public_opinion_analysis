@@ -1,0 +1,24 @@
+{
+  "task_id": "spec-release-order",
+  "kind": "docs",
+  "owner": "architect",
+  "lane": "full",
+  "title": "開發規格第 6 章「執行順序」改成 develop 合進 main 不再等階段 3、5 驗收（D-003）",
+  "issue": 72,
+  "branch": "docs/spec-release-order",
+  "worktree": ".worktrees/spec-release-order",
+  "pr": 74,
+  "qa": {
+    "result": "pass",
+    "sha": "c91a1349322cf93557f862568d9e86b87f7ca402",
+    "by": "qa",
+    "carried_from": "8d5d2d2c0bd5dd9db786f71b49c89bed1e171652"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "c91a1349322cf93557f862568d9e86b87f7ca402",
+    "by": "甲方",
+    "carried_from": "8d5d2d2c0bd5dd9db786f71b49c89bed1e171652"
+  },
+  "merged": true
+}

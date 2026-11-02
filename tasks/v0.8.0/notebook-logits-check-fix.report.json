@@ -1,0 +1,19 @@
+{
+  "task_id": "notebook-logits-check-fix",
+  "status": "done",
+  "files_changed": [
+    "notebooks/bert_finetune.ipynb",
+    "tests/unit/ml/notebook/test_notebook_cells.py",
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "uv run pytest tests/unit/acceptance/notebook-logits-check-fix tests/unit/ml/notebook; make check",
+    "exit_code": 0,
+    "tail": "27 passed (acceptance + notebook); make check: 1360 passed, pre-commit all Passed"
+  },
+  "open_questions": [
+    "差異來源仍是推測（未實測，#178 追蹤）：notebook 現在會印出『GPU PyTorch 對 CPU PyTorch』最大差供診斷（不擋），甲方重跑即可確認；比對本身改在 CPU fp32 重新載入存檔權重，門檻維持 1e-3。",
+    "已處理 review 2 項必改與建議 A（類別不一致只印篇數）、B（run_torch 排序分批）、C（diffusers 措辭）；commit 6773e11，未 push。",
+    "README 第 70 行是否同步 diffusers 說明由 manager 決定。"
+  ]
+}

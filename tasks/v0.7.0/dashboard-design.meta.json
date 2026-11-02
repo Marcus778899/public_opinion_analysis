@@ -1,0 +1,24 @@
+{
+  "task_id": "dashboard-design",
+  "kind": "docs",
+  "owner": "architect",
+  "lane": "full",
+  "title": "階段 7 Dashboard 的呈現方式評估與設計（S7-01、S7-02）",
+  "issue": 85,
+  "branch": "docs/dashboard-design",
+  "worktree": ".worktrees/dashboard-design",
+  "pr": 86,
+  "qa": {
+    "result": "pass",
+    "sha": "1ac5329b6465488e4d10c79c45fbcf508b6abecf",
+    "by": "qa",
+    "carried_from": "f54877f13bbd0dc593482f976680d3bdccbf880d"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "1ac5329b6465488e4d10c79c45fbcf508b6abecf",
+    "by": "甲方",
+    "carried_from": "f54877f13bbd0dc593482f976680d3bdccbf880d"
+  },
+  "merged": true
+}

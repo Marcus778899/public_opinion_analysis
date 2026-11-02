@@ -1,0 +1,23 @@
+{
+  "task_id": "dashboard-test-align",
+  "status": "done",
+  "files_changed": [
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "grep -n \"testcontainers\" docs/development-spec.md",
+    "exit_code": 0,
+    "tail": "39: 1.1 測試工具列（屬 test-infra-compose）\n301: 5 章整合列（屬 test-infra-compose）\n1118、1142、1144、1145: 7.26 背景與做法 2、4、5（禁區，未動）\n7.25 範圍（1009–1116 行）出現次數：0"
+  },
+  "open_questions": [
+    "7.25 新增「測試環境」表：根目錄 compose.yaml 加 grafana（與開發同一個 infra/grafana/Dockerfile、tmpfs、不開 port），只接 internal: true 的 network grafana_offline；clickhouse、test 同時接預設 network 與它（test 的 uv sync 要連網）。每次啟動都是離線啟動，取代「沿用 volume 重啟」（plugin 在 image 裡，不在資料目錄）",
+    "IT_GRAFANA_URL 併入 7.26 做法 2 的必填清單；測試用的 Grafana admin 密碼與 CLICKHOUSE_GRAFANA_USER/PASSWORD 在 compose.yaml 寫固定測試值，不讀 .env",
+    "唯讀帳號 allow_databases 只有 radar：dashboard 的驗收與整合測試一律用 radar DB，看板名稱帶 uuid 隔離，不用 xdist 的 radar_<worker>，也不需要 xdist_group",
+    "CI 的限制：compose.ci.yaml 讓 grafana 另接預設 network 才能發布 127.0.0.1:${IT_GRAFANA_HOST_PORT}，所以 CI 綠燈不代表離線啟動通過；離線只由 run --rm test 證明，worker 與 qa 交單時要附輸出",
+    "派工順序改成依序 1→2→3→4，1 要在 test-infra-compose 合併之後才開；1 和 test-infra-fast-waits 都改 compose.yaml 與 tests/integration/conftest.py，不可平行。dashboard-grafana-infra 的負責檔案多了 compose.yaml、compose.ci.yaml、tests/integration/conftest.py、.github/workflows/ci.yml",
+    "dashboard-grafana-infra 那一列已寫明：該單的 qa 要調整 test-infra-compose 已鎖定的 tests/unit/acceptance/test_infra/test_compose_static.py，test_compose_only_defines_four_test_services 的服務集合加 grafana（測試名稱一併改）；manager 開單時要授權 qa 改這個檔",
+    "7.26 做法 1 只補一句：grafana 由 dashboard-grafana-infra 之後加入，test-infra-compose 不加；7.26 的其他內容沒動。7.26 風險表 users.d 那一列原本寫「後合併的一方補」，現在可以確定由 dashboard-grafana-infra 補，但不在本單範圍，沒有修改",
+    "自行決定（已寫進 7.25 的自行決定表）：測試的 Grafana 只接 internal network；測試查詢一律用 radar DB；dashboard 單依序 1→2→3→4",
+    "待決定：無；需調查：無"
+  ]
+}

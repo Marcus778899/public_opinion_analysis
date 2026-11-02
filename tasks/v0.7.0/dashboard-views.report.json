@@ -1,0 +1,17 @@
+{
+  "task_id": "dashboard-views",
+  "status": "done",
+  "files_changed": [
+    "infra/clickhouse/migrations/0005_dashboard_views.sql",
+    "tests/integration/cdc/test_clickhouse_migrations.py",
+    "docs/development-spec.md",
+    "docs/realtime-sentiment-radar-design.md"
+  ],
+  "verification": {
+    "command": "make check; docker compose --env-file .env -f .worktrees/dashboard-views/compose.yaml run --rm test",
+    "exit_code": 0,
+    "tail": "make check: 1110 passed. compose test: 192 passed in 59.54s (含 acceptance/dashboard/test_views.py 與 cdc/test_clickhouse_migrations.py). 已 down -v"
+  },
+  "open_questions": ["bot/stats.py 未改用 view（依派工單禁區）", "PR 的 CI 尚未開"],
+  "disputes": []
+}

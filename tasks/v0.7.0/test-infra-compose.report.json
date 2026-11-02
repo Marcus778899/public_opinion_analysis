@@ -1,0 +1,35 @@
+{
+  "task_id": "test-infra-compose",
+  "status": "done",
+  "files_changed": [
+    "compose.yaml",
+    "compose.ci.yaml",
+    ".env.example",
+    "Makefile",
+    "pyproject.toml",
+    "uv.lock",
+    ".github/workflows/ci.yml",
+    "docs/development-spec.md",
+    "tests/helpers/clickhouse.py",
+    "tests/integration/conftest.py",
+    "tests/integration/cdc/test_clickhouse_migrations.py",
+    "tests/integration/cdc/test_slot.py",
+    "tests/integration/ml/test_clickhouse_queries.py",
+    "tests/integration/ml/test_inference_cache.py",
+    "tests/integration/ml/test_inference_consumer.py",
+    "tests/integration/streaming/test_heat_app.py"
+  ],
+  "verification": {
+    "command": "PYTHONPATH=src uv run --no-sync pytest tests/unit（1066 passed，含 test_reset_guard）；docker compose --env-file .env -f .worktrees/test-infra-compose/compose.yaml run --rm test；之後 down -v",
+    "exit_code": 0,
+    "tail": "======================= 135 passed in 326.32s (0:05:26) ========================；down -v：容器 kafka/postgres/clickhouse、volume test_venv/test_uv_cache、network 皆 Removed"
+  },
+  "open_questions": [
+    "CI 的 Integration Test（映像拉取、registry-mirrors、runner 上 make coverage、文件跳過判斷、覆蓋率閘門）本機無法驗證，需 PR 的 CI 實跑確認；我另把 Check 與 Integration job 的 fetch-depth 調整為只有 Integration 用 0。",
+    "做法 7 偏離：ClickHouse 只單檔唯讀掛 named_collections.xml 與 radar.xml，不掛整個 config.d/users.d（整目錄覆蓋會蓋掉 image 的 listen 設定與 entrypoint 寫入的使用者檔）。因此 dashboard 的 users.d/grafana.xml（from_env）不會被載入，不需補環境變數；已寫入 7.26 做法 7。",
+    "CLAUDE.md 需改的文字（本單不可改）：第 86 行「整合測試用 testcontainers，放 tests/integration/」建議改為「整合測試放 tests/integration/，連 compose.yaml 的 kafka／postgres／clickhouse（讀 IT_* 環境變數，不用 testcontainers；agent 用 docker compose --env-file .env -f .worktrees/<task_id>/compose.yaml run --rm test，見開發規格 7.26）」；『指令』段落的 docker 說明建議補一行：整合測試的 docker 指令為上述 run --rm test，做完用 down -v 釋放；與開發／e2e 專案（radar）互不相干，可同時運作；第 56～58 行『Makefile 裡碰 docker…』提到的 test-int 也屬此類。",
+    "uv run 在 worktree 以 --no-sync 執行，未改動主目錄 .venv。",
+    "第 2 輪修正：reset_kafka（conftest）與 drop_databases（tests/helpers/clickhouse.py）加主機允許清單（kafka、kafka_1～3、postgres、clickhouse、localhost、127.0.0.1；ClickHouse 另限 database=radar），不符即拒絕、不刪任何東西；已寫入 7.26 做法 8 與威脅表。記憶體實測已回寫 7.26（尖峰合計約 1.4 GiB）。CI 未重驗，需 PR 重跑。",
+    "第 3 輪：7.26 風險表 users.d 列改為單檔掛載、grafana.xml 由 dashboard-grafana-infra 處理；刪除「實測後回寫」字樣。只改文件。"
+  ]
+}

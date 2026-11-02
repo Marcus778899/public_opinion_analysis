@@ -1,0 +1,26 @@
+{
+  "task_id": "bert-design",
+  "status": "done",
+  "files_changed": [
+    "docs/development-spec.md",
+    "docs/realtime-sentiment-radar-design.md"
+  ],
+  "verification": {
+    "command": "git diff --stat develop...HEAD（以 merge base 比較；HEAD = 3acd2e6）",
+    "exit_code": 0,
+    "tail": " docs/development-spec.md                | 181 ++++++++++++++++++++++++++++++--\n docs/realtime-sentiment-radar-design.md |  23 ++--\n 2 files changed, 191 insertions(+), 13 deletions(-)"
+  },
+  "open_questions": [
+    "待決定 1（②執行期新套件）：A onnxruntime+tokenizers（+開發用 onnx）／B torch+transformers CPU。建議 A：image 小、載入不執行程式、onnxruntime 1.31.0 有 cp312 x86_64／aarch64 wheel",
+    "待決定 2（②④預訓練模型）：A ckiplab/bert-base-chinese（GPL-3.0，唯一明寫繁中語料）／B hfl/chinese-macbert-base（Apache-2.0，繁中未說明）／C google-bert/bert-base-chinese（Apache-2.0，未說明）／D A 與 B 各訓一版以測試集決定。建議 B；甲方確認接受 GPL 風險時改 D。理由：繁中效果可用人工測試集量，授權風險量不出來",
+    "待決定 3（②notebook 端套件，不進 uv.lock）：A torch、transformers、optimum[onnxruntime]／B torch、transformers、onnx、onnxruntime 自寫 torch.onnx.export。建議 A：少寫匯出程式，正確性由 logits 比對把關",
+    "待決定 4（②shadow 資源上限）：A cpus 2、mem_limit 1.5g、INFERENCE_THREADS=2／B 不設限。建議 A：fp32 權重推估約 440MB（未實測），不設限可能搶 Kafka、ClickHouse 的 CPU",
+    "待決定 5（④訓練資料上傳平台）：A Colab 工作階段上傳（不放 Drive）／B Kaggle 私有資料集。建議 A：Kaggle 條款摘要為非商用、預設可見度查不到官方原文",
+    "甲方需知的風險（查不到結論）：GPL 是否及於權重需法務意見；Kaggle 非商用條款；兩平台對上傳爬取內容都無明文限制或允許；Apache 候選的繁中效果只能用測試集驗證",
+    "需調查：無剩餘。CPU 延遲／記憶體改在甲方步驟 4（evaluate 實測）與步驟 6（compare）量；tokenizers abi3 在 3.12 arm64 的安裝由 bert-skeleton 驗收（arm64 建 image 後 import）；optimum 的 opset／dynamo 由 notebook logits 比對把關",
+    "依調查新增的自行決定：notebook 同時出 fp32 與 int8 兩個模型包，int8 在測試集 macro-F1 低於 fp32 不超過 0.02 且較快才用；進 shadow 的門檻是每批 INFERENCE_BATCH_SIZE 篇 < 30 秒，否則改 max_len 256 重訓；Colab 12 小時上限：前 50 步後預估超過 10 小時就停，並存每個 epoch 的 checkpoint",
+    "前一版已列的自行決定（開發規格 7.27 表）：shadow 用獨立 topic predictions.shadow 與表 predictions_shadow（呈現層取每篇最新一筆不分版本）；每個模型版本一個 consumer group；人工測試集 F1 離線 evaluate（S8-03 原文用 ClickHouse 算做不到，已改寫）；比較期間 ≥3 天且重疊 ≥500 篇",
+    "流程限制：匯出、匯入、evaluate、compare 都要讀 .env 或開發環境 ClickHouse，列為甲方步驟（派工順序 8、9）",
+    "qa FAIL 1 已修（3acd2e6）：測試用小 ONNX 模型 helper 放 tests/helpers/onnx_model.py，由 bert-skeleton 完整實作（含 tests/unit/helpers/test_onnx_model_helper.py），因為平行的 3～6 都要用；bert-integration 負責 tests/integration/ml/test_bert_pipeline.py，發現別張單的錯回報 manager 開修正單，不直接改"
+  ]
+}

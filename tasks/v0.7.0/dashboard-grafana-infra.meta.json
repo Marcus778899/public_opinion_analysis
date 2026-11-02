@@ -1,0 +1,29 @@
+{
+  "task_id": "dashboard-grafana-infra",
+  "kind": "feat",
+  "owner": "backend",
+  "lane": "full",
+  "title": "開發環境與測試 compose 加入 Grafana（含 ClickHouse plugin 與唯讀帳號），CI 的整合測試一併啟動（開發規格 7.25 派工順序 1）",
+  "issue": 99,
+  "branch": "feat/dashboard-grafana-infra",
+  "worktree": ".worktrees/dashboard-grafana-infra",
+  "pr": 100,
+  "qa": {
+    "result": "pass",
+    "sha": "4a2a4f0a1a035fdfb4e1e478c8cf7b6b3600c1ad",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "4a2a4f0a1a035fdfb4e1e478c8cf7b6b3600c1ad",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "ea972c73891f3cd4d62f911be46b78df6271efe1",
+    "sha": "4a2a4f0a1a035fdfb4e1e478c8cf7b6b3600c1ad",
+    "carried_from": "e59f7322988e15905ff1a1821c0a7fc9f0985c17"
+  },
+  "amend_sha": "ebc893716a33bfeef4586bc262dd6de86a9951c8",
+  "qa_fails": 1
+}

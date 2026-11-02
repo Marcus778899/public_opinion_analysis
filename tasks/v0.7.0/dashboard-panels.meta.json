@@ -1,0 +1,27 @@
+{
+  "task_id": "dashboard-panels",
+  "kind": "feat",
+  "owner": "backend",
+  "lane": "full",
+  "title": "寫 Grafana dashboard JSON（radar.json），含 7.25 的 6 個面板與 board、min_score 兩個變數，由 provisioning 載入（開發規格 7.25 派工順序 3）",
+  "issue": 106,
+  "branch": "feat/dashboard-panels",
+  "worktree": ".worktrees/dashboard-panels",
+  "pr": 107,
+  "qa": {
+    "result": "pass",
+    "sha": "4ae31b727ce0769b3164d3bc2a6d282251ebdf0b",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "4ae31b727ce0769b3164d3bc2a6d282251ebdf0b",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "b23ecb8e655f6d04f48b3932c6241365b6d0b3b7",
+    "sha": "4191a7074ddfe82a9b4e136661bd5362d4fe3130"
+  },
+  "amend_sha": "dfe24dab4f8d7734b004749316a1a61be06add80"
+}

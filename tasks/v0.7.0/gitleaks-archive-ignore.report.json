@@ -1,0 +1,14 @@
+{
+  "task_id": "gitleaks-archive-ignore",
+  "status": "done",
+  "files_changed": [".gitleaksignore"],
+  "verification": {
+    "command": "gitleaks git --redact --no-banner .  (gitleaks 8.30.1, darwin_arm64)",
+    "exit_code": 0,
+    "tail": "INF 129 commits scanned. INF no leaks found（加忽略前為 leaks found: 3）"
+  },
+  "open_questions": [
+    "3 筆發現皆在 commit 27610fd，rule generic-api-key，內容都是 \"unit_key\": \"Gossiping.M.1759730000.A.1B2\"（PTT 文章 ID 範例，非密鑰）：(1) 27610fd981f48b851b3c25e86c426b9ee34c4ad4:tasks/v0.6.0/ci-gitleaks-ignore.qa.md:generic-api-key:14 (2) ...ci-gitleaks-ignore.md:generic-api-key:6 (3) ...ci-gitleaks-ignore.review.md:generic-api-key:9。用 git show 逐筆看過原文，與既有 5a4d91f、06f7081 那筆同款誤判。",
+    "本機原本沒有 gitleaks，已把官方 v8.30.1 darwin_arm64 下載到 scratchpad 執行（未安裝到系統）。"
+  ]
+}

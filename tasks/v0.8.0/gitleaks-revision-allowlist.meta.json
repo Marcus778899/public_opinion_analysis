@@ -1,0 +1,24 @@
+{
+  "task_id": "gitleaks-revision-allowlist",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "gitleaks 不再把「變數名含 rev／revision／commit／sha、值為 40 位小寫 hex」的版本號判成 generic-api-key，恢復所有分支的 CI Security（D-026）",
+  "issue": 169,
+  "branch": "chore/gitleaks-revision-allowlist",
+  "worktree": ".worktrees/gitleaks-revision-allowlist",
+  "pr": 170,
+  "qa": {
+    "result": "pass",
+    "sha": "7206572129415acc1176f5846616cacd5a0d453e",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "7206572129415acc1176f5846616cacd5a0d453e",
+    "by": "architect"
+  },
+  "merged": true,
+  "qa_fails": 1,
+  "amend_sha": "3248580aaebd961fe3f20b098e742c45fe57c778"
+}
