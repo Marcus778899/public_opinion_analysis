@@ -84,12 +84,13 @@
 | replay-alert-repro | backend | done | 1 | PR #265 |
 | gap-record-update | backend | done | 0 | PR #267 |
 | agent-v1-cleanup | architect | blocked | 0 |  |
+| joserfc-vuln-upgrade | backend | review | 0 |  |
 
 ## 卡住／待甲方決定
 
 - 發版前：部署後從 bot log（callback step=…ms=）取 #82 各步驟實測，甲方親手點「我的訂閱」確認 2 秒內
-- v0.8.1 甲方驗收清單（docs/uat/v0.8.1.md）待勾；S22 e2e 需甲方在自己終端機跑（sandbox 讀不到 .env）
 - agent-v1-cleanup：等甲方處理工具狀態（D-037）後派 qa B（PR #273）
+- v0.8.1 甲方驗收清單（docs/uat/v0.8.1.md）待勾（S22 e2e 甲方已實跑 PASS）
 
 ## 注意事項（踩過的坑）
 
