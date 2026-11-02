@@ -13,13 +13,13 @@
 - 提出：architect（todo-design）
 -->
 
-### D-036 CI 要怎麼取得 agent-engineering 工具本體（工具 repo 是 private）
-- 背景：CI 改用 `ae ci coverage-gate`／`ae ci sync-branch` 後要 checkout `Marcus778899/agent-engineering`，它是 private，repo secrets 目前只有 `DOCKERHUB_*`，沒授權的話覆蓋率門檻和 sync_branch 都會失敗
-- 選項：A. 建 fine-grained token，只給 agent-engineering 這個 repo 的 Contents 唯讀、設到期日，存成本專案的 repo secret `AE_TOKEN` ／ B. 把 agent-engineering 改成 public ／ C. CI 不用 ae ci，把覆蓋率門檻腳本留一份在專案 `tools/`（之後工具升級要手動同步）
-- 建議：A，權限最小、不公開工具、CI 跟著工具升級
-- 提出：architect（agent-v1-cleanup）
-
 ## 已決定
+
+### D-036 CI 要怎麼取得 agent-engineering 工具本體（工具 repo 是 private）
+- 決定：A. fine-grained token（只給 agent-engineering 的 Contents 唯讀、設到期日），存成 repo secret `AE_TOKEN`（甲方已設定）
+- 理由：權限最小、不公開工具、CI 跟著工具升級
+- 影響：agent-v1-cleanup 的 ci.yml、sync_branch.yml 用 `AE_TOKEN` checkout 工具；token 到期要續
+- 日期：2026-11-02
 
 <!-- 範本：
 ### D-001 一句話問題

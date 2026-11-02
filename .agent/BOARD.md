@@ -44,6 +44,7 @@
 | 2026-10-29 | D-033 | 未來時間推文所屬 55 篇重爬，依新規則覆寫 |
 | 2026-10-29 | D-034 | Kafka 升到 4.1.2（修 KAFKA-19888 停擺） |
 | 2026-10-29 | D-035 | #254 排進 v0.8.1（基礎服務擋範例密碼、PG port 綁本機） |
+| 2026-11-02 | D-036 | CI 用 fine-grained token（repo secret AE_TOKEN，唯讀）取得 agent-engineering |
 
 ## 任務狀態
 
@@ -81,14 +82,13 @@
 | comments-cdc-gap-investigate | backend | done | 0 | reports/comments-cdc-gap-investigate.json（開發機休眠，非程式問題；watchdog 有記 ERROR） |
 | replay-alert-repro | backend | done | 1 | PR #265 |
 | gap-record-update | backend | done | 0 | PR #267 |
-| agent-v1-cleanup | architect | blocked | 0 |  |
+| agent-v1-cleanup | architect | in-progress | 0 |  |
 
 ## 卡住／待甲方決定
 
 - 發版前在 e2e 環境跑 test_crawler_restart_backfills_more_than_three_pages（#225 未實跑）
 - 發版前：部署後從 bot log（callback step=…ms=）取 #82 各步驟實測，甲方親手點「我的訂閱」確認 2 秒內
 - v0.8.1 甲方驗收清單（docs/uat/v0.8.1.md）待勾；e2e 補抓測試需停開發環境，待甲方決定時間
-- agent-v1-cleanup：甲方先移除 .claude/settings.json 的 v1 hooks（scripts/guard_*、validate_report）並 push；D-036 AE_TOKEN 待決定
 
 ## 注意事項（踩過的坑）
 
