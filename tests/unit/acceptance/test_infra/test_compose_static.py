@@ -296,8 +296,12 @@ def test_ci_integration_first_step_diffs_changed_files(ci: dict) -> None:
     )
     text = _step_text(steps[idx])
     assert "github.event.before" in text
-    for path in ("docs/", "tasks/", "reports/"):
+    for path in ("docs/", ".agent/"):
         assert path in text, path
+    # 不含 .agent/ 前綴的 v1 路徑不應再出現
+    stripped = text.replace(".agent/", "")
+    for path in ("tasks/", "reports/"):
+        assert path not in stripped, path
 
 
 def test_ci_integration_later_steps_are_skippable_by_if(ci: dict) -> None:
