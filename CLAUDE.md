@@ -2,22 +2,6 @@
 
 所有 agent 啟動時都會讀這份。只放永遠成立的規則，越短越好；情境知識放 skills。
 
-@BOARD.md
-
-## 團隊規則
-
-- 布告欄（BOARD.md）上的「已定案決策」不可推翻；與之矛盾時停下來回報 manager
-- 只有 manager 可以改 BOARD.md（透過 `scripts/board.py`）、README.md、docs/decisions.md
-- 每件工作都有派工單 `tasks/<task_id>.md`（task_id 是有意義的名稱，例 `todo-create-api`）；只在派工單的工作目錄 `.worktrees/<task_id>` 修改「負責檔案」；主目錄只寫自己角色規定的檔（回報與證據 `reports/`，uat、researcher、security 各自的 `docs/` 子目錄），其他一律不碰；過去階段的派工單封存在 `tasks/<tag>/`
-- 分支：`main` ← `develop` ← `feat/`、`fix/`、`chore/`…；主目錄永遠停在 develop；不可直接 git push、merge、rebase、切換分支，一律透過 `scripts/`
-- 需要甲方決定的事寫成 D-編號，集中在 `docs/decisions.md`；其他文件只引用編號
-- 決策分級：只有這四類開 D-編號問甲方——①範圍（做不做、做多少）②成本與外部依賴（付費服務、新技術棧或套件）③品牌與對外語氣（品牌色、名稱、文案語氣）④不可逆或有風險（刪資料、權限、資料遷移、安全與法規）。其他可逆、在範圍內的細節（互動方式、版面、元件、欄位排序、命名…）由負責角色自己決定，寫進設計或 UI 規格的「自行決定」表，甲方核可設計時一起看
-- 設定值（port、domain、token…）只放 `.env`；文件與程式只寫變數名稱；不可讀 `.env`
-- 文件精簡：同一件事只寫一次，其他地方引用
-- 「完成」必須附實際執行的驗證指令與輸出；沒跑過不算完成
-- 回報格式依 `contracts/report.schema.json`（做派工單的角色都要寫）
-- Bash 在 sandbox 裡；docker 只能直接下 `docker compose …`（唯一在 sandbox 外的例外），不要包在 make、script 裡或跟 `cd`、`&&` 寫在同一個指令
-
 ## 專案規範（PTT 即時輿情雷達）
 
 動手前先讀相關文件：
