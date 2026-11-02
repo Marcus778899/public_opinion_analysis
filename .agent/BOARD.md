@@ -45,6 +45,7 @@
 | 2026-10-29 | D-034 | Kafka 升到 4.1.2（修 KAFKA-19888 停擺） |
 | 2026-10-29 | D-035 | #254 排進 v0.8.1（基礎服務擋範例密碼、PG port 綁本機） |
 | 2026-11-02 | D-036 | CI 用 fine-grained token（repo secret AE_TOKEN，唯讀）取得 agent-engineering |
+| 2026-11-02 | D-037 | agent-v1-cleanup 仲裁後狀態卡住由甲方處理工具，不用空 commit 繞過 |
 
 ## 任務狀態
 
@@ -88,7 +89,7 @@
 
 - 發版前：部署後從 bot log（callback step=…ms=）取 #82 各步驟實測，甲方親手點「我的訂閱」確認 2 秒內
 - v0.8.1 甲方驗收清單（docs/uat/v0.8.1.md）待勾；S22 e2e 需甲方在自己終端機跑（sandbox 讀不到 .env）
-- agent-v1-cleanup：D-037 工具要求仲裁後 worker 再 commit，實作不用改，卡住派 qa
+- agent-v1-cleanup：等甲方處理工具狀態（D-037）後派 qa B（PR #273）
 
 ## 注意事項（踩過的坑）
 

@@ -13,13 +13,13 @@
 - 提出：architect（todo-design）
 -->
 
-### D-037 agent-v1-cleanup 卡在流程狀態：仲裁判 TEST_WRONG 後實作不用改，工具仍要求 worker 再 commit
-- 背景：worker 的 disputes 判 TEST_WRONG（兩個舊測試依賴已刪的 v1 檔），qa 改好測試並 lock（603437f），worker 重驗全綠、實作不用動、沒有新 commit；PR #273 已開。`ae pr next` 和派工檢查仍要求「派 architect 做修正」，擋住派 qa 驗證。依規定不自行繞過
-- 選項：A. 你在自己的終端機處理工具狀態（或回報給 agent-engineering 修 bug），之後我照常派 qa ／ B. 讓 architect 補一個空 commit（`--allow-empty`）讓狀態前進（等於繞過檢查，不建議）／ C. 作廢這張單重開（重跑一次全部流程）
-- 建議：A，這是工具的狀態判斷漏了「仲裁後實作不需修改」的情況
-- 提出：manager（agent-v1-cleanup）
-
 ## 已決定
+
+### D-037 agent-v1-cleanup 卡在流程狀態：仲裁判 TEST_WRONG 後實作不用改，工具仍要求 worker 再 commit
+- 決定：A. 甲方在自己的終端機處理工具狀態（或回報 agent-engineering 修），之後照常派 qa
+- 理由：工具狀態判斷漏了「仲裁後實作不需修改」的情況，不用空 commit 繞過
+- 影響：agent-v1-cleanup（PR #273）等甲方處理完才派 qa「B」
+- 日期：2026-11-02
 
 ### D-036 CI 要怎麼取得 agent-engineering 工具本體（工具 repo 是 private）
 - 決定：A. fine-grained token（只給 agent-engineering 的 Contents 唯讀、設到期日），存成 repo secret `AE_TOKEN`（甲方已設定）
