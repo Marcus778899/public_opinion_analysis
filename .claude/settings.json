@@ -1,7 +1,4 @@
 {
-  "enabledMcpjsonServers": [
-    "playwright"
-  ],
   "permissions": {
     "allow": [
       "Bash(make check)",
@@ -27,6 +24,10 @@
       "Bash(ae config)",
       "Bash(ae survey:*)",
       "Bash(gh issue create:*)",
+      "Bash(ae import check)",
+      "Bash(ae import apply)",
+      "Bash(ae import remove:*)",
+      "Bash(ae import write:*)",
       "Bash(python3 .claude/skills/ui-ux-pro-max/scripts/search.py:*)"
     ],
     "ask": [
@@ -34,7 +35,9 @@
       "Bash(ae board scope:*)",
       "Bash(ae pr approve:*)",
       "Bash(ae pr unblock:*)",
-      "Bash(ae release finish:*)"
+      "Bash(ae release finish:*)",
+      "Bash(ae import finish:*)",
+      "Bash(ae import upgrade:*)"
     ],
     "deny": [
       "Bash(git push:*)",
@@ -62,7 +65,8 @@
     "failIfUnavailable": true,
     "allowUnsandboxedCommands": false,
     "excludedCommands": [
-      "docker compose *"
+      "docker compose *",
+      "ae import *"
     ],
     "filesystem": {
       "allowWrite": [

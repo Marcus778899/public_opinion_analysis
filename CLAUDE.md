@@ -85,7 +85,7 @@ agent 改成直接下 `docker compose -f infra/docker-compose.yaml --env-file .e
 - 先改文件再改程式；實作中做出新決定時，回寫到文件後才算完成
 - 發現文件與實作不一致時，指出來，不要自行決定以哪邊為準
 
-<!-- agent-engineering:begin（由 ae 管理：ae adopt 加入、ae upgrade 更新；不要手改，專案規範寫在這個區塊外） -->
+<!-- agent-engineering:begin（由 ae 管理：導入時加入、升級時更新；不要手改，專案規範寫在這個區塊外） -->
 ## Agent 團隊（agent-engineering）
 
 所有 agent 啟動時都會讀這段。只放永遠成立的規則；情境知識放 skills。
