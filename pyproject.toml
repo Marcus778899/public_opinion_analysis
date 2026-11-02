@@ -41,8 +41,8 @@ module-name = "radar"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-# NOTE: scripts/、templates/、.claude/ 歸 agent-engineering 範本（update.sh 覆蓋），不套專案的 lint
-extend-exclude = ["docs", "scripts", "templates", ".claude"]
+# NOTE: .claude/ 歸 agent-engineering 管理（ae import 寫入），不套專案的 lint
+extend-exclude = ["docs", ".claude"]
 src = ["src"]
 
 [tool.ruff.lint]
