@@ -4,7 +4,7 @@
 
 ## 快速開始
 
-1. 設定：在自己的終端機（不是 agent 的 sandbox）跑 `python3 scripts/check_env.py`，依提示在 `.env` 填入缺少的值（Telegram 需要 `TELEGRAM_BOT_TOKEN`，並在 `TELEGRAM_ALLOWED_CHAT_IDS` 填自己的 chat id——沒填 bot 會拒絕啟動，要開放所有人必須另設 `TELEGRAM_ALLOW_ALL=true`（D-010）；情緒推論需要 `INFERENCE_MODEL_VERSION` 與 `models/` 下的模型；四個密碼 `POSTGRES_PASSWORD`、`CLICKHOUSE_PASSWORD`、`CLICKHOUSE_GRAFANA_PASSWORD`、`GRAFANA_ADMIN_PASSWORD` 都要自訂，留空或用範例值 `CHANGE_ME`／`change-me` 時 PG、ClickHouse、Grafana 與所有 app 服務都不會啟動）
+1. 設定：在自己的終端機（不是 agent 的 sandbox）跑 `ae check-env`（`.claude/skills/agent-engineering/bin/ae`），依提示在 `.env` 填入缺少的值（Telegram 需要 `TELEGRAM_BOT_TOKEN`，並在 `TELEGRAM_ALLOWED_CHAT_IDS` 填自己的 chat id——沒填 bot 會拒絕啟動，要開放所有人必須另設 `TELEGRAM_ALLOW_ALL=true`（D-010）；情緒推論需要 `INFERENCE_MODEL_VERSION` 與 `models/` 下的模型；四個密碼 `POSTGRES_PASSWORD`、`CLICKHOUSE_PASSWORD`、`CLICKHOUSE_GRAFANA_PASSWORD`、`GRAFANA_ADMIN_PASSWORD` 都要自訂，留空或用範例值 `CHANGE_ME`／`change-me` 時 PG、ClickHouse、Grafana 與所有 app 服務都不會啟動）
 2. 安裝：`make setup`（Python 3.12、[uv](https://docs.astral.sh/uv/)、Docker；`pre-commit install` 啟用 commit 前檢查）
 3. 全部啟動（爬蟲、入庫、CDC、watchdog、API、Grafana、熱度警示、Telegram bot、情緒推論；會對真實 PTT 發請求，自動建表、topic 與 CDC connector）：
 
@@ -115,7 +115,7 @@
 | `notebooks/` | Colab fine-tune notebook（甲方執行） |
 | `infra/` | docker-compose、Kafka、PG、ClickHouse、Debezium 設定 |
 | `tools/` | 營運腳本：建 topic、ClickHouse migration、註冊 connector、seed（D-006） |
-| `scripts/` | agent 團隊流程腳本 |
+| `.agent/` | agent 團隊布告欄、派工單、回報（流程指令 `ae` 由 agent-engineering 提供） |
 
 設計見 [docs/realtime-sentiment-radar-design.md](docs/realtime-sentiment-radar-design.md)，開發規格見 [docs/development-spec.md](docs/development-spec.md)。
 
@@ -132,7 +132,7 @@
 | v0.6.0 | 2026-10-20 | 階段 3～6：情緒標註與模型、推論、熱度警示、Telegram 互動 |
 | v0.7.0 | 2026-10-21 | 階段 7：Grafana Dashboard（情緒信心下限為下拉選單）；整合測試改用 compose test 服務並平行執行（#78）；bot 允許清單 fail closed（D-010） |
 | v0.8.0 | 2026-10-28 | 階段 8：BERT fine-tune notebook（已在 Colab 實跑 macbert、ckip）、ONNX 模型包匯入、shadow 並行推論、兩版比較；ONNX 推論依長度分小批（選填 `INFERENCE_MAX_BATCH_TOKENS`）；authlib 漏洞升級；gitleaks 誤判根治（D-018、D-026）。模型進 shadow 與切換由 #178 追蹤（D-027） |
-| v0.8.1 | 2026-10-30 | backlog 修正：停機後依時間補抓與停擺警告（#180）；Kafka 升 4.1.2（D-034）；推文年份推斷、未來時間推文重爬（D-033）；密碼範例值擋啟動、PG 只綁本機（#119、D-035）；bot 斷線重試、推送照允許清單、訂閱切換先回應；scheduler 查詢逾時；模型匯入 `--sha256` 與錯誤提示；回放不推 Telegram；gitleaks 放行收緊、CI 工具驗 checksum |
+| v0.8.1 | 2026-10-30 | backlog 修正：停機後依時間補抓與停擺警告（#180）；Kafka 升 4.1.2（D-034）；推文年份推斷、未來時間推文重爬（D-033）；密碼範例值擋啟動、PG 只綁本機（#119、D-035）；bot 斷線重試、推送照允許清單、訂閱切換先回應；scheduler 查詢逾時；模型匯入 `--sha256` 與錯誤提示；回放不推 Telegram；gitleaks 放行收緊、CI 工具驗 checksum；joserfc 漏洞升級（#274）；CI 改用 agent-engineering v3 的 `ae ci`、移除 v1 流程副本（D-036） |
 
 ## 授權
 
