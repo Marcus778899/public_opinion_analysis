@@ -29,7 +29,7 @@ agent 改成直接下 `docker compose -f infra/docker-compose.yaml --env-file .e
 
 - 程式碼都在 `src/radar/`，import 一律寫 `from radar.xxx import ...`
 - 每個服務的入口是自己的模組，用 `main()` + `if __name__ == "__main__": main()`，執行方式為 `python -m radar.<module>`
-- 營運腳本（建 topic、ClickHouse migration、註冊 connector、seed）放 `tools/`；`scripts/` 是流程腳本，不放專案程式（D-006）
+- 營運腳本（建 topic、ClickHouse migration、註冊 connector、seed）放 `tools/`；`scripts/` 不放專案程式（D-006；v1 流程腳本已移除）
 - 測試放 `tests/unit/`、`tests/integration/`，目錄結構對應 `src/radar/`；驗收測試目錄由設計指定
 - PTT HTML 測試資料放 `tests/fixtures/ptt/`
 
