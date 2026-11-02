@@ -82,13 +82,13 @@
 | comments-cdc-gap-investigate | backend | done | 0 | reports/comments-cdc-gap-investigate.json（開發機休眠，非程式問題；watchdog 有記 ERROR） |
 | replay-alert-repro | backend | done | 1 | PR #265 |
 | gap-record-update | backend | done | 0 | PR #267 |
-| agent-v1-cleanup | architect | in-progress | 0 |  |
+| agent-v1-cleanup | architect | blocked | 0 |  |
 
 ## 卡住／待甲方決定
 
-- 發版前在 e2e 環境跑 test_crawler_restart_backfills_more_than_three_pages（#225 未實跑）
 - 發版前：部署後從 bot log（callback step=…ms=）取 #82 各步驟實測，甲方親手點「我的訂閱」確認 2 秒內
-- v0.8.1 甲方驗收清單（docs/uat/v0.8.1.md）待勾；e2e 補抓測試需停開發環境，待甲方決定時間
+- v0.8.1 甲方驗收清單（docs/uat/v0.8.1.md）待勾；S22 e2e 需甲方在自己終端機跑（sandbox 讀不到 .env）
+- agent-v1-cleanup：D-037 工具要求仲裁後 worker 再 commit，實作不用改，卡住派 qa
 
 ## 注意事項（踩過的坑）
 
