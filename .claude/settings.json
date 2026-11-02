@@ -26,8 +26,8 @@
       "Bash(ae check-env setup)",
       "Bash(ae config)",
       "Bash(ae survey:*)",
-      "Bash(python3 .claude/skills/ui-ux-pro-max/scripts/search.py:*)",
-      "Bash(gh issue create:*)"
+      "Bash(gh issue create:*)",
+      "Bash(python3 .claude/skills/ui-ux-pro-max/scripts/search.py:*)"
     ],
     "ask": [
       "Bash(dangerouslyDisableSandbox:true)",
