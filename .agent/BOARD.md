@@ -6,8 +6,12 @@
 
 ## 目標與範圍
 
-- 本輪：處理 backlog 小項後發 v0.8.1（階段 9 暫緩）：第 3 批剩 #80、#254（D-035）
+- 本輪：處理 backlog 小項後發 v0.8.1（階段 9 暫緩）：第 3 批剩 #80、#254（D-035）；agent-v1-cleanup 清掉 v1 殘留（CI 改 ae ci、刪 scripts/、templates/、contracts/）
 - 不做：階段 9 上雲；#57（v0.8.1 發版後討論）；#68 #69 #251；多天驗收（D-031）；#178 #181
+- 驗收條件：
+  - CI 改成 ae ci 後在 PR 上綠燈，kafka／postgres／clickhouse 整合測試、gitleaks、改到的程式碼覆蓋率門檻都還在跑
+  - repo 裡沒有任何東西再呼叫 scripts/，根目錄的 scripts/、templates/、contracts/ 已移除
+  - v0.8.1 甲方驗收清單 PASS（docs/uat/v0.8.1.md）
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
