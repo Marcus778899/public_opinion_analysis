@@ -1,0 +1,4 @@
+[submodule ".claude/skills/agent-engineering"]
+	path = .claude/skills/agent-engineering
+	url = https://github.com/Marcus778899/agent-engineering
+	branch = main

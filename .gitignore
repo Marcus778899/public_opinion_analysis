@@ -82,3 +82,12 @@ reports/
 .hooklog/
 coverage-reports/
 node_modules/
+.agent/tasks/
+.agent/reports/
+.agent/survey/
+.venv
+node_modules
+docs/uat/artifacts/
+.claude/skills/ui-ux-pro-max/
+.claude/skills/differential-review/
+CLAUDE.local.md

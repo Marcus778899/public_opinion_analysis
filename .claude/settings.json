@@ -6,14 +6,6 @@
     "allow": [
       "Bash(make check)",
       "Bash(docker compose:*)",
-      "Bash(python3 scripts/board.py:*)",
-      "Bash(python3 scripts/task.py:*)",
-      "Bash(python3 scripts/pr.py:*)",
-      "Bash(python3 scripts/docs.py:*)",
-      "Bash(python3 scripts/check_env.py)",
-      "Bash(python3 scripts/check_env.py setup)",
-      "Bash(python3 scripts/validate_report.py:*)",
-      "Bash(python3 .claude/skills/ui-ux-pro-max/scripts/search.py:*)",
       "Bash(python3 -m http.server:*)",
       "Bash(gh issue list:*)",
       "Bash(gh issue view:*)",
@@ -25,14 +17,24 @@
       "Bash(git log:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(python3 scripts/release.py open:*)"
+      "Bash(ae board:*)",
+      "Bash(ae task:*)",
+      "Bash(ae pr:*)",
+      "Bash(ae docs:*)",
+      "Bash(ae release open:*)",
+      "Bash(ae check-env)",
+      "Bash(ae check-env setup)",
+      "Bash(ae config)",
+      "Bash(ae survey:*)",
+      "Bash(python3 .claude/skills/ui-ux-pro-max/scripts/search.py:*)",
+      "Bash(gh issue create:*)"
     ],
     "ask": [
-      "Bash(python3 scripts/init_project.py:*)",
-      "Bash(python3 scripts/pr.py approve:*)",
-      "Bash(python3 scripts/pr.py unblock:*)",
       "Bash(dangerouslyDisableSandbox:true)",
-      "Bash(python3 scripts/release.py finish:*)"
+      "Bash(ae board scope:*)",
+      "Bash(ae pr approve:*)",
+      "Bash(ae pr unblock:*)",
+      "Bash(ae release finish:*)"
     ],
     "deny": [
       "Bash(git push:*)",
@@ -48,9 +50,12 @@
       "Bash(gh release upload:*)",
       "Bash(gh repo:*)",
       "Read(**/.env)",
-      "Edit(/scripts/**)",
       "Edit(/contracts/**)",
-      "Edit(/CLAUDE.md)"
+      "Edit(/CLAUDE.md)",
+      "Bash(ae adopt:*)",
+      "Bash(ae upgrade:*)",
+      "Edit(/.claude/**)",
+      "Edit(/.agent/config.toml)"
     ]
   },
   "sandbox": {
@@ -73,7 +78,8 @@
       "denyWrite": [
         "./scripts",
         "./contracts",
-        "./CLAUDE.md"
+        "./CLAUDE.md",
+        "./.agent/config.toml"
       ]
     },
     "network": {

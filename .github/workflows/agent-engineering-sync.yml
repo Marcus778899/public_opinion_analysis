@@ -1,0 +1,42 @@
+name: agent-engineering Sync release branch back
+
+# 由 ae adopt 產生。保底：ae release finish 會在本機把發版分支併回整合分支，通常這裡已經沒事做
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Sync develop
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # 工具本體（ae）：submodule 指到的版本。agent-engineering 是 private 時，到 repo 的 secrets 設 AE_TOKEN
+      # （fine-grained token，只給 agent-engineering 的 Contents 唯讀）；public 不用設。不讓 checkout 順便抓 submodule：預設 token 讀不到別的 private repo
+      - name: Locate agent-engineering
+        id: ae
+        run: |
+          url=$(git config -f .gitmodules --get submodule..claude/skills/agent-engineering.url)
+          repo=${url#https://github.com/}
+          echo "repo=${repo%.git}" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD:.claude/skills/agent-engineering)" >> "$GITHUB_OUTPUT"
+      - name: Checkout agent-engineering
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.ae.outputs.repo }}
+          ref: ${{ steps.ae.outputs.sha }}
+          path: .claude/skills/agent-engineering
+          token: ${{ secrets.AE_TOKEN || github.token }}
+          persist-credentials: false   # 後面會跑專案的程式，不留 token
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Sync
+        run: .claude/skills/agent-engineering/bin/ae ci sync-branch
