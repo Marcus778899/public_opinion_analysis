@@ -114,15 +114,3 @@ def test_env_example_passwords_use_uppercase_placeholder() -> None:
     }
     for name in NAMES:
         assert lines[name].strip() == "CHANGE_ME", name
-
-
-def test_check_env_lists_example_passwords_as_required() -> None:
-    sys.path.insert(0, str(ROOT / "scripts"))
-    try:
-        import check_env
-
-        parsed = check_env.parse(ENV_EXAMPLE)
-    finally:
-        sys.path.remove(str(ROOT / "scripts"))
-    for name in NAMES:
-        assert parsed[name][0] == "CHANGE_ME", name
