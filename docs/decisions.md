@@ -15,6 +15,18 @@
 
 ## 已決定
 
+### D-039 Kafka 三個對外 port 綁 0.0.0.0 要不要收斂（UAT v0.8.1 F-8）
+- 決定：改綁 127.0.0.1，只給本機的已知服務連；排進 v0.8.1
+- 理由：Kafka 沒有認證，綁 0.0.0.0 時同網段的人可讀寫 topic；其他服務（PG、api、connect…）都已綁本機
+- 影響：`infra/docker-compose.yaml` kafka_1～3 的 ports；v0.8.1 範圍
+- 日期：2026-11-04
+
+### D-038 遺留的 `heat-replay-*` 內部 topic 與 consumer group 要不要清
+- 決定：清掉，排進 v0.8.1；只刪 `heat-replay-*` 相關的 consumer group 與 Quix 內部 topic（changelog、repartition），其他 topic、group 不動
+- 理由：回放測試的殘留，已不需要
+- 影響：開發環境的 Kafka；v0.8.1 範圍
+- 日期：2026-11-04
+
 ### D-037 agent-v1-cleanup 卡在流程狀態：仲裁判 TEST_WRONG 後實作不用改，工具仍要求 worker 再 commit
 - 決定：A. 甲方在自己的終端機處理工具狀態（或回報 agent-engineering 修），之後照常派 qa
 - 理由：工具狀態判斷漏了「仲裁後實作不需修改」的情況，不用空 commit 繞過

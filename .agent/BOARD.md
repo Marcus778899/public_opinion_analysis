@@ -6,11 +6,13 @@
 
 ## 目標與範圍
 
-- 本輪：處理 backlog 小項後發 v0.8.1（階段 9 暫緩）：第 3 批剩 #80、#254（D-035）；agent-v1-cleanup 清掉 v1 殘留（CI 改 ae ci、刪 scripts/、templates/、contracts/）
-- 不做：階段 9 上雲；#57（v0.8.1 發版後討論）；#68 #69 #251；多天驗收（D-031）；#178 #181
+- 本輪：處理 backlog 小項後發 v0.8.1（階段 9 暫緩）：第 3 批剩 #80、#254（D-035）；agent-v1-cleanup 清掉 v1 殘留（CI 改 ae ci、刪 scripts/、templates/、contracts/）；清掉遺留 heat-replay-* group 與內部 topic（D-038）；Kafka 對外 port 改綁 127.0.0.1（D-039）
+- 不做：階段 9 上雲；#57（v0.8.1 發版後討論）；#68 #69 #251 #281 #282；多天驗收（D-031）；#178 #181
 - 驗收條件：
   - CI 改成 ae ci 後在 PR 上綠燈，kafka／postgres／clickhouse 整合測試、gitleaks、改到的程式碼覆蓋率門檻都還在跑
   - repo 裡沒有任何東西再呼叫 scripts/，根目錄的 scripts/、templates/、contracts/ 已移除
+  - Kafka 三個對外 port 只綁 127.0.0.1，本機服務與工具照常連得上
+  - 開發環境的 Kafka 沒有 heat-replay-* 的 consumer group 與內部 topic，其他 topic、group 不受影響
   - v0.8.1 甲方驗收清單 PASS（docs/uat/v0.8.1.md）
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
@@ -46,6 +48,8 @@
 | 2026-10-29 | D-035 | #254 排進 v0.8.1（基礎服務擋範例密碼、PG port 綁本機） |
 | 2026-11-02 | D-036 | CI 用 fine-grained token（repo secret AE_TOKEN，唯讀）取得 agent-engineering |
 | 2026-11-02 | D-037 | agent-v1-cleanup 仲裁後狀態卡住由甲方處理工具，不用空 commit 繞過 |
+| 2026-11-04 | D-038 | 遺留 heat-replay-* 的 group 與內部 topic 清掉（v0.8.1） |
+| 2026-11-04 | D-039 | Kafka 三個對外 port 改綁 127.0.0.1（v0.8.1） |
 
 ## 任務狀態
 
