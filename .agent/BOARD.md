@@ -60,6 +60,10 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
+| stability-design | architect | done | 0 | PR #292 |
+| producer-fatal-exit | backend | done | 0 | PR #298 |
+| connect-resilience | backend | done | 0 | PR #296 |
+| cli-wording-sha256 | backend | qa | 1 |  |
 
 ## 卡住／待甲方決定
 

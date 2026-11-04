@@ -273,3 +273,52 @@ def test_restart_failed_server_error_raises_with_body():
 
     with pytest.raises(ConnectError, match="500 boom"):
         restart_failed(client, "radar-cdc")
+
+
+def test_wait_until_ready_polls_health_path(monkeypatch):
+    paths = []
+
+    def handler(request):
+        paths.append(request.url.path)
+        return httpx2.Response(200)
+
+    wait_until_ready(client_with(handler), timeout_s=60)
+
+    assert paths == ["/health"]
+
+
+def test_wait_until_running_failed_then_restart_then_running_succeeds(monkeypatch):
+    monkeypatch.setattr(connect.time, "sleep", lambda _: None)
+    state = {"restarted": False}
+
+    def handler(request):
+        if request.method == "POST":
+            state["restarted"] = True
+            return httpx2.Response(204)
+        task = "RUNNING" if state["restarted"] else "FAILED"
+        return httpx2.Response(
+            200, json={"connector": {"state": "RUNNING"}, "tasks": [{"state": task}]}
+        )
+
+    status = wait_until_running(client_with(handler), "c", 60, restart_limit=2)
+
+    assert status.is_running
+    assert state["restarted"]
+
+
+def test_wait_until_running_failed_without_restart_limit_raises_immediately(monkeypatch):
+    monkeypatch.setattr(connect.time, "sleep", lambda _: None)
+    posts = []
+
+    def handler(request):
+        if request.method == "POST":
+            posts.append(request)
+            return httpx2.Response(204)
+        return httpx2.Response(
+            200, json={"connector": {"state": "RUNNING"}, "tasks": [{"state": "FAILED"}]}
+        )
+
+    with pytest.raises(ConnectError, match="FAILED"):
+        wait_until_running(client_with(handler), "c", 60)
+
+    assert posts == []

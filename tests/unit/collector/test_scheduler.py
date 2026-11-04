@@ -255,3 +255,24 @@ def test_list_task_sender_puts_since_into_task():
 
     task = CrawlTask.model_validate_json(fake.produced[0]["value"])
     assert task.since == latest - timedelta(minutes=10)
+
+
+def test_logged_fatal_calls_on_fatal_and_ordinary_error_is_swallowed():
+    from confluent_kafka import KafkaError
+
+    from radar.collector.scheduler import _logged
+    from radar.common.kafka.producer import ProducerFatalError
+
+    seen: list[ProducerFatalError] = []
+    error = ProducerFatalError(KafkaError(KafkaError._FATAL, "x", fatal=True))
+
+    def fatal_job(board: str) -> None:
+        raise error
+
+    def broken_job(board: str) -> None:
+        raise RuntimeError("boom")
+
+    _logged(fatal_job, seen.append)("b")
+    _logged(broken_job, seen.append)("b")
+
+    assert seen == [error]
