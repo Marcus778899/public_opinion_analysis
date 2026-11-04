@@ -13,13 +13,13 @@
 - 提出：architect（todo-design）
 -->
 
-### D-040 正式推論要不要直接換成 BERT（跳過 shadow 3 天＋compare）
-- 背景：開發環境的 inference 沒在跑，甲方要重開並換新模型。原設計是 BERT 先以 shadow 跑 3 天、compare 比過才換正式（#178），D-031 把它延到上雲後。人工測試集 macro-F1：`bert-ckip-202610280849` 0.612、`bert-macbert-202610280830` 0.571、baseline `tfidf-lr-202610151237` 0.504
-- 選項：A. 正式直接換 `bert-ckip-202610280849`（fp32），shadow 不開；#178 上雲後改成驗證已上線的 BERT ／ B. 正式維持 baseline，另開 shadow 跑 ckip（D-023 上限 1.5g），等 compare 再換
-- 建議：A，開發環境沒有對外使用者，ckip 在測試集明顯較好、記憶體與耗時已過門檻（開發規格「順序 3 判定」）；換版前後的 predictions 以 model_version 區分
-- 提出：manager（2026-11-04）
-
 ## 已決定
+
+### D-040 正式推論要不要直接換成 BERT（跳過 shadow 3 天＋compare）
+- 決定：A. 正式推論直接換 `bert-ckip-202610280849`（fp32），shadow 不開；#178 上雲後改成驗證已上線的 BERT
+- 理由：開發環境沒有對外使用者；ckip 人工測試集 macro-F1 0.612（macbert 0.571、baseline 0.504），耗時與記憶體已過門檻（開發規格「順序 3 判定」）
+- 影響：甲方已在 `.env` 設 `INFERENCE_MODEL_VERSION`；#178；開發規格第 6 章執行順序（模型切換）
+- 日期：2026-11-04
 
 ### D-039 Kafka 三個對外 port 綁 0.0.0.0 要不要收斂（UAT v0.8.1 F-8）
 - 決定：改綁 127.0.0.1，只給本機的已知服務連；排進 v0.8.1
