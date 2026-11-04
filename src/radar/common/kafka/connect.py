@@ -9,6 +9,8 @@ from pathlib import Path
 
 import httpx2
 
+from radar.common.log import log
+
 _VAR = re.compile(r"\$\{([A-Z0-9_]+)\}")
 _RUNNING = "RUNNING"
 _FAILED = "FAILED"
@@ -78,7 +80,7 @@ def wait_until_ready(client: httpx2.Client, timeout_s: float, poll_s: float = 3.
     deadline = time.monotonic() + timeout_s
     while True:
         try:
-            if client.get("/").status_code == 200:
+            if client.get("/health").status_code == 200:
                 return
         except httpx2.TransportError:
             pass
@@ -123,11 +125,19 @@ def restart_failed(client: httpx2.Client, name: str) -> None:
 
 
 def wait_until_running(
-    client: httpx2.Client, name: str, timeout_s: float, poll_s: float = 2.0
+    client: httpx2.Client,
+    name: str,
+    timeout_s: float,
+    poll_s: float = 2.0,
+    *,
+    restart_limit: int = 0,
+    restart_grace_s: float = 15.0,
 ) -> ConnectorStatus:
     """PUT 成功只代表設定被接受；連不上 PG、publication 不存在要等 task 啟動才會失敗。"""
     # NOTE: PUT 建立後狀態是非同步產生的，剛建立時查狀態會先回 404
     deadline = time.monotonic() + timeout_s
+    restarts = 0
+    grace_until = 0.0
     while True:
         status: ConnectorStatus | str
         try:
@@ -137,8 +147,20 @@ def wait_until_running(
         else:
             if status.is_running:
                 return status
-            if status.is_failed:
-                raise ConnectError(f"connector {name} failed: {status}")
+            # NOTE: 重啟後 grace 內可能還讀到舊的 FAILED，不判定
+            if status.is_failed and time.monotonic() >= grace_until:
+                if restarts >= restart_limit:
+                    raise ConnectError(f"connector {name} failed: {status}")
+                restarts += 1
+                log.warning(
+                    "connector %s failed, restarting (%d/%d): %s",
+                    name,
+                    restarts,
+                    restart_limit,
+                    status,
+                )
+                restart_failed(client, name)
+                grace_until = time.monotonic() + restart_grace_s
         if time.monotonic() >= deadline:
             raise ConnectError(f"connector {name} not running after {timeout_s}s: {status}")
         time.sleep(poll_s)

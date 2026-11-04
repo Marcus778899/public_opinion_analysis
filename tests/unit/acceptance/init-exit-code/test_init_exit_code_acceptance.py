@@ -267,11 +267,16 @@ def test_connector_put_rejected_exits_nonzero_and_logs_step_and_reason() -> None
     assert_failed_with_reason(proc, "connector", "plugin boom")
 
 
-def test_connector_task_failed_exits_nonzero_and_logs_step_and_reason() -> None:
-    setup = connector_setup(
+def test_connector_task_failed_exits_nonzero_after_sending_restart_and_logs_reason() -> None:
+    # 7.30 D：FAILED 先重啟（最多 TASK_RESTART_LIMIT 次）才失敗；grace 調小避免等 30 秒
+    setup = "mod.TASK_RESTART_GRACE_S = 0.0\n" + connector_setup(
         """
         if request.method == "PUT":
             return httpx2.Response(201, json={})
+        if request.url.path.endswith("/restart"):
+            import sys
+            print("RESTART_SENT", file=sys.stderr, flush=True)
+            return httpx2.Response(204)
         if request.url.path.endswith("/status"):
             return httpx2.Response(200, json={
                 "connector": {"state": "RUNNING"}, "tasks": [{"state": "FAILED"}]})
@@ -280,6 +285,34 @@ def test_connector_task_failed_exits_nonzero_and_logs_step_and_reason() -> None:
     )
     proc = run_tool("register_connector.py", setup, CONNECT_ENV)
     assert_failed_with_reason(proc, "connector", "FAILED")
+    assert "RESTART_SENT" in proc.stderr + proc.stdout, "must send a restart before giving up"
+
+
+def test_connector_task_failed_then_running_after_restart_exits_zero() -> None:
+    setup = connector_setup(
+        """
+        import sys
+        global restarted
+        try:
+            restarted
+        except NameError:
+            restarted = False
+        if request.method == "PUT":
+            return httpx2.Response(201, json={})
+        if request.url.path.endswith("/restart"):
+            restarted = True
+            return httpx2.Response(204)
+        if request.url.path.endswith("/status"):
+            state = "RUNNING" if restarted else "FAILED"
+            return httpx2.Response(200, json={
+                "connector": {"state": "RUNNING"}, "tasks": [{"state": state}]})
+        return httpx2.Response(200, json={})
+        """
+    )
+    proc = run_tool(
+        "register_connector.py", "mod.TASK_RESTART_GRACE_S = 0.0\n" + setup, CONNECT_ENV
+    )
+    assert proc.returncode == 0, proc.stderr
 
 
 def test_connector_connect_unreachable_exits_nonzero_and_logs_step_and_reason() -> None:
