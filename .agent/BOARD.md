@@ -91,9 +91,10 @@
 | joserfc-vuln-upgrade | backend | done | 0 | PR #275 |
 | ci-v1-path-cleanup | architect | done | 0 | PR #279 |
 | dev-stall-recover | backend | done | 0 | reports/dev-stall-recover.json（已恢復；只調查，已作廢 PR） |
-| kafka-port-bind-local | backend | done | 0 | PR #286（待重啟 Kafka 生效） |
+| kafka-port-bind-local | backend | done | 0 | PR #286；開發環境已重建生效 |
 | heat-replay-cleanup | backend | done | 0 | reports/heat-replay-cleanup.json（刪 9 組 group、20 個內部 topic；只清理，已作廢 PR） |
 | dev-alerting-up | backend | done | 0 | reports/dev-alerting-up.json（heat、bot 已啟動；只操作，已作廢 PR） |
+| kafka-rolling-restart | backend | done | 0 | reports/kafka-rolling-restart.json（三台已綁 127.0.0.1；只操作，已作廢 PR） |
 
 ## 卡住／待甲方決定
 
