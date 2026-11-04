@@ -1,6 +1,7 @@
 """驗收 cli-wording-sha256（#263、#270、#271）：import_model 文案、--sha256 必填、derive --help。"""
 
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -122,3 +123,72 @@ def test_derive_model_help_describes_both_arguments(tmp_path):
         body = re.sub(rf"{flag}\s+\S+", "", block.group(0), count=1)
         assert len(body.split()) >= 2, f"{flag} has no description\n{proc.stdout}"
     assert "len" in proc.stdout  # 說明產生 models/<版本>-len<N>/
+
+
+# 回歸（qa FAIL 1）：ModelPackageError 的原因也要中文，不可原樣露出英文句子
+REASON = re.compile(r"（(?P<reason>[^（）]*)）")
+TECH_TOKEN = re.compile(r"\S*[._\d]\S*|zip|onnx|json|utf|sha|\W+", re.IGNORECASE)
+
+
+def assert_reason_is_chinese(line: str) -> None:
+    match = REASON.search(line)
+    assert match, f"no （原因） in: {line}"
+    reason = match.group("reason")
+    assert CJK.search(reason), reason
+    # 去掉檔名、雜湊、zip／onnx／json 等技術名詞後，不可再有英文單字
+    leftover = re.findall(r"[A-Za-z]{3,}", TECH_TOKEN.sub(" ", reason))
+    assert not leftover, f"English words {leftover} in: {line}"
+
+
+def _fail_line(zip_path: Path, cwd: Path) -> str:
+    return assert_one_line_error(
+        run_import(["--zip", str(zip_path), "--sha256", sha(zip_path)], cwd)
+    )
+
+
+def test_not_a_zip_reason_is_chinese(tmp_path):
+    bogus = tmp_path / "bogus.zip"
+    bogus.write_bytes(b"not a zip")
+    assert_reason_is_chinese(_fail_line(bogus, tmp_path))
+
+
+def test_unexpected_members_reason_is_chinese(make_model_package: MakePackage, tmp_path):
+    members = read_zip(make_model_package())
+    members["extra.txt"] = b"x"
+    assert_reason_is_chinese(_fail_line(write_zip(tmp_path / "x.zip", members), tmp_path))
+
+
+def test_member_sha256_mismatch_reason_is_chinese(make_model_package: MakePackage, tmp_path):
+    members = read_zip(make_model_package())
+    members["model.onnx"] += b"x"
+    assert_reason_is_chinese(_fail_line(write_zip(tmp_path / "x.zip", members), tmp_path))
+
+
+def test_card_not_json_reason_is_chinese(make_model_package: MakePackage, tmp_path):
+    members = read_zip(make_model_package())
+    members["model_card.json"] = b"not json"
+    assert_reason_is_chinese(_fail_line(write_zip(tmp_path / "x.zip", members), tmp_path))
+
+
+def test_invalid_model_version_reason_is_chinese(make_model_package: MakePackage, tmp_path):
+    members = read_zip(make_model_package())
+    card = json.loads(members["model_card.json"])
+    card["model_version"] = "../Bad Version"
+    members["model_card.json"] = json.dumps(card).encode()
+    assert_reason_is_chinese(_fail_line(write_zip(tmp_path / "x.zip", members), tmp_path))
+
+
+def test_invalid_card_reason_is_chinese(make_model_package: MakePackage, tmp_path):
+    members = read_zip(make_model_package())
+    card = json.loads(members["model_card.json"])
+    card.pop("files", None)
+    members["model_card.json"] = json.dumps(card).encode()
+    assert_reason_is_chinese(_fail_line(write_zip(tmp_path / "x.zip", members), tmp_path))
+
+
+def test_card_kind_not_onnx_reason_is_chinese(make_model_package: MakePackage, tmp_path):
+    members = read_zip(make_model_package())
+    card = json.loads(members["model_card.json"])
+    card["kind"] = "sklearn"
+    members["model_card.json"] = json.dumps(card).encode()
+    assert_reason_is_chinese(_fail_line(write_zip(tmp_path / "x.zip", members), tmp_path))
