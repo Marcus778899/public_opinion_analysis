@@ -91,6 +91,8 @@
 | joserfc-vuln-upgrade | backend | done | 0 | PR #275 |
 | ci-v1-path-cleanup | architect | done | 0 | PR #279 |
 | dev-stall-recover | backend | done | 0 | reports/dev-stall-recover.json（已恢復；只調查，已作廢 PR） |
+| kafka-port-bind-local | backend | in-progress | 0 |  |
+| heat-replay-cleanup | backend | in-progress | 0 |  |
 
 ## 卡住／待甲方決定
 
