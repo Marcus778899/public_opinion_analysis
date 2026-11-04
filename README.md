@@ -98,7 +98,7 @@
 | 停機補抓與停擺警告 | v0.8.1 | 爬蟲重啟後依停機時間往回補抓（最多 80 頁）；`cdc-watchdog` 在 ClickHouse 超過 30 分鐘沒新資料時記 ERROR 並送 heartbeat 失敗（開發規格 7.28） |
 | Telegram bot | v0.6.0 | 按鈕操作訂閱、現在熱門、看板概況、通知設定；警示含推／噓／箭頭、爭議度與情緒；v0.7.0 起沒設允許清單就拒絕啟動（D-010） |
 | Dashboard | v0.7.0 | Grafana 6 個面板：各看板推文量、情緒分布與趨勢、爭議度最高的文章、近 24 小時警示、熱門文章排行（D-014） |
-| BERT 與 shadow 比較 | v0.8.0 | Colab fine-tune 中文 BERT、匯入 ONNX 模型包、shadow 並行推論、ClickHouse 比較兩版（見上方「BERT 與 shadow 比較」） |
+| BERT 與 shadow 比較 | v0.8.0 | Colab fine-tune 中文 BERT、匯入 ONNX 模型包、shadow 並行推論、ClickHouse 比較兩版（見上方「BERT 與 shadow 比較」）；2026-11-04 起正式推論改用 `bert-ckip-202610280849`（D-040） |
 
 ## 架構
 
@@ -132,7 +132,7 @@
 | v0.6.0 | 2026-10-20 | 階段 3～6：情緒標註與模型、推論、熱度警示、Telegram 互動 |
 | v0.7.0 | 2026-10-21 | 階段 7：Grafana Dashboard（情緒信心下限為下拉選單）；整合測試改用 compose test 服務並平行執行（#78）；bot 允許清單 fail closed（D-010） |
 | v0.8.0 | 2026-10-28 | 階段 8：BERT fine-tune notebook（已在 Colab 實跑 macbert、ckip）、ONNX 模型包匯入、shadow 並行推論、兩版比較；ONNX 推論依長度分小批（選填 `INFERENCE_MAX_BATCH_TOKENS`）；authlib 漏洞升級；gitleaks 誤判根治（D-018、D-026）。模型進 shadow 與切換由 #178 追蹤（D-027） |
-| v0.8.1 | 2026-10-30 | backlog 修正：停機後依時間補抓與停擺警告（#180）；Kafka 升 4.1.2（D-034）；推文年份推斷、未來時間推文重爬（D-033）；密碼範例值擋啟動、PG 只綁本機（#119、D-035）；bot 斷線重試、推送照允許清單、訂閱切換先回應；scheduler 查詢逾時；模型匯入 `--sha256` 與錯誤提示；回放不推 Telegram；gitleaks 放行收緊、CI 工具驗 checksum；joserfc 漏洞升級（#274）；CI 改用 agent-engineering v3 的 `ae ci`、移除 v1 流程副本（D-036） |
+| v0.8.1 | 2026-11-04 | backlog 修正：停機後依時間補抓與停擺警告（#180）；Kafka 升 4.1.2（D-034）；推文年份推斷、未來時間推文重爬（D-033）；密碼範例值擋啟動、PG 只綁本機（#119、D-035）；bot 斷線重試、推送照允許清單、訂閱切換先回應；scheduler 查詢逾時；模型匯入 `--sha256` 與錯誤提示；回放不推 Telegram；gitleaks 放行收緊、CI 工具驗 checksum；joserfc 漏洞升級（#274）；CI 改用 agent-engineering v3 的 `ae ci`、移除 v1 流程副本（D-036）；Kafka 對外 port 只綁 127.0.0.1（D-039）；清掉回放殘留的 consumer group 與內部 topic（D-038） |
 
 ## 授權
 
