@@ -130,6 +130,7 @@ def main() -> None:
     args = parser.parse_args()
     try:
         digest = package_sha256(args.zip)
+        log.info("package sha256 %s", digest)
         if digest != args.sha256.strip().lower():
             sys.exit(f"error: 整包 zip 的 sha256 不符（實際 {digest}），可能下載不完整，請重新下載")
         target = import_model(args.zip, MODELS_DIR, sha256=args.sha256)
@@ -144,7 +145,6 @@ def main() -> None:
         sys.exit(
             f"error: {args.zip} 不是合格的模型包（{exc}），請確認是 notebook 產生的 zip 並重新下載"
         )
-    log.info("package sha256 %s", digest)
     log.info("imported %s; next: python -m radar.ml.training.evaluate --model %s", target, target)
 
 
