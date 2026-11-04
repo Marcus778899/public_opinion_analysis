@@ -1,7 +1,7 @@
 # 即時輿情雷達：開發流程規格
 
 > 狀態：v0.4，對應設計文件 [realtime-sentiment-radar-design.md](realtime-sentiment-radar-design.md)
-> 最後更新：2026-10-28（7.27 進 shadow 門檻的統計量與順序 3 判定）
+> 最後更新：2026-11-04（7.30 v0.8.2 穩定性修正）
 
 設計文件回答「要做什麼、為什麼」；本文件回答「怎麼做、做到什麼程度算完成」。兩者衝突時，先修設計文件再改本文件。**文件必須與程式同步**：行為、格式、相依套件有變動時，同一個 PR 內一併更新。
 
@@ -133,6 +133,7 @@
 | 版本 | 每則 JSON 訊息帶 `schema_version`，只做向後相容的變更（加欄位） |
 | Key | 依設計文件：`post_id`；`crawl.tasks` 的列表任務例外，用 `board`（見 7.1），且 partition 由送出端明確指定（見 7.10；爬蟲送的續抓任務不指定，見 7.28） |
 | Producer | `acks=all`、`enable.idempotence=true`、`compression.type=zstd`、`message.max.bytes=5MB`（`raw.html` 爆文可能超過預設 1MB） |
+| Producer fatal | librdkafka 回報 fatal（例：idempotent producer 的 `_INCONSISTENT`）後該 producer 不能再用：`JsonProducer` 丟 `ProducerFatalError`，服務記 CRITICAL、非 0 結束，由 `restart: unless-stopped` 重啟；不在程式內重建（7.30 A，#281） |
 | Consumer | 關閉 auto commit，處理完（含寫入下游）才 commit，at-least-once |
 | 錯誤處理 | 暫時性錯誤（網路、DB 斷線）：指數退避重試，不 commit；資料錯誤（解析、驗證失敗，或 handler 回報寫不進下游的訊息）：寫入 `dlq` 後 commit（7.13） |
 | 重試期間 | handler 拋 `TransientError` 時：`pause()` 已分配的 partition 並持續 `poll()`，維持 group 成員資格；重試不限時間，成功後 `resume()`（#11：只 sleep 不 poll 會超過 `max.poll.interval.ms` 被踢出 group） |
@@ -719,7 +720,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - **Connector 註冊**：`infra/debezium/radar-cdc.json` 以 `${VAR}` 引用環境變數，`tools/register_connector.py` 替換後 `PUT /connectors/<name>/config`（冪等，設定有變就更新）
 - **ClickHouse schema**：`infra/clickhouse/migrations/NNNN_<name>.sql`，`tools/migrate_clickhouse.py` 透過 HTTP 介面依序執行，已執行的版本記在 ClickHouse 的 `schema_migrations` 表
 - **Image 內容**：`init` 在 container 內執行上述腳本，`Dockerfile` 必須 COPY `infra/clickhouse/migrations/` 與 `infra/debezium/radar-cdc.json`；migration 資料夾不存在或沒有檔案時直接報錯，不可當成「沒有待執行的 migration」默默略過
-- **等待 connector 啟動**：PUT 建立後狀態是非同步產生的，剛建立時查 `/status` 會先回 404，視為尚未就緒繼續輪詢，逾時才報錯
+- **等待 connector 啟動**：PUT 建立後狀態是非同步產生的，剛建立時查 `/status` 會先回 404，視為尚未就緒繼續輪詢，逾時才報錯；task 為 FAILED 時先重啟，最多 2 次（7.30 D，#262）。等 Connect 就緒改看 `GET /health`（7.30 B）
 - **執行順序**（預設 profile 先由 `secret-check` 擋密碼，通過後 postgres、clickhouse、grafana 才啟動；以下為 `init` 服務）：密碼檢查（`tools/check_secrets.py`，用 `&&` 串接，失敗就不做後面）→ Alembic → topic → ClickHouse migration → 註冊 connector。ClickHouse 先建好才開始產生 CDC 事件；Kafka engine 表從最早的 offset 讀，順序顛倒也不會掉資料
 - Apicurio、Kafka Connect、ClickHouse 放在預設 profile（`make up` 就啟動），階段 2 起它們是資料流的一部分
 
@@ -844,6 +845,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
   - 同時查 `pg_replication_slots`：`active=false` 持續超過 `CDC_WATCHDOG_SLOT_INACTIVE_ALERT_S`（預設 300 秒），或 `pg_current_wal_lsn() - confirmed_flush_lsn` 超過 `CDC_WATCHDOG_SLOT_LAG_ALERT_BYTES`（預設 256 MB），記 ERROR；同樣只在狀態改變時記
   - 狀態判斷寫成純函式（輸入狀態、時間 → 輸出動作），單元測試不需要 Connect 或 PG
   - Connect REST API 連不上、查 slot 失敗時記 WARNING，下一輪再試，服務本身不中止
+  - REST 有回應但 connector 回 404（Connect worker 卡在讀內部 topic，或 connector 真的被刪）：第一次記 WARNING，持續超過 `CDC_WATCHDOG_CONNECTOR_MISSING_ALERT_S`（預設 300 秒）記 ERROR 並讓 heartbeat 送 `/fail`（7.30 B，#282）
 - **外部 heartbeat**（`CDC_WATCHDOG_HEARTBEAT_URL`，選填）：
   - 每輪檢查完 ping 一次：CDC 正常時 `GET <url>`；connector 處於失敗狀態，或 slot 有任何警示時 `GET <url>/fail`
   - Connect REST API 連不上不算異常：Connect 停太久時 slot 會變成 inactive，由 slot 的警示涵蓋，避免 Connect 重啟的 1 分鐘內誤報
@@ -877,7 +879,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - **批次推論**：一批事件中要推論的文字一次送進 `predict_proba`；同一批內同一篇有多筆事件時只推論最後一筆，其中有任何一筆是 `op=c` 就當成新文章（新文章後面緊接著推噓數更新時，最後一筆是 `op=u`）
 - **commit 與冪等**：推論結果 flush 到 Kafka 後才 commit；重送的訊息因 hash 相同而跳過。快取在 flush 成功後才更新，整批重試時不會誤判為已推論
 - **錯誤**：模型檔不存在或無法載入 → 啟動失敗（`CRITICAL`）；推論時的例外視為程式錯誤，讓服務中止，不送 DLQ（資料本身沒有問題）；解碼失敗由 `BatchConsumer` 送 DLQ
-- **部署**：compose 服務 `inference`，獨立 profile（`make up-inference`），唯讀掛載 `../models:/app/models`；沒有模型前不啟動
+- **部署**：compose 服務 `inference`，獨立 profile（`make up-inference`），唯讀掛載 `../models:/app/models`；沒有模型前不啟動；上限 2 CPU、2g、`INFERENCE_THREADS=2`（7.30 C，#289）
 - **服務上線前的文章**：不在這個服務內處理；需要時另外寫一次性的補跑工具（不在階段 4 範圍）
 
 ---
@@ -1098,7 +1100,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 
 | 資產 | 威脅 | 對策 |
 |---|---|---|
-| Grafana 管理權限 | 預設帳密 admin/admin 被登入、改 datasource | 密碼必填、只綁本機、關閉匿名與註冊；上雲前（階段 9）重新評估對外存取 |
+| Grafana 管理權限 | 預設帳密 admin/admin 被登入、改 datasource | 密碼必填、只綁本機、關閉匿名與註冊；上雲前（階段 9）重新評估對外存取。`GF_SECURITY_ADMIN_PASSWORD` 只在 `grafana_data` 第一次初始化時生效，既有 volume 換密碼用 `grafana cli admin reset-admin-password`（README 第 1 步，#269） |
 | 四個密碼（`POSTGRES_PASSWORD`、`CLICKHOUSE_PASSWORD`、`CLICKHOUSE_GRAFANA_PASSWORD`、`GRAFANA_ADMIN_PASSWORD`）（M-4，#119） | `.env` 沿用範例值 `change-me`，compose 的 `:?` 只擋空值 | `.env.example` 範例值為 `CHANGE_ME`（`ae check-env` 列為必填）；`init` 與預設 profile 的一次性服務 `secret-check`（純 python image 掛載腳本，不需 build radar-app）都先跑 `tools/check_secrets.py`；postgres、clickhouse、grafana 以 `service_completed_successfully` 依賴 `secret-check`，所以只跑 `make up` 也擋得住。空值或不分大小寫的 change-me／changeme／change_me 就非 0 結束，只印變數名稱。postgres 的 port 只綁 127.0.0.1（#254、D-035） |
 | ClickHouse 資料與設定 | datasource 帳號能執行任意 SQL（DROP、讀 named collection） | 唯讀帳號、只能 SELECT `radar.*`、無 named collection 權限 |
 | ClickHouse 資源 | 拉長時間範圍讓 `FINAL` 查詢吃滿記憶體 | 唯讀帳號的 profile 設執行時間與記憶體上限 |
@@ -1261,7 +1263,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 |---|---|---|---|
 | 1. 匯出訓練資料 | 甲方 | `python -m radar.ml.training.export`（與 baseline 相同，S3-06） | `data/datasets/<名稱>.jsonl` 與同名的 meta 檔：每列 `post_id`、`board`、`text`（已用 `post_text` 截斷到 `max_chars`）、`polarity`；不含作者、推文、人工測試集 |
 | 2. fine-tune | 甲方在 Colab 執行 `notebooks/bert_finetune.ipynb`，第一格參數 `BASE` 選預訓練模型（`macbert`＝`hfl/chinese-macbert-base`、`ckip`＝`ckiplab/bert-base-chinese`，D-021），兩個各執行一次 | 工作階段上傳步驟 1 的兩個檔（D-024） | 每次執行兩個模型包：fp32 `<model_version>.zip` 與 int8 動態量化 `<model_version>-int8.zip`（格式見下表），兩次共四個；notebook 最後一格印出各檔的 SHA-256 |
-| 3. 匯入 | 甲方 `python -m radar.ml.training.import_model --zip <路徑> [--sha256 <整包 SHA-256>]`；一律印出整包 SHA-256，給了 `--sha256` 就比對（大小寫不分），不符拒絕；檔案不存在、不是 zip、版本已存在、驗證失敗都印一行說明並以非 0 結束（無 traceback） | 模型包 | `models/<model_version>/`（不進 git，`.gitignore` 已含 `/models/`、`*.onnx`） |
+| 3. 匯入 | 甲方 `python -m radar.ml.training.import_model --zip <路徑> --sha256 <整包 SHA-256>`；一律印出整包 SHA-256，`--sha256` 必填（7.30 F，#270）、大小寫不分，不符拒絕；檔案不存在、不是 zip、版本已存在、驗證失敗都印一行中文說明與下一步並以非 0 結束（無 traceback，#263） | 模型包 | `models/<model_version>/`（不進 git，`.gitignore` 已含 `/models/`、`*.onnx`） |
 | 4. 測試集評估 | 甲方 `python -m radar.ml.training.evaluate --model models/<model_version>`，四個模型包各跑一次 | 人工測試集（只在本機） | `models/<model_version>/evaluation.md`（與 baseline 同格式），另加 CPU 推論耗時（每篇 p50／p95、每批 `INFERENCE_BATCH_SIZE` 篇的耗時，記下 `INFERENCE_THREADS`）與程序記憶體峰值；依「自行決定」選一個進 shadow |
 | 5. shadow 並行 | 甲方 `make up-shadow`（`.env` 設 `INFERENCE_SHADOW_MODEL_VERSION`） | `cdc.public.posts` | `predictions.shadow` → ClickHouse `predictions_shadow` |
 | 6. 比較 | 甲方 `python -m radar.ml.training.compare --a <現行版本> --b <shadow 版本> --since <shadow 開始時間>` | ClickHouse | `models/<b>/comparison.md`、`data/review/disagreements-<a>-vs-<b>.csv` |
@@ -1338,7 +1340,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 
 | 資產 | 威脅 | 對策 |
 |---|---|---|
-| 推論主機（載入模型的程序） | 模型包在下載或傳遞途中被換掉；pickle 格式載入即執行任意程式 | 只接受 ONNX、JSON；`import_model` 比對 `model_card.files` 的 SHA-256，並可用 `--sha256` 比對整包 zip（甲方對照 notebook 最後一格印出的整包值）；`kind` 必須是 `onnx`，加密成員與 STORED／DEFLATED 以外的壓縮法拒絕；`model_card` 用 pydantic 驗證，`labels` 必須恰好是三個 `Polarity` |
+| 推論主機（載入模型的程序） | 模型包在下載或傳遞途中被換掉；pickle 格式載入即執行任意程式 | 只接受 ONNX、JSON；`import_model` 比對 `model_card.files` 的 SHA-256，並以必填的 `--sha256` 比對整包 zip（甲方填 notebook 最後一格印出的整包值，#270）；`kind` 必須是 `onnx`，加密成員與 STORED／DEFLATED 以外的壓縮法拒絕；`model_card` 用 pydantic 驗證，`labels` 必須恰好是三個 `Polarity` |
 | 本機檔案系統 | 模型包的 zip slip、zip bomb；`model_version` 帶路徑字元 | 只解出白名單的三個檔名，不依 zip 內路徑；解壓總大小上限 2 GB；`model_version` 限 `^[a-z0-9][a-z0-9-]{0,63}$`；目標資料夾已存在就拒絕 |
 | 預訓練模型的授權 | `ckiplab/bert-base-chinese` 為 GPL-3.0，散布模型或相關程式要負擔 GPL 義務；GPL 是否及於權重查不到判定（調查 1） | 甲方接受，只在自己的機器與 VM 使用、不對外散布（D-021）；`models/` 不進 git、模型包不對外提供；日後要對外提供須重新評估 |
 | 預訓練模型的來源 | Hugging Face 上同名模型被改、含自訂程式；權重是 pickle 格式，載入即執行程式 | notebook 釘 `revision`（commit hash，含 `ckip` 用的 Google tokenizer repo）、`trust_remote_code=False`；`base_model` 連同 revision 記進 card，tokenizer 的來源與 revision 一併記入。兩個模型的 main 都只有 `pytorch_model.bin`（調查「模型 revision」節），依 D-025：`ckip` 釘 safetensors 轉換 PR 的 commit、只載 safetensors（`use_safetensors=True`）；`macbert` 無 safetensors，載 `.bin`，第一格檢查 `torch>=2.6`（`weights_only` 預設）不符就停止；pickle 只在用完即丟的 Colab VM 解開 |
@@ -1552,8 +1554,8 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 
 | 項目 | 決定 |
 |---|---|
-| 要補到哪裡 | 該看板在 PG 最新一篇文章的時間（`posts.created_at` 最大值）減 10 分鐘，叫 `since`；爬蟲翻頁直到遇到不晚於 `since` 的文章 |
-| 誰查 PG | Scheduler：`make_list_task_sender` 每次送列表任務前查 `SELECT max(created_at) FROM posts WHERE board = :board`（Core `select()`，同 `DuePostDispatcher` 的 engine）。爬蟲照舊不碰 PG |
+| 要補到哪裡 | 該看板在 PG 最新一篇文章的檔名時間（`post_id` 的 epoch 最大值）減 10 分鐘，叫 `since`；爬蟲翻頁直到遇到不晚於 `since` 的文章。原本用 `posts.created_at`（作者可改，資安 v0.8.1 M-1），v0.8.2 改（7.30 E，#268） |
+| 誰查 PG | Scheduler：`make_list_task_sender` 每次送列表任務前查該看板 `post_id` 檔名 epoch 的最大值（7.30 E；原為 `SELECT max(created_at) FROM posts WHERE board = :board`）（Core `select()`，同 `DuePostDispatcher` 的 engine）。爬蟲照舊不碰 PG |
 | 查不到時 | 看板還沒有文章、或查詢失敗（記 WARNING）→ `since` 為 null，爬蟲只讀第一頁（手動觸發也是）；新看板不往回翻 |
 | 查詢逾時 | Scheduler 的 engine 設 `statement_timeout`（`SCHEDULER_STATEMENT_TIMEOUT_SEC`，預設 30 秒；`make_engine(statement_timeout_sec=)`，其他服務不設）。`QueryCanceled` 時記 WARNING、略過該看板這一輪（不送列表任務，下一輪照常），`DuePostDispatcher` 同樣略過該輪；其他錯誤照舊（#226） |
 | 訊息格式 | `crawl.tasks` 加 `since`、`backfill_depth`，`reason` 加 `backfill`（3.1）；只加欄位，`schema_version` 仍為 1 |
@@ -1616,8 +1618,8 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 
 | 項目 | 理由 |
 |---|---|
-| 缺口終點用 PG 最新 `created_at`，不讓爬蟲記 watermark | 爬蟲不碰 PG、沒有持久狀態；PG 本來就是「已收到哪些文章」的唯一來源 |
-| `since` 減 10 分鐘 | `posts.created_at` 取文章標頭時間（只到分、作者可改），列表用檔名時間；差一點只會多讀一頁 |
+| 缺口終點用 PG 最新文章（v0.8.2 起取檔名時間，7.30 E），不讓爬蟲記 watermark | 爬蟲不碰 PG、沒有持久狀態；PG 本來就是「已收到哪些文章」的唯一來源 |
+| `since` 減 10 分鐘 | 原本取標頭時間（只到分、作者可改）；改用檔名時間後保留，差一點只會多讀一頁 |
 | 續抓走 Kafka，不在一個任務裡翻完 | 一次翻完 24 小時的缺口要 70 分鐘，遠超過 `max.poll.interval.ms`；續抓任務在 Kafka 裡，爬蟲中途重啟也不會斷 |
 | 續抓任務不指定 partition | handler 拿不到來源 partition，爬蟲也不知道啟用看板清單（7.10）；舊頁面不在任何爬蟲的快取，換一個爬蟲處理結果相同。代價是兩個看板的續抓可能落在同一個 partition，耗時以上表最壞情況估 |
 | 上限 80 頁、不開環境變數 | ≈ Gossiping 48 小時；與 7.17 的門檻一致寫成建構參數；最高速率不變，上限只限制持續時間 |
@@ -1657,6 +1659,152 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 - **其他看板沒有遺失**：Stock、Boy-Girl、Tech_Job 每天不到 100 篇，重啟後前 1～3 頁就補完；停機日的推文是重爬補進來的最終狀態，不是當時的快照
 - **用到這段資料時**：逐日、逐小時的統計與趨勢圖，這些區間要排除或標示；不可當成「當天討論少」。訓練與標註資料只是少了樣本，不受影響
 - 另有 246 則推文的 `commented_at` 落在未來（年份推斷錯誤），由 D-033 重爬修正，與本節無關
+
+### 7.30 v0.8.2 穩定性修正（規劃，2026-11-04，D-041、D-042）
+
+來源：`.agent/tasks/v0.8.1/dev-stall-recover.report.json`（#281、#282）、`inference-ckip-up.report.json`（#289）、`docs/uat/v0.8.1.md`（F-4、F-6、F-7、F-9）、`docs/security/v0.8.1.md`（M-1、L-1～L-3）。
+
+#### A. Producer 進入 fatal 就結束程式（#281）
+
+11-04 02:56Z scheduler 的 idempotent producer 出現 `_INCONSISTENT` 後每次 produce 都丟 `_FATAL`，`send_list_task` 的 `except KafkaException` 與 `_logged` 把例外吞掉，程式沒結束，`crawl.tasks` 26 分鐘沒有新任務。librdkafka 規定 fatal 後該 producer 不能再用。
+
+| 項目 | 決定 |
+|---|---|
+| 偵測（`common/kafka/producer.py`） | `JsonProducer` 記住第一個 fatal 錯誤（`fatal_error` property）：①`produce()` 丟的 `KafkaException`，其 `KafkaError.fatal()` 為真；②delivery callback 的錯誤 `fatal()` 為真；③建 Producer 時加的 `error_cb`（只處理 fatal；非 fatal 錯誤不記 log，避免 broker 斷線時洗版） |
+| 例外 | `ProducerFatalError(Exception)`，帶 `error: KafkaError`；**不繼承** `KafkaException`、`DeliveryError`，既有的 `except (DeliveryError, TimeoutError, KafkaException, BufferError)`（scheduler、API）才不會吞掉它。已 fatal 時 `send()` 直接丟，不再呼叫 librdkafka |
+| `flush()` | 已 fatal：立即丟 `ProducerFatalError`（佇列不可能再送出，不等 10 秒）；flush 後才發現 fatal 時優先丟它，否則照舊 `TimeoutError`／`DeliveryError` |
+| 結束方式 | 不在程式內重建（甲方決定）。例外往上丟到 `main()` 的 `@log.catch(level="CRITICAL")`：記 CRITICAL（loggerhelper 送 Slack）、以 1 結束，compose 的 `restart: unless-stopped` 重啟。各服務 `finally` 的 `producer.flush()` 不改：fatal 時立即再丟一次，結束碼一樣非 0 |
+| consumer 類（crawler、ingest、inference、label-stream、bot） | 不改：handler 或 DLQ 丟出非 `TransientError` 的例外本來就讓 `BatchConsumer.run()` 中止；該批沒 commit，重啟後重做（冪等）。heat 只在 Quix `on_consumer_error` 裡用 `JsonProducer` 送 DLQ，例外會不會傳出見「需調查」3 |
+| scheduler | `_logged(fn, on_fatal)` 改成可帶參數，並包住列表任務（`sync_board_jobs` 收到的 sender 目前沒包，例外由 APScheduler 自己記錄後繼續）；遇 `ProducerFatalError` 呼叫 `on_fatal(e)`：記下例外、`scheduler.shutdown(wait=False)`；`main()` 在 `scheduler.start()` 返回、`finally` 釋放 advisory lock 後重新丟出（待命的 scheduler 可立即接手） |
+| API（uvicorn CLI 啟動） | `create_app` 註冊 `ProducerFatalError` 的 exception handler：記 CRITICAL、回 503（body 同既有 `{"detail": "kafka unavailable"}`），回應送出後的 background task 呼叫 `exit_for_restart()`：`log.close()`（送完 Slack 佇列）再 `os._exit(70)`。不用 SIGTERM：uvicorn 收到後以 0 結束，lifespan 的例外也不影響結束碼 |
+| CLI（`tools/recrawl_posts.py`、labeling、replay） | 不改：例外照常結束 |
+| #224 有沒有涵蓋「scheduler 沒送出 `crawl.tasks`」 | 間接涵蓋：沒有任務 → 沒有新 `raw.posts` → `posts_history` 不前進，超過 `CDC_WATCHDOG_STALE_ALERT_S`（1800 秒）記 ERROR、heartbeat `/fail`（7.28 B）。11-04 只停 26 分鐘，低於門檻；修正後 scheduler 幾秒內重啟，不另加檢查 |
+
+#### B. Connect 內部 topic 2 份副本與健康檢查（#282，D-041）
+
+現況（2026-11-04 唯讀查詢）：`connect_configs` 1 個 partition、`connect_offsets` 25、`connect_statuses` 5，都是 RF=1，topic 設定 `min.insync.replicas=2`、`cleanup.policy=compact`。原因：Debezium image 的 `connect-distributed.properties` 三個 `*.storage.replication.factor` 預設 1，compose 沒覆寫。#282 的「`connect_status` 不存在」是名稱查錯：compose 設 `STATUS_STORAGE_TOPIC: connect_statuses`，它存在。
+
+| 項目 | 決定 |
+|---|---|
+| 新環境 | compose `connect` 加 `CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR`、`CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR`、`CONNECT_STATUS_STORAGE_REPLICATION_FACTOR` 為 `2`（entrypoint 把 `CONNECT_*` 轉成 worker 設定，已讀 image 的 `/docker-entrypoint.sh` 確認），與三個 `CONNECT_*_STORAGE_MIN_INSYNC_REPLICAS=1`（建立時帶的 topic 設定，需調查 1） |
+| 既有環境 | 一次性 partition reassignment（下方步驟）；不刪資料、不重建 connector。Connect 只在 topic 不存在時建立、啟動時不檢查副本數，compose 的設定不影響既有 topic |
+| `min.insync.replicas` | 三個內部 topic 設 1：RF=2 時若維持 2，任一台 broker 停掉約 2/3 的 partition 寫不進去（offset commit、status、session key 失敗，Debezium 確認不了 LSN，WAL 累積），達不到驗收的「停掉任一台照樣運作」；設 1 仍比現在的 RF=1 多一份副本。業務 topic（RF 3、min.isr 2）不動 |
+| `tools/create_topics.py`、`topics.yaml` | 不管內部 topic：Connect 在 `init` 之前就啟動並自行建立；`create_topics` 也不能改既有 topic 的副本數 |
+| connect healthcheck | `curl -sf http://localhost:8083/health > /dev/null && curl -sf http://localhost:8083/connectors/radar-cdc > /dev/null`；加 `start_period: 300s`（全新環境要等 `init` 註冊）。`/health`（KIP-1017；Connect 4.3.1 實測 200）在 worker 卡在讀內部 topic 時回 503，原本的 `GET /` 照樣 200；第二段確認 connector 存在。只影響 `ps` 與 `up --wait`，docker 不會因 unhealthy 重啟 |
+| `init` 的相依 | `connect` 從 `service_healthy` 改 `service_started`，否則全新環境互等；`register_connector` 的 `wait_until_ready`（`common/kafka/connect.py`）改輪詢 `GET /health` 回 200（只看狀態碼），逾時訊息不變 |
+| 已知限制 | 全新環境只跑 `make up`（沒有 `app` profile、沒有 `init`）時 connect 一直 unhealthy，`--wait` 在 start_period 後失敗；全新環境照 README 第 3 步帶 `--profile app` |
+| cdc-watchdog | `get_status` 回 404（REST 有回應）：第一次記 WARNING（原本每輪都記）；持續超過 `CDC_WATCHDOG_CONNECTOR_MISSING_ALERT_S`（預設 300 秒）記一次 ERROR，提示「先確認三台 broker healthy、沒有 under-replicated partition，再重啟 connect；設定在 `connect_configs`，不要先重新註冊」；恢復記 INFO；告警期間 heartbeat 送 `/fail`（`is_cdc_healthy`）。狀態判斷是純函式 `MissingWatch.observe(found, now)`（同 `FreshnessWatch`）；Connect 連不上不改變狀態（7.16） |
+
+**既有環境的操作步驟**（`connect-rf-reassign`；開發環境、主目錄；`DC` = `docker compose -f infra/docker-compose.yaml --env-file .env`；Kafka 工具在 `kafka_1` 容器內跑，`--bootstrap-server localhost:29092`，路徑 `/opt/kafka/bin/`）
+
+0. 前置：`DC ps` 三台 broker healthy；`kafka-topics.sh --describe --under-replicated-partitions` 沒有輸出；`curl -s localhost:8083/connectors/radar-cdc/status` 為 RUNNING
+1. 備份（放 `$TMPDIR/connect-rf-backup/`，不進 repo、不貼進回報；config 含 PG 密碼，驗證完刪除）：`GET /connectors/radar-cdc/config`、`GET /connectors/radar-cdc/offsets`、三個 topic 的 `--describe` 輸出
+2. 計畫：每個 partition `replicas = [現有副本, 現有副本 % 3 + 1]`（共 31 個 partition），格式 `{"version":1,"partitions":[{"topic":"connect_offsets","partition":0,"replicas":[2,3]},…]}`，在容器內存成 `/tmp/connect-rf2.json`
+3. 執行：`kafka-reassign-partitions.sh --reassignment-json-file /tmp/connect-rf2.json --execute`；印出的「Current partition replica assignment」另存成回復檔（備份目錄也存一份）
+4. 等完成：同一個檔案 `--verify`，直到每個 partition 都 completed（資料量小，預期 1 分鐘內）
+5. 三個 topic 各 `kafka-configs.sh --entity-type topics --entity-name <topic> --alter --add-config min.insync.replicas=1`
+6. 驗證：`--describe` 每個 partition `Replicas`、`Isr` 都是 2 個，`min.insync.replicas=1`；`--under-replicated-partitions` 沒有輸出；connector 與 task 仍 RUNNING（線上作業，不需重啟 connect）
+7. 演練（驗收，`stability-dev-verify`，需 B 的 healthcheck 已部署）：kafka_1、kafka_2、kafka_3 依序各一次：`DC stop kafka_N` → `DC restart connect` → 3 分鐘內 `/health` 200、`/connectors/radar-cdc/status` RUNNING、`DC ps connect` healthy → `DC start kafka_N` → `--under-replicated-partitions` 沒有輸出才換下一台
+- **回復**：用回復檔 `--execute`（回到 RF=1），`--add-config min.insync.replicas=2`。connector 不見時先照 watchdog 的提示（broker 恢復後重啟 connect）；`connect_configs` 真的遺失才重跑 `init`（`register_connector` 依 repo 的設定 PUT），offset 用備份還原：`PUT /connectors/radar-cdc/stop` → `PATCH /connectors/radar-cdc/offsets`（備份內容）→ `PUT /connectors/radar-cdc/resume`
+
+#### C. 推論的資源上限（#289）
+
+| 項目 | 決定 |
+|---|---|
+| compose `inference` | `cpus: 2`、`mem_limit: 2g`、`INFERENCE_THREADS: '2'`（比照 D-023 的 shadow；ckip 補積壓時 cgroup 峰值約 1.46 GB，含 page cache，1.5g 不夠） |
+| 只對 `op=c` 推論是否預期 | 是（S4-02、7.18）：讀到的事件多是推噓數更新，hash 與快取相同就跳過；換模型版本後快取是空的（7.19），舊文章的 `op=u` 只記 hash。所以每分鐘讀約 1,150 筆、只寫約 120 筆，不改 |
+| 驗證 | 開發環境停推論 ≥ 60 分鐘累積積壓後以新設定啟動：cgroup `memory.events` 的 `oom_kill` 為 0、`memory.peak` < 2g、consumer group `inference` lag 回到個位數、容器沒有重啟（`stability-dev-verify`） |
+
+#### D. init 遇到 task FAILED 先重啟（#262，UAT F-4）
+
+| 項目 | 決定 |
+|---|---|
+| `wait_until_running` | 加 `restart_limit: int = 0`、`restart_grace_s: float = 15.0`（keyword-only）。看到 FAILED 且已重啟次數 < `restart_limit`：`restart_failed()`（`includeTasks=true&onlyFailed=true`，同 watchdog）、記 WARNING（第幾次、狀態），之後 `restart_grace_s` 內的 FAILED 不判定、繼續輪詢；用完次數仍 FAILED 才丟 `ConnectError`（訊息照舊含 `FAILED`）；總時間仍受 `timeout_s` 限制。預設 0，其他呼叫端行為不變 |
+| `tools/register_connector.py` | 模組常數 `TASK_RESTART_LIMIT = 2`、`TASK_RESTART_GRACE_S = 15.0`，`RUNNING_TIMEOUT_S` 維持 60；一直 FAILED 時約 32 秒後失敗（F-4 第二次執行在約 20 秒後就成功） |
+| 重啟請求本身失敗 | `ConnectError` 照常往上丟，init 以 CRITICAL 結束 |
+
+#### E. 補抓終點改用檔名時間（#268，資安 v0.8.1 M-1）
+
+| 項目 | 決定 |
+|---|---|
+| `since`（`latest_post_since`） | 該看板 PG 文章 `post_id` 檔名 epoch 的最大值（`max(split_part(post_id, '.', 3)::bigint)`，Core `select()`）轉 UTC 減 10 分鐘。檔名由 PTT 產生，作者改不了；爬蟲比較用的也是檔名時間（7.28 A）。算出來晚於現在時以現在計並記 WARNING（主機時鐘誤差） |
+| 為什麼不用 `created_at` | 標頭時間作者可改；改成 `2099` 年會讓 `since` 永遠在第一頁之後，補抓無聲停用 |
+| 其餘不變 | 刪除文仍計入；沒有文章或查詢失敗為 null；查詢逾時略過這一輪（7.28 A） |
+| parser | 不改：`posts.created_at` 仍取標頭時間（顯示用） |
+
+#### F. 小項
+
+| # | 修法 |
+|---|---|
+| #276 | `Makefile` 的 `setup` 註解把 `check_env.py setup` 改成 `ae check-env setup`。`.pre-commit-config.yaml`、`pyproject.toml` 的排除樣式已在 PR #279 清掉。發版後確認 Sync workflow 與 coverage-gate 輸出由 manager 處理 |
+| #277 | `ci.yml` integration job 的「Locate agent-engineering」「Checkout agent-engineering」移到「Detect code changes」之後、「Use Docker Hub mirror」之前（之前只有 checkout 與 `git diff`，沒有執行 PR 的程式、相依或 compose）；`if` 條件不變，coverage gate 的兩步留在原位。`.gitleaks.toml` 的 `^tasks/` 保留：CI 掃整段歷史，舊 commit 的 `tasks/` 仍需要它（檔內 NOTE，D-018） |
+| #269 | 不改程式：README 第 1 步「已經有資料後要換密碼」已有 `grafana cli admin reset-admin-password`（v0.8.1）；7.25 威脅表補註 |
+| #263 | `import_model` 的錯誤一律一行、`error: ` 開頭、中文、帶下一步：檔案不存在（路徑只出現一次，不帶系統原文）、不是 zip、內容驗證失敗（各 `ModelPackageError` 的原因改中文）、整包 SHA-256 不符（印實際值，並說要重新下載、不要改填實際值）、版本已存在（說不會覆寫，要重匯先刪除或改名 `models/<版本>`）。`derive_model --help` 的 `--model`、`--max-len` 補說明（`--max-len` 要小於原模型、產生 `models/<版本>-len<N>/`）。onnxruntime 的 telemetry 警告只在 sandbox 出現，不處理 |
+| #270 | `import_model --sha256` 改必填（argparse `required=True`，說明寫「notebook 最後一格印出的整包 sha256」），仍先印實際值再比對。`import_model()` 函式的 `sha256` 參數維持選填，只有 CLI 強制 |
+| #271 文案 | `replay` 的殘留警告改中文，含「舊訊息」：「`replay.cdc.comments` 還有舊訊息：新的 heat group 也會讀到，時間較早的回放資料會被當成遲到丟掉；先刪掉並重建 topic（開發規格 7.20 步驟 1）」 |
+| #271 重複 `alert_id` | 先調查（需調查 2）：同一份 state 不會重算已結算的分鐘（`advance` 只結算 watermark 之後，`evaluate` 的冷卻擋同一分鐘），重複代表 state 被回退或有兩份。bot 本來就以 `alert_id` 去重（只推第一筆），影響只在 `replay.alerts`／`alerts` 的列數 |
+
+#### 威脅與對策
+
+| 資產 | 威脅 | 對策 |
+|---|---|---|
+| PG 密碼（`connect_configs`、reassignment 備份） | 備份留在 repo、回報或暫存區 | 只放 `$TMPDIR`，不貼內容，驗證完刪除含密碼的檔（B 步驟 1） |
+| 補抓完整性 | PTT 使用者把標頭時間改到未來，讓補抓停用（M-1） | `since` 改用 PTT 產生的檔名時間（E） |
+| `AE_TOKEN` | PR 的程式或被污染的相依在 checkout 當下讀到 token（L-3） | 先 checkout 工具再跑 PR 程式（F #277）；工具檔仍在磁碟上，PR 程式讀得到該 SHA 的工具程式碼，但拿不到 token |
+| 模型主機 | 模型包被換掉而沒帶 `--sha256`（L-2） | CLI 必填（F #270） |
+| 管線可用性 | producer fatal 後靜默停擺；connect 卡住卻顯示 healthy | 結束程式交給 restart（A）；`/health` 與 connector 存在的健康檢查、watchdog ERROR（B） |
+| API | 讓 API 結束 | 只有 producer 已 fatal 才結束；API 只綁本機（不變） |
+
+#### 派工順序
+
+| 順序 | task_id | 負責 | 通道 | 相依／平行 | 負責檔案 | 驗收測試 | 受影響的既有驗收測試 |
+|---|---|---|---|---|---|---|---|
+| 1 | `producer-fatal-exit`（A） | backend | full | 與 2、4、5、6、7 平行 | `src/radar/common/kafka/producer.py`、`src/radar/collector/scheduler.py`、`src/radar/api/main.py`、`tests/unit/common/kafka/test_producer.py`、`tests/unit/common/kafka/fakes.py`、`tests/unit/collector/test_scheduler.py`、`tests/unit/api/test_main.py`（新） | `tests/unit/acceptance/producer-fatal-exit/`（三種 fatal 入口都丟 `ProducerFatalError` 且不是 `KafkaException`；fatal 後 `flush` 立即丟；非 fatal 錯誤行為不變；scheduler 列表任務與 `due_posts` 遇 fatal 都讓 main 丟出、結束碼非 0、有 CRITICAL；`BatchConsumer` 服務遇 fatal 不 commit 並結束；API 回 503 且呼叫結束函式） | 無 |
+| 2 | `connect-resilience`（B、D） | backend | full | 與 1、4、5、6、7 平行 | `infra/docker-compose.yaml`（`connect`、`init`）、`src/radar/common/kafka/connect.py`、`tools/register_connector.py`、`src/radar/cdc/watchdog.py`、`src/radar/common/settings.py`（`CdcWatchdogSettings`）、`.env.example`（選填註解 `# CDC_WATCHDOG_CONNECTOR_MISSING_ALERT_S=300`）、`tests/unit/common/kafka/test_connect.py`、`tests/unit/cdc/test_watchdog.py`、`tests/unit/common/test_settings.py` | `tests/unit/acceptance/connect-resilience/`（compose 靜態：三個 RF=2、min.isr=1、healthcheck 含 `/health` 與 `/connectors/radar-cdc`、`start_period`、`init` 對 connect 為 `service_started`；`wait_until_ready` 打 `/health`；FAILED 後重啟一次就 RUNNING 時成功、用完次數仍 FAILED 時失敗且有送重啟；watchdog 404 門檻前後、只在狀態改變時記、告警時 heartbeat `/fail`） | `tests/unit/acceptance/infra-secret-guard/test_compose_secret_guard.py::test_guard_init_depends_on_unchanged`（connect 改 `service_started`）；`tests/unit/acceptance/init-exit-code/test_init_exit_code_acceptance.py::test_connector_task_failed_exits_nonzero_and_logs_step_and_reason`（改為斷言先送過重啟才失敗，setup 把 `TASK_RESTART_GRACE_S` 調小，避免等 30 秒） |
+| 3 | `backfill-since-filename`（E） | backend | full | 1 之後（同改 `scheduler.py`、`test_scheduler.py`） | `src/radar/collector/scheduler.py`、`tests/unit/collector/test_scheduler.py`、`tests/integration/collector/test_scheduler_since_db.py`（新） | `tests/integration/acceptance/backfill-since-filename/`（真的 PG：`since` = 最大檔名時間 − 10 分鐘；`created_at` 在 2099 年的文章不影響；刪除文仍計入；沒有文章為 null；檔名時間晚於現在時以現在計） | `tests/integration/acceptance/crawl-backfill-depth/test_scheduler_since_acceptance.py` 全檔（用 `M.1`、`M.2` 這種與 `created_at` 不一致的檔名斷言 `since` 來自 `created_at`；改用一致的檔名時間） |
+| 4 | `heat-alert-dup-investigate`（F #271） | backend | 只調查，作廢 PR | 與 1、2、5、6、7 平行 | 無（只在 scratchpad 與 compose `test` 服務重現） | 無 | 無 |
+| 5 | `cli-wording-sha256`（F #263、#270、#271 文案） | backend | full | 與 1、2、4、6、7 平行 | `src/radar/ml/training/import_model.py`、`src/radar/ml/training/derive_model.py`、`src/radar/streaming/replay.py`、`tests/unit/ml/training/test_import_model.py`、`tests/unit/ml/training/test_derive_model.py`、`tests/unit/streaming/test_replay.py` | `tests/unit/acceptance/cli-wording-sha256/`（五種錯誤一行、`error:` 開頭、含中文、無 traceback、結束碼 1；不給 `--sha256` 結束碼 2 且提示該參數；`derive_model --help` 兩個參數都有說明；殘留警告含「舊訊息」） | `tests/unit/acceptance/import-model-hardening/test_import_model_hardening_acceptance.py` 的 CLI 測試（`test_cli_missing_zip_…`、`test_cli_not_a_zip_…`、`test_cli_existing_version_…`、`test_cli_tampered_package_…`、`test_cli_failure_message_is_short`、`test_cli_prints_package_sha256_without_option`：都沒帶 `--sha256`）；`tests/unit/acceptance/replay-alert-repro/test_replay_warmup_no_false_warning.py`（`WARNING_KEYWORD = "old messages"`） |
+| 6 | `inference-resource-limit`（C） | backend | full | 2 之後（同改 compose） | `infra/docker-compose.yaml`（`inference`） | `tests/unit/acceptance/inference-resource-limit/`（compose 靜態：`cpus` 2、`mem_limit` 2g、`INFERENCE_THREADS` `'2'`；shadow 設定不變） | 無 |
+| 7 | `ci-token-order`（F #276、#277） | backend | full | 與 1、2、4、5 平行 | `.github/workflows/ci.yml`、`Makefile` | `tests/unit/acceptance/ci-token-order/`（ci.yml 靜態：兩個工具 checkout 步驟在第一個 `docker compose`／`uv`／`make` 步驟之前、在 `git diff` 步驟之後，`if` 條件不變；`persist-credentials: false`；Makefile 不再提 `check_env.py`） | 無（7.26 的 `test_ci_integration_first_step_diffs_changed_files` 只要求 `git diff` 之前只有 checkout，放在它之後即可） |
+| 8 | `connect-rf-reassign`（B 步驟 0～6） | backend | 只操作，作廢 PR | 本設計合併、manager 指派後；與程式單無關 | 無 | 無；回報附步驟 6 的輸出 | 無 |
+| 9 | `stability-dev-verify` | backend | 只操作，作廢 PR | 1、2、3、6、8 合併／完成後 | 無 | 無；回報附：B 步驟 7 三台的輸出；C 的驗證；重建 postgres 容器（`DC --profile app up -d --force-recreate --no-deps postgres`，volume 不動）後 `DC --profile app up -d --force-recreate --no-deps init` 第一次就 `Exited (0)`；scheduler 容器內 `kill -TERM 1` 後被 docker 重啟、`crawl.tasks` 的 offset 繼續增加 | 無 |
+
+- 本節與設計文件（4.2、4.4、6.4、8.2、10.3）已先寫成目標行為；實作單不改文件，實作與文件不符時回報 manager
+- 驗收測試只有 3 需要 DB（compose `test` 服務）；其餘在 `make check`。沒有跨模組的新流程，不另開整合單；9 是開發環境的整體驗證
+- 需要 `.env` 的 e2e（`make e2e`）agent 跑不了；connect healthcheck 改了 `e2e-up` 的等待條件，發版前請甲方跑一次
+
+#### 自行決定
+
+| 項目 | 理由 |
+|---|---|
+| 內部 topic `min.insync.replicas=1` | 見 B 表；比現況（RF=1）多一份副本，不是降低防護 |
+| healthcheck 用 `/health` 加 connector 存在；`init` 改 `service_started`；`start_period` 300 秒 | `/health` 才看得出 worker 卡在啟動；connector 存在是甲方要求；全新環境 connector 由 `init` 建立，不放寬就互等 |
+| `ProducerFatalError` 不繼承 `KafkaException` | 既有的 `except KafkaException` 會吞掉它 |
+| fatal 時 `flush` 立即丟例外、各服務 `finally` 不改 | 結束碼一樣非 0，少改 8 個服務入口 |
+| API 用 `os._exit(70)` | uvicorn 收 SIGTERM 以 0 結束；先 `log.close()` 送完 CRITICAL |
+| 不重建 producer | 甲方決定 |
+| 內部 topic 不進 `topics.yaml` | 見 B 表 |
+| `since` 用 `split_part` 取檔名 epoch，不用字串排序的 `max(post_id)` | PG 的 collation 對 `.`、底線的排序不保證與數字一致；看板文章數萬篇，每輪全掃仍在 `statement_timeout` 內 |
+| init 重啟 2 次、每次等 15 秒 | F-4 約 20 秒恢復；總時間仍在 `RUNNING_TIMEOUT_S` 60 秒內 |
+| watchdog 404 門檻 300 秒、第一次只記 WARNING | Connect 正常重啟約 1 分鐘；原本每 30 秒一行 WARNING 洗版 |
+| `--sha256` 只在 CLI 必填 | 函式給程式內與測試呼叫；甲方的路徑是 CLI |
+| `.gitleaks.toml` 保留 `^tasks/` | 歷史 commit 仍有 `tasks/`；拿掉會讓 CI 掃到封存的誤判 |
+| CI 只搬步驟、不拆 job | 已能讓 token 在 PR 程式執行前就離開程序；拆 job 要上傳下載覆蓋率報告，改動大 |
+| onnxruntime telemetry 警告不處理 | 只在 sandbox 出現 |
+| #224 不加 `crawl.tasks` 檢查 | 見 A 表 |
+| 重複 `alert_id` 先調查再修 | 程式邏輯上不該發生，沒有可寫成驗收測試的預期行為 |
+
+#### 需調查
+
+| # | 項目 | 誰 | 查不到時 |
+|---|---|---|---|
+| 1 | Connect 建內部 topic 時是否套用 `config.storage.`／`offset.storage.`／`status.storage.` 前綴的 topic 設定（`CONNECT_*_STORAGE_MIN_INSYNC_REPLICAS`） | `connect-resilience`（查 Kafka 4.3 文件或 `DistributedConfig` 原始碼） | 拿掉這三個變數；既有環境由 B 步驟 5 設定，新環境維持 broker 預設 2，記進本節已知限制 |
+| 2 | 同一個 `alert_id` 在 `replay.alerts` 出現兩筆（UAT F-9 第 2 輪，`value` 62 後 143）的原因 | `heat-alert-dup-investigate`：用整合測試（真的 Kafka、exactly-once）照第 2 輪的資料重現 | 回報後由 manager 決定是否列 backlog；不改程式 |
+| 3 | Quix 的 `on_consumer_error` 回呼丟例外時，`app.run()` 會不會中止（heat 的 DLQ 遇 producer fatal） | 同 2 | 列進 A 的已知限制：heat 的 DLQ 很少用，Quix 自己的 producer 不受影響 |
+
+#### 待決定
+
+無。四類之內的事都已由 D-041、D-042 決定。
 
 ## 8. 風險清單
 

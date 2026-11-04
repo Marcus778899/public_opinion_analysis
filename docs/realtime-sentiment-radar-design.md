@@ -162,7 +162,7 @@ Apicurio 使用 SQL 儲存，不建立 topic。PG connector 不需要 schema his
   - 「爆」固定視為 100，所以「爆 → 爆」算沒變，由 4.5 的重爬排程定期抓；「99 → 爆」算變化
   - 被刪除的文章（列表上沒有連結）不抓
   - 爬蟲重啟或 rebalance 後快取清空，只會多抓幾次內頁，upsert 會擋掉沒變化的寫入
-- **往前翻頁**（2026-10-29 改，開發規格 7.28 A）：Scheduler 在列表任務帶上該看板 PG 最新文章的時間 `since`；一頁的文章全都沒見過、且最舊的一篇仍晚於 `since`，就往前翻。重啟或停擺後也會一路補到 `since`；一個任務最多 3 頁，沒翻完由爬蟲送續抓任務（`reason=backfill`）接著翻，一條鏈最多 80 頁。`since` 為 null（新看板、查詢失敗、手動觸發）只讀第一頁
+- **往前翻頁**（2026-10-29 改，開發規格 7.28 A）：Scheduler 在列表任務帶上該看板 PG 最新文章的時間 `since`（取 PTT 產生的檔名時間，不用作者可改的標頭時間，開發規格 7.30 E）；一頁的文章全都沒見過、且最舊的一篇仍晚於 `since`，就往前翻。重啟或停擺後也會一路補到 `since`；一個任務最多 3 頁，沒翻完由爬蟲送續抓任務（`reason=backfill`）接著翻，一條鏈最多 80 頁。`since` 為 null（新看板、查詢失敗、手動觸發）只讀第一頁
 - 置底公告（`r-list-sep` 以下）不列入
 
 #### 近期文章：依年齡分級重爬
@@ -212,14 +212,14 @@ PTT 網頁版的文章頁約 10 分鐘才更新一次（開發規格 7.22），�
   - 停用、或已從 API 消失的看板 → 移除計時器
   - `interval_sec` 改變 → `reschedule`，從當下重新起算；要立刻爬就用手動觸發
 - API 失敗（連線錯誤、非 200、格式錯誤）時維持現有計時器
-- 派發失敗只記錄 ERROR，不讓計時器停掉，下一次觸發再送
+- 派發失敗只記錄 ERROR，不讓計時器停掉，下一次觸發再送；例外是 Kafka producer 進入 fatal（不能再用）：停止程式，由 `restart: unless-stopped` 重啟（開發規格 7.30 A）
 - 計時器設定 `coalesce`、`max_instances=1`，前一次還沒做完就不會重疊執行
 
 #### 計時器
 
 | 計時器 | 頻率 | 動作 |
 |---|---|---|
-| `board:<name>` | 看板的 `interval_sec` | 查該看板 PG 最新文章的時間當 `since`，派發列表頁任務（`reason=schedule`，key=board；4.2「往前翻頁」） |
+| `board:<name>` | 看板的 `interval_sec` | 查該看板 PG 最新文章的檔名時間當 `since`，派發列表頁任務（`reason=schedule`，key=board；4.2「往前翻頁」） |
 | `sync_boards` | 30 秒（啟動時立刻執行） | 同步看板設定 |
 | `due_posts` | 30 秒 | 派發到期的文章重爬任務（4.5） |
 | `lock` | 30 秒 | 確認仍持有 advisory lock，失去就停止 |
@@ -470,13 +470,14 @@ Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED
 |---|---|---|
 | 減少失敗 | Converter 快取設定（6.1） | 快取過期後，向 Apicurio 刷新時偶發的連線錯誤 |
 | 自動恢復 | 常駐服務 `cdc-watchdog` 定期查 connector 狀態，`FAILED` 時呼叫 Connect REST API 重啟失敗的 task，間隔以指數退避拉長 | 其他原因造成的 task 失敗（例如 Apicurio 停機期間遇到新的 schema） |
-| 讓人知道 | `cdc-watchdog` 同時檢查 replication slot：`active=false` 持續太久，或 WAL 延遲超過門檻，就記 ERROR，由 loggerhelper 送到 Slack | 自動恢復失敗、PG 端的問題 |
+| 讓人知道 | `cdc-watchdog` 同時檢查 replication slot：`active=false` 持續太久，或 WAL 延遲超過門檻，就記 ERROR，由 loggerhelper 送到 Slack；Connect 有回應但 connector 查不到超過 5 分鐘也記 ERROR（開發規格 7.30 B） | 自動恢復失敗、PG 端的問題、Connect 卡在讀內部 topic（2026-11-04，一台 broker 卡住時 RF=1 的內部 topic 讀不到） |
 | 整條管線停擺 | `cdc-watchdog` 查 ClickHouse `posts_history` 最新的 `changed_at`，超過 30 分鐘沒有新資料就記 ERROR，heartbeat 改 ping `/fail`（開發規格 7.28 B） | 容器都在跑但資料不動（2026-10-28 Kafka coordinator 故障，爬蟲與 ingest 無限重新平衡 10 小時） |
 | 監看 watchdog 本身 | `cdc-watchdog` 每輪 ping 外部的 heartbeat 服務（healthchecks.io）；CDC 異常時改 ping `/fail`。外部服務超過期限沒收到 ping，或收到 `/fail`，就寄 email | watchdog crash、卡住、開發機睡眠或 Docker 停止；Slack 漏看 |
 
 - **為什麼要外部服務**：監控程式和被監控的服務在同一台機器上，無法回報「整台機器停了」（2026-10-10 的驗收監控腳本就是無聲無息地停了 10 小時）；只有「該收到卻沒收到就通知」的外部服務能涵蓋這種情況
 - **heartbeat 只帶 URL，不送任何資料內容**；沒設定 URL 就不送（測試與 e2e 環境都不設）
 
+- **Connect 內部 topic**（`connect_configs`、`connect_offsets`、`connect_statuses`）2 份副本、`min.insync.replicas=1`，一台 broker 停掉 Connect 仍能啟動（D-041）；compose 的健康檢查打 `/health` 並確認 connector 存在（開發規格 7.30 B）
 - **不用 Connect 內建的錯誤處理**：`errors.retry.timeout` 只重試 `RetriableException`；`errors.tolerance=all` 會丟掉訊息，資料不完整
 - **不設 `max_slot_wal_keep_size`**：超過上限時 PG 會讓 slot 失效，必須重新 snapshot；寧可記 ERROR 讓人處理
 - **重啟後會重送**：Debezium 從最後一次 flush 的 offset 接續，之後的事件會再送一次。`posts_latest`、`comments_latest` 以 LSN 去重不受影響；`posts_history` 是 `MergeTree`，會出現 `(post_id, lsn)` 相同的重複列，畫曲線時要以 LSN 去重
@@ -559,6 +560,7 @@ Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED
   - Connect 重啟重送的 `op=c` 事件，hash 相同也不會重複推論
 - 刪除的文章（`is_deleted`）不推論
 - 模型檔不進 image：compose 以唯讀方式掛載 `models/`，模型版本由環境變數指定
+- 資源上限 2 CPU、2g、ONNX 2 個 thread（與 shadow 相同，開發規格 7.30 C）
 - 模型格式由 `model_card.json` 的 `kind` 區分（baseline 為 sklearn，BERT 為 ONNX），推論與評估經同一個 `Classifier` 介面載入（開發規格 7.27）
 - **呈現**：Telegram（警示、熱門、看板概況，9.2）與 Dashboard（9.1）讀 ClickHouse `predictions` 每篇最新一筆；信心不足顯示「不確定」（15.8）
 
@@ -675,9 +677,9 @@ Grafana 接 ClickHouse（開發規格階段 7）：各看板推文量曲線、�
 | 服務 | profile | 說明 |
 |---|---|---|
 | `kafka_1`～`kafka_3`、`postgres` | （預設） | 本機開發時服務直接用 `uv run` 執行 |
-| `apicurio-db-init`、`apicurio`、`connect`、`clickhouse` | （預設） | 階段 2 起屬於資料流的一部分，`make up` 一併啟動；`apicurio-db-init` 是一次性服務 |
+| `apicurio-db-init`、`apicurio`、`connect`、`clickhouse` | （預設） | 階段 2 起屬於資料流的一部分，`make up` 一併啟動；`apicurio-db-init` 是一次性服務；`connect` 的健康檢查要求 connector 已註冊，全新環境要等 `init`（`app` profile）跑完才 healthy |
 | `label-stream` | `labeling` | 串流抽樣標註，會持續呼叫 LLM API，`make up-labeling` 才啟動 |
-| `inference` | `inference` | 情緒推論（8.2），需要先訓練好模型；`make up-inference` 才啟動，以唯讀方式掛載 `models/` |
+| `inference` | `inference` | 情緒推論（8.2），需要先訓練好模型；`make up-inference` 才啟動，以唯讀方式掛載 `models/`；上限 2 CPU、2g |
 | `inference-shadow` | `shadow` | shadow 推論（8.4），模型版本與現行不同；`make up-shadow` 才啟動，比較結束就停 |
 | `heat`、`bot` | `alerting` | 熱度偵測（8.3）與 Telegram bot（9.2）；bot 需要 `TELEGRAM_BOT_TOKEN`，`make up-alerting` 才啟動；heat 的 RocksDB 掛 volume `heat_state` |
 | `grafana` | （預設） | Dashboard（開發規格 7.25）：只綁 `127.0.0.1:${GRAFANA_PORT}`、需登入，以唯讀帳號查 ClickHouse；`infra/grafana/Dockerfile` 建置時裝好 ClickHouse plugin，datasource 與 dashboard 以 provisioning 載入，資料放 volume `grafana_data` |
