@@ -95,9 +95,14 @@ def test_guard_grafana_still_waits_for_healthy_clickhouse(services: dict[str, di
 
 
 @pytest.mark.parametrize(
-    ("name", "port"), [("kafka_1", "9092:9092"), ("kafka_2", "9094:9094"), ("kafka_3", "9096:9096")]
+    ("name", "port"),
+    [
+        ("kafka_1", "127.0.0.1:9092:9092"),
+        ("kafka_2", "127.0.0.1:9094:9094"),
+        ("kafka_3", "127.0.0.1:9096:9096"),
+    ],
 )
-def test_guard_kafka_ports_unchanged(services: dict[str, dict], name: str, port: str) -> None:
+def test_guard_kafka_ports_bound_local(services: dict[str, dict], name: str, port: str) -> None:
     assert services[name]["ports"] == [port]
 
 
