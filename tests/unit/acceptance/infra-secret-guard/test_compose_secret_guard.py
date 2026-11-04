@@ -127,7 +127,7 @@ def test_guard_api_depends_only_on_init_and_port_unchanged(services: dict[str, d
 def test_guard_init_depends_on_unchanged(services: dict[str, dict]) -> None:
     assert services["init"]["depends_on"] == {
         "postgres": {"condition": "service_healthy"},
-        "connect": {"condition": "service_healthy"},
+        "connect": {"condition": "service_started"},
         "clickhouse": {"condition": "service_healthy"},
         "kafka_1": {"condition": "service_healthy"},
         "kafka_2": {"condition": "service_healthy"},
