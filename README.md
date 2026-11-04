@@ -14,7 +14,7 @@
 
    指令結束後所有容器都應該是 `running`／`healthy`（`radar_secret_check`、`radar_init`、`radar_apicurio_db_init` 是一次性工作，`exited (0)` 是正常的；`radar_secret_check` 是 `exited (1)` 代表有密碼還是範例值，log 會列出是哪幾個變數）。
 
-   > **已經有資料後要換密碼**：PG 與 Grafana 的密碼只在第一次建立 volume 時套用，只改 `.env` 不會生效。PG 先執行 `docker compose -f infra/docker-compose.yaml --env-file .env exec postgres psql -U radar -d radar -c "ALTER USER radar PASSWORD '<新密碼>'"` 再改 `.env`；Grafana 用 `docker compose -f infra/docker-compose.yaml --env-file .env exec grafana grafana cli admin reset-admin-password '<新密碼>'` 再改 `.env`；ClickHouse 改 `.env` 後重新執行第 3 步即可。PG 剛重建時 init 可能因 CDC connector 還在恢復而失敗，等 20 秒再執行一次第 3 步。
+   > **已經有資料後要換密碼**：PG 與 Grafana 的密碼只在第一次建立 volume 時套用，只改 `.env` 不會生效。PG 先執行 `docker compose -f infra/docker-compose.yaml --env-file .env exec postgres psql -U radar -d radar -c "ALTER USER radar PASSWORD '<新密碼>'"` 再改 `.env`；Grafana 用 `docker compose -f infra/docker-compose.yaml --env-file .env exec grafana grafana cli admin reset-admin-password '<新密碼>'` 再改 `.env`；ClickHouse 改 `.env` 後重新執行第 3 步即可。
 
    > **選擇性啟動**：上面的 `--profile` 決定開哪些服務，拿掉就不開。Kafka、PostgreSQL、ClickHouse、Debezium、Grafana、Kafka UI 不分 profile 一律啟動。
    >
@@ -75,7 +75,7 @@
    7. 最後一格會印出兩行 `bert-macbert-<時間>.zip  size=…  sha256=…`，把這兩行複製存起來（第 3 步匯入要對照），瀏覽器會自動下載這兩個 zip 到「下載」資料夾（瀏覽器問「允許下載多個檔案」請按允許；沒下載到就從左側資料夾圖示進 `/content/packages/` 右鍵下載）
    8. 第二次跑：把第一格的 `BASE = "macbert"` 改成 `BASE = "ckip"`，再「執行階段 → 全部執行」，到上傳那格要**重新選一次**同樣兩個檔，其餘同 4～7，得到 `bert-ckip-<時間>.zip` 與 `-int8.zip`
    9. 中途出錯：紅字最後一行會說原因（例如沒開 GPU、上傳的檔不對、預估超過 10 小時要把 `MAX_LEN = 512` 改成 `256`），照著改完再「全部執行」；看不懂就把紅字貼給我
-3. 匯入（4 個 zip 各做一次）：`uv run --env-file .env python -m radar.ml.training.import_model --zip ~/Downloads/<檔名>.zip --sha256 <第 2 步存下來的 sha256 值>`，會放到 `models/<檔名去掉 .zip>/`。`--sha256` 對不上就拒絕匯入（擋整包被換掉）；不給也能匯入，但會少這道檢查，所以請一定要給。同版本已存在不會覆寫；檔案不存在、不是 zip 等錯誤會印一行說明
+3. 匯入（4 個 zip 各做一次）：`uv run --env-file .env python -m radar.ml.training.import_model --zip ~/Downloads/<檔名>.zip --sha256 <第 2 步存下來的 sha256 值>`，會放到 `models/<檔名去掉 .zip>/`。`--sha256` 必填，對不上就拒絕匯入（擋整包被換掉；不符時請重新下載，不要改填印出的實際值）。同版本已存在不會覆寫；檔案不存在、不是 zip、驗證失敗等錯誤會印一行中文說明與下一步
 4. 評估：`uv run --env-file .env python -m radar.ml.training.evaluate --model models/<模型版本>`，結果在該資料夾的 `evaluation.md`；依開發規格 7.27「自行決定」挑一個進 shadow
 5. 啟動 shadow：`.env` 設 `INFERENCE_SHADOW_MODEL_VERSION`（`models/` 下的資料夾名稱；沒設容器會不斷重啟），再執行：
 

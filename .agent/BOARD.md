@@ -63,7 +63,12 @@
 | stability-design | architect | done | 0 | PR #292 |
 | producer-fatal-exit | backend | done | 0 | PR #298 |
 | connect-resilience | backend | done | 0 | PR #296 |
-| cli-wording-sha256 | backend | qa | 1 |  |
+| cli-wording-sha256 | backend | done | 1 | PR #297 |
+| backfill-since-filename | backend | done | 0 | PR #302 |
+| ci-token-order | backend | done | 0 | PR #301 |
+| inference-resource-limit | backend | review | 0 |  |
+| heat-alert-dup-investigate | backend | in-progress | 0 |  |
+| connect-rf-reassign | backend | done | 0 | 操作完成（作廢 PR），.agent/reports/connect-rf-reassign.json |
 
 ## 卡住／待甲方決定
 
