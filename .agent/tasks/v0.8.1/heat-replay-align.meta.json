@@ -1,0 +1,27 @@
+{
+  "task_id": "heat-replay-align",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "熱度回放（7.20 replay／surge）不會推送過期警示給甲方、surge 範例實際觸發得了文章警示、每次回放用全新的 consumer group（#80）",
+  "issue": 257,
+  "branch": "fix/heat-replay-align",
+  "worktree": ".worktrees/heat-replay-align",
+  "pr": 258,
+  "qa": {
+    "result": "pass",
+    "sha": "8a8406a9429547bb83fba7d1b27242195a366695",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "8a8406a9429547bb83fba7d1b27242195a366695",
+    "by": "architect"
+  },
+  "merged": true,
+  "amend_sha": "d5c3e90fac3ed547c1d9b6f9091ddee24ebb49c1",
+  "acceptance_lock": {
+    "patch": "3bf17d8388027fa5d5f53b061c06f18079d96953",
+    "sha": "d5c3e90fac3ed547c1d9b6f9091ddee24ebb49c1"
+  }
+}

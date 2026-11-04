@@ -1,0 +1,11 @@
+{
+  "task_id": "kafka-version-upgrade",
+  "status": "done",
+  "files_changed": [".env.example"],
+  "verification": {
+    "command": "docker compose --env-file .env -f .worktrees/kafka-version-upgrade/compose.yaml run --rm test; docker compose ... images kafka; docker compose ... down -v",
+    "exit_code": 0,
+    "tail": "371 passed in 77.63s; kafka image apache/kafka:4.1.2; down -v 已釋放容器與 volume"
+  },
+  "open_questions": ["PR 的 CI 結果尚未取得（我不能 push），待 manager 開 PR 後佐證。", "無程式、端點、migration 變動，檢查清單其餘項目不適用。"]
+}

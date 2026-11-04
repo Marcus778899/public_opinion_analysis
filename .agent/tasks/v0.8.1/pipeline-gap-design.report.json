@@ -1,0 +1,21 @@
+{
+  "task_id": "pipeline-gap-design",
+  "status": "done",
+  "files_changed": [
+    "docs/development-spec.md",
+    "docs/realtime-sentiment-radar-design.md"
+  ],
+  "verification": {
+    "command": "pre-commit（trim/eof/ruff format）on 兩份文件 + commit 308888e；資料查證：docker compose -f infra/docker-compose.yaml --env-file .env exec -T clickhouse clickhouse-client（posts_history 分鐘間隔分佈、10-28 停擺起訖）；curl issues.apache.org JIRA、hub.docker.com",
+    "exit_code": 0,
+    "tail": "pre-commit: trim trailing whitespace Passed / fix end of files Passed / ruff format Passed\n308888e docs(pipeline-gap-design): ...\nCH: 10-28 停擺 16:18:18Z → 10-29 02:35:31Z（10.3h）\nCH: 09-29～10-29 posts_history 有變化分鐘的間隔 >5/10/15/20/30/60 分：74/65/58/47/37/15 次（>30 分全在停機或已知異常時段）\nJIRA KAFKA-19888 'Coordinator histogram negative values causing persistent write timeouts ... in Kafka 4.1.0' Resolved, fixVersions 4.0.2、4.1.2（2026-03-17）、4.2.0；Docker Hub apache/kafka:4.1.2 存在"
+  },
+  "open_questions": [
+    "待決定（②外部依賴版本＋④broker 逐台重啟）：Kafka 4.1.0 → 4.1.2。10-28 的故障就是 KAFKA-19888，4.1.2 已修；只重啟 broker 會再發生。建議 A 升級（patch 版；CI 以 .env.example 跑整合測試驗證，甲方改 .env 後逐台 up -d）；B 維持 4.1.0，靠 pipeline-stall-alert 告警後人工重啟。開發規格 7.28 C 寫的是「D-待定」，編號定了請 manager 替換",
+    "需調查（不在本輪）：10-13 01:17～06:31Z、10-20 01:45～02:45Z、10-22～10-23 間歇、10-24 21:08～23:46Z 的靜默原因；沒有當時的 log，要查得先讓開發環境保留 log（compose logging 或 Loki），另開單",
+    "需調查：4.1.0→4.1.2 其他變更的影響，由 CI 整合測試與升級後觀察確認",
+    "派工（開發規格 7.28「派工順序」）：1 crawl-backfill-depth（backend）與 2 pipeline-stall-alert（backend）可平行，負責檔案不重疊（tests/unit/common/ 依檔名分開）；3 kafka-upgrade-4-1-2 待核可，且要排在 2 之後（都會改 .env.example）。實作單不改文件，實作與文件不符時回報；1、2 互不相干，所以不另開整合單",
+    "自行決定的項目列在 7.28「自行決定」表，重點有：since＝PG 最新 created_at 減 10 分（Scheduler 查詢）、續抓任務走 Kafka 且不指定 partition、一條鏈最多 80 頁（建構參數，不開環境變數）、略過積壓的列表任務、停擺訊號用 ClickHouse posts_history 且門檻 30 分（實測得出）、檢查放在 cdc-watchdog 並沿用 healthchecks email",
+    "提醒 manager：進度表新增的一列已標 ⬜（文件完成、待實作）；合併後在 BOARD 的「卡住」記下 Kafka 升級待甲方決定"
+  ]
+}

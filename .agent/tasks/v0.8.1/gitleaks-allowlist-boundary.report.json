@@ -1,0 +1,18 @@
+{
+  "task_id": "gitleaks-allowlist-boundary",
+  "status": "done",
+  "files_changed": [
+    ".gitleaks.toml",
+    "tests/unit/test_gitleaks_allowlist.py"
+  ],
+  "verification": {
+    "command": "uv run pytest tests/unit/test_gitleaks_allowlist.py -q; uv run ruff check .; uv run ruff format --check .",
+    "exit_code": 0,
+    "tail": "26 passed in 0.12s; ruff: All checks passed!; 314 files already formatted"
+  },
+  "open_questions": [
+    "退回修正：已移除 [\"']? ，新 regex 放行的字串是舊 regex 的子集；帶引號 key 改為不放行並有測試（含新⇒舊子集測試）",
+    "sandbox 沒有 gitleaks，驗收條件 1 靠 PR CI Security job 確認",
+    "名稱以 sha／rev 結尾的密鑰（SECRET_SHA）舊規則本來就放行，未改變"
+  ]
+}

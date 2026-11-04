@@ -1,0 +1,19 @@
+{
+  "task_id": "kafka-rolling-restart",
+  "status": "done",
+  "files_changed": [],
+  "verification": {
+    "command": "docker compose -f infra/docker-compose.yaml --env-file .env up -d --no-deps kafka_N (N=1,2,3，逐台); docker compose -p radar exec kafka_1 kafka-topics.sh --bootstrap-server localhost:29092 --describe --under-replicated-partitions; docker compose -p radar ps; docker compose -p radar exec connect curl -s localhost:8083/connectors/radar-cdc/status; uv run python -c (AdminClient localhost:9092 list_topics)",
+    "exit_code": 0,
+    "tail": "ps：radar_kafka_1 127.0.0.1:9092->9092、kafka_2 127.0.0.1:9094->9094、kafka_3 127.0.0.1:9096->9096，三台 healthy；--under-replicated-partitions 最後無輸出；radar-cdc = connector RUNNING、tasks[0] RUNNING；主機 localhost:9092 list_topics 回 20 個 topic、3 個 broker。"
+  },
+  "open_questions": [
+    "【重建前（ps，04:00Z 前後）】kafka_1 0.0.0.0:9092 / [::]:9092、kafka_2 0.0.0.0:9094、kafka_3 0.0.0.0:9096（舊容器 44 hours ago），三台 healthy。",
+    "【逐台過程】kafka_1：重建後約 30 秒 healthy，under-replicated 無輸出才繼續。kafka_2：重建期間 under-replicated 只列出 connect_offsets 9 個 partition 與 connect_statuses 1 個 partition（Leader: none，Replicas: 2，這些 topic RF=1，正是 #282）；其餘 topic ISR 都是 3,1。kafka_2 healthy 後再查無輸出，才換 kafka_3。kafka_3：重建期間與 healthy 後 under-replicated 都無輸出。三台之後全部 describe 無 under-replicated。",
+    "【重建中的影響（預期）】kafka_2 down 時 connect 內部 topic 部分 partition 無 leader（RF=1），connect 沒有被重啟、事後 radar-cdc 自行恢復 RUNNING（未卡在啟動）。kafka_3 重建時 heat、bot、crawler-1、scheduler 的 log 出現 Connection refused、Failed to resolve 'kafka_3'、COORDINATOR_LOAD_IN_PROGRESS commit retry，皆約 04:07Z 暫時性，04:07:02Z 後沒有再出現。",
+    "【服務檢查】scheduler：04:07:08Z、04:08:08Z 持續 'dispatched N recrawl tasks'，無 _FATAL（producer 沒進 fatal，所以不需 restart）。crawl.tasks end offset 為 0:301009 1:310722 2:301430，比 dev-stall-recover 的 03:23Z（300259/310067/300663）持續增加。ingest 04:07～04:08Z 持續 'batch received=… posts_written=…' 有寫入。heat 的 repartition topic lag 為 1，cdc.public.comments lag 0。crawler 有持續 list/post 處理；crawler consumer lag 89～217（正常消化中）。bot 的 alerts lag 0。clickhouse-* 各 group lag 0～1。沒有 restart 任何服務、沒有重建 connect 以外的容器。",
+    "【觀察到但與本單無關】consumer group 'inference' 與 'inference-shadow-bert-ckip-202610280849' 沒有 active member（lag 6000 與 5 萬以上）；該服務不在 compose ps 清單裡，看起來是本來就沒跑（shadow／推論，D-027 之後的 #178 範圍），沒有動它。",
+    "【動作紀錄】只對 kafka_1、kafka_2、kafka_3 各執行一次 up -d --no-deps（Recreate）；沒有 down、沒有刪 volume／topic／consumer group、沒有讀 .env、沒有改程式與設定；未 commit（無檔案變更）。",
+    "【交付前檢查清單】本單不改程式，無新設定、migration、端點或單元測試（無適用項）。"
+  ]
+}

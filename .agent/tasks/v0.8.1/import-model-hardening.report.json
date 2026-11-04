@@ -1,0 +1,18 @@
+{
+  "task_id": "import-model-hardening",
+  "status": "done",
+  "files_changed": [
+    "src/radar/ml/training/import_model.py",
+    "tests/unit/ml/training/test_import_model.py",
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "cd .worktrees/import-model-hardening && PYTHONPATH=$PWD/src:$PWD uv run pytest tests/unit/acceptance/import-model-hardening tests/unit/ml -q; uv run ruff check .; uv run ruff format .; make check",
+    "exit_code": 0,
+    "tail": "先寫的損壞成員測試修前 2 failed（Bad CRC-32 traceback）；修後 395 passed（acceptance + tests/unit/ml）；ruff check: All checks passed!; make check: 1652 passed in 73.94s"
+  },
+  "open_questions": [
+    "2 GB 讀入記憶體（#162 第 3 點）依禁區未改；sha 不符時整包多雜湊兩次，review 判定不用改"
+  ],
+  "disputes": []
+}

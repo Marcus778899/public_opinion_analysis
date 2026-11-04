@@ -1,0 +1,15 @@
+{
+  "task_id": "spec-docs-sync",
+  "status": "done",
+  "files_changed": ["docs/development-spec.md", "Makefile"],
+  "verification": {
+    "command": "grep -n '待甲方' docs/development-spec.md; uv run pytest tests/unit -q",
+    "exit_code": 0,
+    "tail": "grep 無輸出；1668 passed in 88.22s (0:01:28)"
+  },
+  "open_questions": [
+    "分支未同步 develop（依指示不自行 merge/rebase），bot 章節依主目錄 develop 的 src/radar/bot/main.py 撰寫",
+    "bot 錯誤處理寫在 7.21（第 6 節只有階段表）；要放別處請告知",
+    "同一輪 make check 曾有 1 個單元測試失敗（1 failed, 1667 passed），我沒抓到是哪一個；立刻重跑 tests/unit 全過（1668 passed），本單只改文件與 Makefile 註解，疑似偶發不穩的測試，建議留意"
+  ]
+}

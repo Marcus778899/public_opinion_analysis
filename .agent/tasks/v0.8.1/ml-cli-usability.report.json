@@ -1,0 +1,26 @@
+{
+  "task_id": "ml-cli-usability",
+  "status": "done",
+  "files_changed": [
+    "src/radar/common/cli.py",
+    "src/radar/common/csv_safe.py",
+    "src/radar/ml/labeling/cross_check.py",
+    "src/radar/ml/training/compare.py",
+    "src/radar/ml/training/evaluate.py",
+    "tests/unit/ml/training/test_compare.py",
+    "tests/unit/ml/training/test_evaluate.py"
+  ],
+  "verification": {
+    "command": "cd .worktrees/ml-cli-usability && PYTHONPATH=$PWD/src uv run --no-sync pytest tests/unit -q",
+    "exit_code": 0,
+    "tail": "1483 passed in 53.29s; ruff and bandit passed via pre-commit"
+  },
+  "open_questions": [
+    "evaluate 的 ClickHouse 環境變數檢查放在 load_classifier 之後（派工說要最先）：已合併的 bert-onnx-length-batching 驗收測試 test_evaluate_main_passes_setting_to_load_classifier 不設 ClickHouse 變數也要走到 load_classifier，放最先會讓它失敗。compare、cross_check 都是 parse_args 後立刻檢查。",
+    "bert-evaluate-report-fix 驗收測試用空資料夾當 --model 且 patch load_classifier，所以模型包檢查只在 load_classifier 丟 FileNotFoundError 時才觸發，不事先檢查 model_card.json。",
+    "load_settings 用 pydantic 的 missing 錯誤取得缺少的變數，所以只列真的缺的；未新增環境變數。",
+    "compare #168：改用 argMax((polarity, score), predicted_at) 取 tuple；同一 predicted_at 完全相同時仍任選一列，但 polarity 與 score 必為同一列。ClickHouse SQL 未實跑（只有文字層級測試）。",
+    "共用的 .venv（symlink）可編輯安裝會被並行 worktree 的 uv run 改指到別的 src，導致 make check 偶發失敗（子行程跑到別的程式）；釘 PYTHONPATH 後全過。這是環境問題，不是程式問題。",
+    "共用模組 cli、csv_safe 的測試已搬進 tests/unit/ml/training/test_compare.py，tests/unit/common/test_cli.py 已刪。"
+  ]
+}

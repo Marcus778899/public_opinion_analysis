@@ -1,0 +1,30 @@
+{
+  "task_id": "comment-year-infer",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "修正推文時間補年份的錯誤，讓 `commented_at` 不再落在未來（#179）",
+  "issue": 207,
+  "branch": "fix/comment-year-infer",
+  "worktree": ".worktrees/comment-year-infer",
+  "pr": 211,
+  "qa": {
+    "result": "pass",
+    "sha": "c2e5a0615cc405e60f0d06bc0a7625325d9ca9fc",
+    "by": "qa",
+    "carried_from": "4993a7b9d8eff97c39b05909fed089d86a276e19"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "c2e5a0615cc405e60f0d06bc0a7625325d9ca9fc",
+    "by": "architect",
+    "carried_from": "4993a7b9d8eff97c39b05909fed089d86a276e19"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "f3997e1b31ecc40c6a3b379182620ba75aa5505e",
+    "sha": "c2e5a0615cc405e60f0d06bc0a7625325d9ca9fc",
+    "carried_from": "4993a7b9d8eff97c39b05909fed089d86a276e19"
+  },
+  "amend_sha": "b78037ed38ae636e33c6b1330a6502610f3fb57d"
+}

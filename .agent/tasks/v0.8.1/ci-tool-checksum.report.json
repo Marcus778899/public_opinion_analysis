@@ -1,0 +1,15 @@
+{
+  "task_id": "ci-tool-checksum",
+  "status": "done",
+  "files_changed": [".github/workflows/ci.yml"],
+  "verification": {
+    "command": "shasum -a 256 -c（本機下載同一批 release 檔，比對 ci.yml 寫死的值）",
+    "exit_code": 0,
+    "tail": "g.tgz: OK\no: OK\n錯誤雜湊對照：shasum 回非 0（exit=1）"
+  },
+  "open_questions": [
+    "checksum 來源：https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt（551f6fc8…70eb）與 https://github.com/google/osv-scanner/releases/download/v2.6.0/osv-scanner_SHA256SUMS（ca69b3d3…b108）",
+    "ci.yml 未做 YAML 語法解析（本機無 pyyaml）；未推 PR，Security job 綠燈待推上後確認",
+    "對不上的負向測試只用格式錯誤的雜湊模擬，未用格式正確但值不符的雜湊；sha256sum -c 對不符值同樣回非 0，步驟會失敗"
+  ]
+}

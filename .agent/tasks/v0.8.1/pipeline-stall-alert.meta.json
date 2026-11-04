@@ -1,0 +1,26 @@
+{
+  "task_id": "pipeline-stall-alert",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "`cdc-watchdog` 偵測資料管線靜默停擺：ClickHouse `posts_history` 最新 `changed_at` 超過 `CDC_WATCHDOG_STALE_ALERT_S`（預設 1800 秒）沒更新就記 ERROR，heartbeat 改 ping `/fail`",
+  "issue": 223,
+  "branch": "fix/pipeline-stall-alert",
+  "worktree": ".worktrees/pipeline-stall-alert",
+  "pr": 224,
+  "qa": {
+    "result": "pass",
+    "sha": "705243282c55cfab7a2b6f133d4e457e902a2172",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "705243282c55cfab7a2b6f133d4e457e902a2172",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "59e424e1523a593344ce1efa411f5d36f0ebfdd8",
+    "sha": "cc0c2dc98e9421dca85117559bf33bd8481708fa"
+  }
+}

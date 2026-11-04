@@ -1,0 +1,30 @@
+{
+  "task_id": "subscription-toggle-latency",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "「📋 我的訂閱」切換看板時，按鈕畫面在 2 秒內更新（#82）",
+  "issue": 248,
+  "branch": "fix/subscription-toggle-latency",
+  "worktree": ".worktrees/subscription-toggle-latency",
+  "pr": 250,
+  "qa": {
+    "result": "pass",
+    "sha": "98aafb9340ac9558e5838cdbef58518f921acb19",
+    "by": "qa",
+    "carried_from": "d82b7e29b721f3386d2adf257249178f63b7738a"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "98aafb9340ac9558e5838cdbef58518f921acb19",
+    "by": "architect",
+    "carried_from": "d82b7e29b721f3386d2adf257249178f63b7738a"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "4209b66155ce29ce262509dd1125087bcf45a652",
+    "sha": "98aafb9340ac9558e5838cdbef58518f921acb19",
+    "carried_from": "d82b7e29b721f3386d2adf257249178f63b7738a"
+  },
+  "amend_sha": "44d0065cd5ef2c224046fe7c8e483b12307b3cea"
+}

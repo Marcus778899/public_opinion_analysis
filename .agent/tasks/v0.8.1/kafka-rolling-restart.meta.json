@@ -1,0 +1,15 @@
+{
+  "task_id": "kafka-rolling-restart",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "開發環境的 kafka_1～3 逐台重建，讓 PR #286（Kafka 對外 port 改綁 127.0.0.1，D-039）生效；重建後確認依賴 Kafka 的服務都正常。不改程式",
+  "issue": 287,
+  "branch": "chore/kafka-rolling-restart",
+  "worktree": ".worktrees/kafka-rolling-restart",
+  "pr": null,
+  "qa": null,
+  "review": null,
+  "merged": false,
+  "cancelled": true
+}

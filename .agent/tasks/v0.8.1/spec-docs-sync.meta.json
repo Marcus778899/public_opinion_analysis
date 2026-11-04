@@ -1,0 +1,33 @@
+{
+  "task_id": "spec-docs-sync",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "補齊 backlog 累積的文件缺口（#234、#231、#65 與 bot 錯誤處理），只改文件與 Makefile 註解，不改行為",
+  "issue": 243,
+  "branch": "chore/spec-docs-sync",
+  "worktree": ".worktrees/spec-docs-sync",
+  "pr": 246,
+  "qa": {
+    "result": "pass",
+    "sha": "89d9435129585052cdb8dfc4258f46f4ddda24af",
+    "by": "qa",
+    "carried_from": "9f0b48840291477e722a651262f72ee4f3068a37"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "89d9435129585052cdb8dfc4258f46f4ddda24af",
+    "by": "architect",
+    "carried_from": "9f0b48840291477e722a651262f72ee4f3068a37"
+  },
+  "merged": true,
+  "amend_sha": "16b8f78ddb2c2e5ffcb3e4da83121e4d2c532157",
+  "qa_fails": 1,
+  "rulings": 1,
+  "refunds": 1,
+  "ruling": {
+    "result": "qa_wrong",
+    "sha": "9f0b48840291477e722a651262f72ee4f3068a37",
+    "after_fails": 1
+  }
+}

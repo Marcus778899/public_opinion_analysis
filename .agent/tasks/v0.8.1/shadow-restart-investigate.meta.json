@@ -1,0 +1,15 @@
+{
+  "task_id": "shadow-restart-investigate",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "查出 `inference-shadow`（ckip fp32）啟動後反覆重啟、沒有進度的原因，回報證據與建議的修法（本單只調查，不改程式）",
+  "issue": 201,
+  "branch": "chore/shadow-restart-investigate",
+  "worktree": ".worktrees/shadow-restart-investigate",
+  "pr": null,
+  "qa": null,
+  "review": null,
+  "merged": false,
+  "cancelled": true
+}

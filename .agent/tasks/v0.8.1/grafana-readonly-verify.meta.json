@@ -1,0 +1,24 @@
+{
+  "task_id": "grafana-readonly-verify",
+  "kind": "test",
+  "owner": "backend",
+  "lane": "full",
+  "title": "實測 ClickHouse 唯讀帳號 grafana 的實際權限範圍，補整合測試；權限比預期寬就收緊設定（#122）",
+  "issue": 245,
+  "branch": "test/grafana-readonly-verify",
+  "worktree": ".worktrees/grafana-readonly-verify",
+  "pr": 249,
+  "qa": {
+    "result": "pass",
+    "sha": "9d10c18f0c3aa97d92cf9d2bb5418708a0fdbb87",
+    "by": "qa",
+    "carried_from": "141c32f1aff30f22c71a0d94884d2c568dbdf372"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "9d10c18f0c3aa97d92cf9d2bb5418708a0fdbb87",
+    "by": "architect",
+    "carried_from": "141c32f1aff30f22c71a0d94884d2c568dbdf372"
+  },
+  "merged": true
+}

@@ -1,0 +1,15 @@
+{
+  "task_id": "dev-stall-recover",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "開發環境停擺：先保留證據，再恢復 kafka_1、`radar-cdc` connector、scheduler，最後查清原因並提出修法。不改程式",
+  "issue": 280,
+  "branch": "chore/dev-stall-recover",
+  "worktree": ".worktrees/dev-stall-recover",
+  "pr": null,
+  "qa": null,
+  "review": null,
+  "merged": false,
+  "cancelled": true
+}

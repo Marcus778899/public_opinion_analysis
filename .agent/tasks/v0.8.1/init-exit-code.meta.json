@@ -1,0 +1,27 @@
+{
+  "task_id": "init-exit-code",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "`radar_init` 初始化成功時結束碼為 0，失敗時能從 log 看出哪一步失敗（#66）",
+  "issue": 212,
+  "branch": "fix/init-exit-code",
+  "worktree": ".worktrees/init-exit-code",
+  "pr": 213,
+  "qa": {
+    "result": "pass",
+    "sha": "dfee1baed614c47490909226e15c4cd703bf8317",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "dfee1baed614c47490909226e15c4cd703bf8317",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "2f0cc55b7aa8029e69f90f509d6807f0ab712f50",
+    "sha": "dfee1baed614c47490909226e15c4cd703bf8317"
+  },
+  "amend_sha": "dfee1baed614c47490909226e15c4cd703bf8317"
+}

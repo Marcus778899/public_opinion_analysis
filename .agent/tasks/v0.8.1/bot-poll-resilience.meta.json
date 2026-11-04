@@ -1,0 +1,36 @@
+{
+  "task_id": "bot-poll-resilience",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "bot 指令迴圈在 PG 斷線、Telegram 網路錯誤時穩定重試，不會整個重啟，也不會讓按鈕長時間沒反應（#79、#67）",
+  "issue": 236,
+  "branch": "fix/bot-poll-resilience",
+  "worktree": ".worktrees/bot-poll-resilience",
+  "pr": 242,
+  "qa": {
+    "result": "pass",
+    "sha": "ba14c902ebfb90e2738a4025d0a05e67a785d83b",
+    "by": "qa",
+    "carried_from": "2d663057b9c9a009d6ee518883a425db75725fb2"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "ba14c902ebfb90e2738a4025d0a05e67a785d83b",
+    "by": "architect",
+    "carried_from": "2d663057b9c9a009d6ee518883a425db75725fb2"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "3533a6be9432f8f4771ef959140905770dad7b0c",
+    "sha": "ba14c902ebfb90e2738a4025d0a05e67a785d83b",
+    "carried_from": "2d663057b9c9a009d6ee518883a425db75725fb2"
+  },
+  "rulings": 1,
+  "ruling": {
+    "result": "test_wrong",
+    "sha": "dfa9c8c010089a9a5f264076e6e2b7d6d8b153d9",
+    "after_fails": 0
+  },
+  "amend_sha": "079d55aac31af332ff62ce6105bf1662613dd528"
+}

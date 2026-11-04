@@ -1,0 +1,29 @@
+{
+  "task_id": "crawl-backfill-depth",
+  "status": "done",
+  "files_changed": [
+    "src/radar/common/schemas.py",
+    "src/radar/common/enums.py",
+    "src/radar/common/tasks.py",
+    "src/radar/collector/crawler.py",
+    "src/radar/collector/scheduler.py",
+    "tests/unit/collector/test_crawler.py",
+    "tests/unit/collector/test_scheduler.py",
+    "tests/unit/collector/test_fake_ptt_paging.py",
+    "tests/unit/common/test_schemas.py",
+    "tests/unit/common/test_tasks.py",
+    "tests/e2e/fake_ptt.py",
+    "tests/e2e/test_pipeline.py"
+  ],
+  "verification": {
+    "command": "uv run pytest tests/unit (PYTHONPATH=worktree/src); pre-commit run --all-files; docker compose --env-file .env -f .worktrees/crawl-backfill-depth/compose.yaml run --rm test",
+    "exit_code": 0,
+    "tail": "unit: 1577 passed (新增測試後 collector/common/e2e_support 再跑全過); pre-commit all Passed; integration: 368 passed in 56.30s (含 crawl-backfill-depth 驗收); down -v 已釋放容器"
+  },
+  "open_questions": [
+    "e2e 新測試 test_crawler_restart_backfills_more_than_three_pages 與 fake_ptt 分頁（PUT /_control/boards/{board}/page_size）未在 e2e 堆疊實跑（sandbox 無 make e2e-up），只跑了假 PTT 的單元測試；請 qa/甲方在 e2e 環境確認",
+    "續抓任務（reason=backfill）不更新「最近一次開始處理」時間，以免補抓期間排入的 schedule 任務被誤略過；文件 7.28 A 未明寫，若要含續抓請告知",
+    "latest_post_since 查詢沒有獨立 statement timeout，沿用 engine 設定",
+    "多看板補抓期間同 partition 的一般任務會等續抓任務，與文件相同"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "task_id": "dev-alerting-up",
+  "status": "done",
+  "files_changed": [],
+  "verification": {
+    "command": "docker compose -f infra/docker-compose.yaml --env-file .env --profile app --profile alerting up -d --wait heat bot; kafka-consumer-groups.sh --describe --group heat; --delete --group uat-read-1793349393; --list",
+    "exit_code": 0,
+    "tail": "radar_heat Healthy, radar_bot Healthy. heat log: 'heat consuming cdc.public.comments as heat'; bot log: 'bot started; allowed chats: [...]' then alerts sent to 1 chats. heat lag: cdc.public.comments partitions 0/1/2 LAG 0; repartition topic LAG 181/1/4 (draining). uat-read-1793349393: 'has no active members' -> 'Deletion ... successful'; --list afterwards: 12 groups (clickhouse-comments, heat, clickhouse-labels, clickhouse-predictions, crawler, inference, inference-shadow-bert-ckip-202610280849, bot, clickhouse-alerts, clickhouse-posts, ingest, clickhouse-predictions-shadow), only uat-read removed."
+  },
+  "open_questions": [
+    "Why heat/bot were absent: `docker compose -p radar ps -a` showed NO heat or bot containers at all (not even Exited), so there was no last log to inspect. Both were created fresh by this up (log lines 'Container radar_heat Creating'). Likely removed earlier (e.g. an up without --profile alerting, or orphan removal); cause not provable from current state.",
+    "The up command listed other containers as Running and did not recreate them; only heat and bot were Created/Started.",
+    "heat log shows one quixstreams WARNING on startup (transactional PID 'Coordinator load in progress: retrying'), transient after recent broker restarts; no ERROR or traceback in heat or bot.",
+    "bot did not log an explicit 'polling' line; it logged 'bot started' and immediately delivered pending alerts (replay.alerts backlog) to the allowed chat, so the bot is alive. Because the backlog was delivered, the user may have received a burst of alerts in Telegram.",
+    "Kafka admin CLI must use localhost:29092 inside kafka_1 (19092 is not reachable); not documented in Makefile.",
+    "Not touched: uat's replay heat (PID 74977, group heat-replay-1793345392) left for the owner to kill; no .env read, no down, no volume deletion."
+  ]
+}

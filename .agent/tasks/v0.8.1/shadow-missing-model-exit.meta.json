@@ -1,0 +1,33 @@
+{
+  "task_id": "shadow-missing-model-exit",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "shadow 推論沒設 `INFERENCE_SHADOW_MODEL_VERSION`（或模型資料夾不存在）時，啟動印一行清楚的設定提示並停止，不進重啟迴圈（#172）",
+  "issue": 215,
+  "branch": "fix/shadow-missing-model-exit",
+  "worktree": ".worktrees/shadow-missing-model-exit",
+  "pr": 217,
+  "qa": {
+    "result": "pass",
+    "sha": "243b510c2c8526707ec57e519b7eee84901b64fb",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "243b510c2c8526707ec57e519b7eee84901b64fb",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "0be952026e045afd17e1ed3b5b5112dbeb0a3576",
+    "sha": "243b510c2c8526707ec57e519b7eee84901b64fb"
+  },
+  "amend_sha": "243b510c2c8526707ec57e519b7eee84901b64fb",
+  "rulings": 1,
+  "ruling": {
+    "result": "test_wrong",
+    "sha": "d51ba3c670a8f2afef93d16ade536c1332f890a7",
+    "after_fails": 0
+  }
+}

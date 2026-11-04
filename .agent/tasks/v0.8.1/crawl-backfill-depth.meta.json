@@ -1,0 +1,29 @@
+{
+  "task_id": "crawl-backfill-depth",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "爬蟲重啟或停擺後，依 scheduler 給的 `since` 往前補抓到 PG 最新文章為止（續抓任務、80 頁上限、略過積壓的列表任務）",
+  "issue": 222,
+  "branch": "fix/crawl-backfill-depth",
+  "worktree": ".worktrees/crawl-backfill-depth",
+  "pr": 225,
+  "qa": {
+    "result": "pass",
+    "sha": "187ace62f35ed99656643e040303ebfd297ed486",
+    "by": "qa",
+    "carried_from": "170e310cbfed7d7a919f737b06c6b835ad28d0c6"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "187ace62f35ed99656643e040303ebfd297ed486",
+    "by": "architect",
+    "carried_from": "170e310cbfed7d7a919f737b06c6b835ad28d0c6"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "2465696cb494735ebd27cebbb2668e950d78d439",
+    "sha": "187ace62f35ed99656643e040303ebfd297ed486",
+    "carried_from": "170e310cbfed7d7a919f737b06c6b835ad28d0c6"
+  }
+}

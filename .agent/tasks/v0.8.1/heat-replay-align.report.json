@@ -1,0 +1,26 @@
+{
+  "task_id": "heat-replay-align",
+  "status": "done",
+  "files_changed": [
+    "src/radar/streaming/replay.py",
+    "src/radar/streaming/heat.py",
+    "src/radar/common/settings.py",
+    "src/radar/common/kafka/names.py",
+    "infra/kafka/topics.yaml",
+    ".env.example",
+    "docs/development-spec.md",
+    "tests/unit/streaming/test_replay.py",
+    "tests/unit/streaming/test_heat.py",
+    "tests/unit/common/test_settings.py"
+  ],
+  "verification": {
+    "command": "uv run pytest tests/unit/acceptance/heat-replay-align tests/unit/streaming tests/unit/common; make check",
+    "exit_code": 0,
+    "tail": "358 passed (指定目錄); make check: 1830 passed in 240.48s; grep TODO(heat-replay-align) 無結果; commit 8a8406a"
+  },
+  "open_questions": [
+    "容器內跑回放需要 compose 覆寫檔（HEAT_OUTPUT_TOPIC、HEAT_CONSUMER_GROUP 等環境變數傳入 heat 容器），本單不做（禁區不改 compose），需另開單",
+    "既有環境要先跑 make topics（或 tools/create_topics.py）才會建立 replay.alerts",
+    "surge 尾事件的 __source_ts_ms 比現在晚 1 分鐘（未來時間），未做整合測試實跑；建議回放驗收時實測最後一分鐘有結算"
+  ]
+}

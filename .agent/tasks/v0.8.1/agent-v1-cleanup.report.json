@@ -1,0 +1,27 @@
+{
+  "task_id": "agent-v1-cleanup",
+  "status": "done",
+  "files_changed": [
+    ".github/workflows/ci.yml",
+    ".github/workflows/sync_branch.yml",
+    ".coverage-exempt",
+    ".gitignore",
+    "docs/development-spec.md",
+    "scripts/（刪除：_common.py、board.py、check_env.py、coverage_gate.py、docs.py、guard_bash.py、guard_paths.py、init_project.py、pr.py、release.py、task.py、validate_report.py）",
+    "templates/（刪除：contract.md、decisions.md、design.md、github/workflows/ci.yml、github/workflows/sync_branch.yml、project-readme.md、task-card.md、uat.md、ui-mockup.html、ui-spec.md）",
+    "contracts/（刪除：report.schema.json）"
+  ],
+  "verification": {
+    "command": "cd .worktrees/agent-v1-cleanup && uv run ruff check . && uv run pytest tests/unit -q; grep -rn \"scripts/\" .github .coverage-exempt docs/development-spec.md",
+    "exit_code": 0,
+    "tail": "HEAD 603437f（含 qa 依仲裁修正的測試）\nruff: All checks passed!\npytest: 1885 passed in 87.19s\ngrep scripts/: 無結果（grep exit 1 = 沒有命中，符合驗收條件）"
+  },
+  "open_questions": [
+    "實作 commit 8b5a38c、09d2ffc；qa 的測試修正 603437f。重驗不需改實作，沒有新增 commit",
+    "刪掉的檔案都是 v1 流程副本，沒有專案自己的程式；專案營運腳本早已在 tools/（D-006）",
+    "ci.yml：只有覆蓋率閘門改成 ae ci coverage-gate（用 AE_TOKEN checkout 工具，D-036）；check、integration（kafka/postgres/clickhouse/grafana）、ruff 與單元測試（make check）、pytest-xdist（D-015）、gitleaks（D-018/D-026 設定未動）、osv-scanner、semgrep 全保留；門檻 80% 不變。security job 不換成 ae ci security（它不驗下載檔 SHA256，會降低 #238 的防護），ci.yml 以 NOTE 註明",
+    "sync_branch.yml 與範本一致（佔位符換成 main/develop），用 ae ci sync-branch",
+    "負責檔案以外仍有 v1 殘留，需另派或由 manager 處理：README.md:7（python3 scripts/check_env.py 應改為 ae check-env）、README.md:118（scripts/ 目錄說明）、CLAUDE.md:32、docs/decisions.md D-006 文字、.pre-commit-config.yaml:2 與 pyproject.toml:44-45 的 scripts/templates/contracts 排除（無害但過時）、Makefile:68 註解提 check_env.py",
+    "PR 與 CI run 連結、覆蓋率步驟輸出由 manager 開 PR 後補"
+  ]
+}

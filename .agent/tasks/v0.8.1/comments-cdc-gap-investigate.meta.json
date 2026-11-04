@@ -1,0 +1,15 @@
+{
+  "task_id": "comments-cdc-gap-investigate",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "查清 2026-10-30 04:30Z～07:15Z 約 3 小時 `cdc.public.comments` 沒有事件的原因，以及 #224 的停擺警告有沒有發出。只調查、不改程式",
+  "issue": 260,
+  "branch": "chore/comments-cdc-gap-investigate",
+  "worktree": ".worktrees/comments-cdc-gap-investigate",
+  "pr": null,
+  "qa": null,
+  "review": null,
+  "merged": false,
+  "cancelled": true
+}

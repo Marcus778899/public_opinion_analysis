@@ -1,0 +1,22 @@
+{
+  "task_id": "kafka-version-upgrade",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "依 D-034 把 `.env.example` 的 `KAFKA_VERSION` 改為 4.1.2，讓 CI 以新版跑全部整合測試（開發規格派工順序稱 `kafka-upgrade-4-1-2`，流程不允許數字段命名，改用此名）",
+  "issue": 228,
+  "branch": "chore/kafka-version-upgrade",
+  "worktree": ".worktrees/kafka-version-upgrade",
+  "pr": 229,
+  "qa": {
+    "result": "pass",
+    "sha": "02edee34ce7a5e904a9a1995509171551af1c118",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "02edee34ce7a5e904a9a1995509171551af1c118",
+    "by": "architect"
+  },
+  "merged": true
+}

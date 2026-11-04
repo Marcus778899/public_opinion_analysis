@@ -1,0 +1,13 @@
+{
+  "task_id": "gap-record-update",
+  "status": "done",
+  "files_changed": ["docs/development-spec.md"],
+  "verification": {
+    "command": "pre-commit run --files docs/development-spec.md",
+    "exit_code": 0,
+    "tail": "trim trailing whitespace...Passed; fix end of files...Passed; check yaml...Skipped; ruff (legacy alias)...Skipped; ruff format...Passed; bandit...Skipped"
+  },
+  "open_questions": [
+    "區間 04:05→07:15 取自調查回報的 PG 最後/最初寫入時間（04:05:06Z、07:15:10Z），長度 3.2 h；未重新查詢"
+  ]
+}

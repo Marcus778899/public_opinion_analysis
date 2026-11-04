@@ -1,0 +1,33 @@
+{
+  "task_id": "import-model-hardening",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "`import_model` 的錯誤提示、`--help` 說明、整包 SHA-256 驗證與 review 建議（#173 import_model 部分、#174 import_model 部分、#177、#162）",
+  "issue": 232,
+  "branch": "fix/import-model-hardening",
+  "worktree": ".worktrees/import-model-hardening",
+  "pr": 233,
+  "qa": {
+    "result": "pass",
+    "sha": "f0bd736a3d1a2c04f2a5b89f2f21dc2e21e88d18",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "f0bd736a3d1a2c04f2a5b89f2f21dc2e21e88d18",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "fe27837c216c96b0dc38df1087b9ef3a023af7b0",
+    "sha": "a279de732eeed43fb8222fc82f8bab94a3e1d968"
+  },
+  "rulings": 1,
+  "ruling": {
+    "result": "test_wrong",
+    "sha": "37e4bd30a8cfb981634dfcd9c0bc2af1fe159dc2",
+    "after_fails": 0
+  },
+  "amend_sha": "f0bd736a3d1a2c04f2a5b89f2f21dc2e21e88d18"
+}

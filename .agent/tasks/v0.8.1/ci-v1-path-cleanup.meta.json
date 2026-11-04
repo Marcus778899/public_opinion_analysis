@@ -1,0 +1,27 @@
+{
+  "task_id": "ci-v1-path-cleanup",
+  "kind": "chore",
+  "owner": "architect",
+  "lane": "full",
+  "title": "ci.yml integration job 的「只改文件就略過」判斷拿掉 v1 的 `tasks/`、`reports/`；先改驗收測試不再要求這兩個路徑，再改 ci.yml",
+  "issue": 278,
+  "branch": "chore/ci-v1-path-cleanup",
+  "worktree": ".worktrees/ci-v1-path-cleanup",
+  "pr": 279,
+  "qa": {
+    "result": "pass",
+    "sha": "fc85d53827d1cd1e023bad269cc22c1e2b15a3d1",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "fc85d53827d1cd1e023bad269cc22c1e2b15a3d1",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "91ae9ca855b795ce5cb38cfb636d3b3b70733c16",
+    "sha": "8316b56bde6c18e2a833e216ad2dd6fb9ad7dcd8"
+  },
+  "node_at": 1793617372.548838
+}

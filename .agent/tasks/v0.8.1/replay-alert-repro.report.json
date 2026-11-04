@@ -1,0 +1,22 @@
+{
+ "task_id": "replay-alert-repro",
+ "status": "done",
+ "files_changed": [
+  "docs/development-spec.md",
+  "src/radar/streaming/replay.py",
+  "tests/unit/streaming/test_replay.py"
+ ],
+ "verification": {
+  "command": "uv run pytest tests/unit/acceptance/replay-alert-repro tests/unit/streaming -q；make check",
+  "exit_code": 0,
+  "tail": "第二輪（qa FAIL：surge 誤報舊訊息警告）修正 commit acc1ee6：main() 只在 command==replay 時呼叫 warn_if_replay_topic_dirty，7.20 對應文字同步。驗收測試+streaming：151 passed；make check：1886 passed in 86.62s，pre-commit 全 Passed。新增單元測試 test_main_surge_does_not_check_topic_for_leftovers。第一輪的根本原因與實跑輸出不變（replay.alerts 收到 board Gossiping 53 與 post ...BBB 80 共 2 則）。"
+ },
+ "open_questions": [
+  "實跑時我刪除並重建了回放專用 topic replay.cdc.comments、replay.alerts（含 UAT 留下的 ~5,500 筆測試資料）；未碰正式 topic 與正式服務。三次回放 heat 都用 subprocess timeout 自行結束（300/400/240 秒），group heat-replay-1793346444／heat-replay-1793346xxx／heat-replay-1793347268 的 state 在 scratchpad，Quix 內部 changelog／repartition topic 仍在（保留期限內）",
+  "UAT 留下的 heat PID 74977 我在 sandbox 無法查（ps 被擋），不確定是否仍在；它若還在會用舊 group 讀寫 replay.alerts，仍需 manager 在 sandbox 外確認／結束",
+  "heat.py 未修改：正式與回放的偵測邏輯沒有 bug，只是文件沒寫暖機與殘留資料；改以 replay 工具啟動時警告（replay.cdc.comments 有舊訊息時印一行 WARNING）加 7.20 文件處理",
+  "7.20 的回放 heat 啟動指令仍是本機執行（compose 覆寫檔屬 #259）；UV 前綴與 SCHEMA_REGISTRY_URL 本機值我是照 .env.example 推出，未讀 .env",
+  "暖機資料需涵蓋 surge 的同一看板且 ≥75 分鐘；若該時段系統停擺（例 04:30Z～07:15Z 管線缺口）錄不到資料，文件已提醒",
+  "pre-commit 的 gitleaks 等 hook 在 commit 時通過；覆蓋率閘門（CI 的 coverage_gate）未在本機跑"
+ ]
+}

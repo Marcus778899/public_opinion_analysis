@@ -1,0 +1,24 @@
+{
+  "task_id": "pipeline-stall-alert",
+  "status": "done",
+  "files_changed": [
+    ".env.example",
+    "src/radar/cdc/watchdog.py",
+    "src/radar/common/clickhouse.py",
+    "src/radar/common/settings.py",
+    "tests/unit/cdc/test_watchdog.py",
+    "tests/unit/common/test_clickhouse.py",
+    "tests/unit/common/test_settings.py"
+  ],
+  "verification": {
+    "command": "PYTHONPATH=$PWD/src uv run pytest tests/unit (含驗收) ; make check ; docker compose --env-file .env -f .worktrees/pipeline-stall-alert/compose.yaml run --rm test",
+    "exit_code": 0,
+    "tail": "unit 1559 passed；make check exit 0；整合（含 tests/integration/acceptance/pipeline-stall-alert）364 passed；grep TODO(pipeline-stall-alert) 無結果；已 down -v；commit 7052432"
+  },
+  "open_questions": [
+    "read_latest_changed_at 在空表（ClickHouse 回 epoch）時回 None；FreshnessWatch 以 started_at 為下限。",
+    "ClickHouseSettings 在 watchdog 的 compose 服務需有 CLICKHOUSE_* 環境變數（規格說 compose 已有），我沒有檢查 infra/docker-compose.yaml（不在負責檔案）；若 cdc-watchdog 服務沒帶，啟動會失敗，請 manager 確認。",
+    "沒有 disputes：測試與契約無矛盾。"
+  ],
+  "disputes": []
+}

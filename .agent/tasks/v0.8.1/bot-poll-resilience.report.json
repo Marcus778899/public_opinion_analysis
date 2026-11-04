@@ -1,0 +1,17 @@
+{
+  "task_id": "bot-poll-resilience",
+  "status": "done",
+  "files_changed": [
+    "src/radar/bot/main.py",
+    "tests/unit/bot/test_main.py"
+  ],
+  "verification": {
+    "command": "PYTHONPATH=$PWD/src uv run pytest tests/unit/acceptance/bot-poll-resilience tests/unit/bot；PYTHONPATH=$PWD/src make check",
+    "exit_code": 0,
+    "tail": "先寫 test_poll_commands_reply_transient_error_retries_same_update（訊息與按鈕兩種）確認失敗（2 failed），修後：200 passed；make check：1667 passed in 72.77s，exit 0"
+  },
+  "open_questions": [
+    "開發規格階段 6 需補：PG 斷線為暫時性錯誤、單筆 update 意外例外跳過且 offset 前進（派工單禁改，之後補）"
+  ],
+  "disputes": []
+}

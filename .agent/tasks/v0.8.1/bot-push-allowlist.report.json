@@ -1,0 +1,14 @@
+{
+  "task_id": "bot-push-allowlist",
+  "status": "done",
+  "files_changed": ["src/radar/bot/main.py", "tests/unit/bot/test_main.py"],
+  "verification": {
+    "command": "uv run pytest tests/unit/acceptance/bot-push-allowlist tests/unit/bot; make check",
+    "exit_code": 0,
+    "tail": "acceptance + bot: 200 passed; make check: 1719 passed; grep TODO(bot-push-allowlist) 無結果"
+  },
+  "open_questions": [
+    "為了單元測試，在 main.py 新增模組層級 helper filter_recipients（內部用 is_allowed，被過濾人數記 INFO，不記 chat id），main() 的 recipients 呼叫它；派工單寫「只限 main() 裡」，這是小幅擴張，請確認可接受。",
+    "開發規格（spec-docs-sync 進行中）需補：警示推送也受 TELEGRAM_ALLOWED_CHAT_IDS 過濾；TELEGRAM_ALLOW_ALL=true 且無清單時推給所有訂閱者；不在清單的訂閱資料保留不刪。"
+  ]
+}
