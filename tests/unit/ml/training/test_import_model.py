@@ -104,7 +104,7 @@ def test_encrypted_flag_is_rejected_before_reading(tmp_path: Path) -> None:
         pos = data.find(b"PK\x01\x02", pos + 4)
     zip_path.write_bytes(bytes(data))
     assert all(i.flag_bits & 1 for i in zipfile.ZipFile(zip_path).infolist())
-    with pytest.raises(ModelPackageError, match="encrypted"):
+    with pytest.raises(ModelPackageError, match="加密"):
         import_model(zip_path, tmp_path / "models")
 
 
@@ -116,7 +116,7 @@ def test_bzip2_compression_is_rejected(tmp_path: Path) -> None:
     with zipfile.ZipFile(bad, "w", compression=zipfile.ZIP_BZIP2) as zf:
         for name, data in members.items():
             zf.writestr(name, data)
-    with pytest.raises(ModelPackageError, match="compression"):
+    with pytest.raises(ModelPackageError, match="壓縮"):
         import_model(bad, tmp_path / "models")
 
 
@@ -130,18 +130,50 @@ def test_main_missing_zip_exits_with_one_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with pytest.raises(SystemExit) as exc:
-        _run_main(monkeypatch, tmp_path, "--zip", str(tmp_path / "nope.zip"))
-    assert "nope.zip" in str(exc.value.code)
+        _run_main(monkeypatch, tmp_path, "--zip", str(tmp_path / "nope.zip"), "--sha256", "0" * 64)
+    assert "找不到" in str(exc.value.code)
+    assert str(exc.value.code).count("nope.zip") == 1
 
 
 def test_main_existing_version_exits_with_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     zip_path = _zip_path(tmp_path)
-    _run_main(monkeypatch, tmp_path, "--zip", str(zip_path))
+    args = ("--zip", str(zip_path), "--sha256", im.package_sha256(zip_path))
+    _run_main(monkeypatch, tmp_path, *args)
     with pytest.raises(SystemExit) as exc:
-        _run_main(monkeypatch, tmp_path, "--zip", str(zip_path))
-    assert "already exists" in str(exc.value.code)
+        _run_main(monkeypatch, tmp_path, *args)
+    assert "不會覆寫" in str(exc.value.code)
+    assert "models/bert-test-202610210000/" in str(exc.value.code)
+
+
+def test_main_missing_sha256_exits_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, tmp_path, "--zip", str(_zip_path(tmp_path)))
+    assert exc.value.code == 2
+
+
+def test_main_sha256_mismatch_shows_actual_and_redownload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    zip_path = _zip_path(tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, tmp_path, "--zip", str(zip_path), "--sha256", "0" * 64)
+    assert im.package_sha256(zip_path) in str(exc.value.code)
+    assert "重新下載" in str(exc.value.code)
+    assert "不要把 --sha256 改填實際值" in str(exc.value.code)
+
+
+def test_main_unreadable_zip_exits_with_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(_p: Path) -> str:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(im, "package_sha256", boom)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, tmp_path, "--zip", "x.zip", "--sha256", "0" * 64)
+    assert "無法讀取" in str(exc.value.code)
 
 
 def _corrupt_first_member_data(zip_path: Path) -> None:
@@ -163,7 +195,7 @@ def test_corrupted_member_data_raises_package_error(tmp_path: Path) -> None:
         for name, data in members.items():
             zf.writestr(name, data)
     _corrupt_first_member_data(bad)
-    with pytest.raises(ModelPackageError, match="corrupted"):
+    with pytest.raises(ModelPackageError, match="損毀"):
         import_model(bad, tmp_path / "models")
     assert not (tmp_path / "models").exists()
 
@@ -179,5 +211,12 @@ def test_main_corrupted_zip_exits_with_message(
             zf.writestr(name, data)
     _corrupt_first_member_data(bad)
     with pytest.raises(SystemExit) as exc:
-        _run_main(monkeypatch, tmp_path, "--zip", str(bad))
-    assert "corrupted" in str(exc.value.code)
+        _run_main(monkeypatch, tmp_path, "--zip", str(bad), "--sha256", im.package_sha256(bad))
+    assert "損毀" in str(exc.value.code)
+
+
+def test_file_name_constants_match_classifier() -> None:
+    from radar.ml.training import classifier
+
+    assert im.ONNX_MODEL_FILE == classifier.ONNX_MODEL_FILE
+    assert im.TOKENIZER_FILE == classifier.TOKENIZER_FILE

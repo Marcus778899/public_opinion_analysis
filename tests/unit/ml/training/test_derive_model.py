@@ -104,3 +104,13 @@ def test_main_rejected_exits_nonzero_with_one_line(
     with pytest.raises(SystemExit) as exc:
         main()
     assert str(exc.value).startswith("error: ")
+
+
+def test_help_describes_both_arguments(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    monkeypatch.setattr(sys, "argv", ["derive_model", "--help"])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "來源模型目錄" in out
+    assert "-len<N>" in out

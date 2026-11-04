@@ -357,8 +357,8 @@ def warn_if_replay_topic_dirty(kafka: KafkaSettings) -> None:
         consumer.close()
     if dirty:
         log.warning(
-            "%s still has old messages; a new heat group reads them too and drops "
-            "earlier-timed replay data as late. Delete and recreate the topic first (spec 7.20)",
+            "%s 還有舊訊息；新的 heat group 會一併讀入，時間較早的回放資料會被當遲到丟掉。"
+            "請先刪除並重建該 topic（開發規格 7.20）",
             names.REPLAY_COMMENTS,
         )
 

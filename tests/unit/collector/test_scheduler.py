@@ -226,8 +226,22 @@ class FakeEngine:
 
 def test_latest_post_since_subtracts_ten_minutes():
     latest = datetime(2026, 10, 29, 6, 0, tzinfo=UTC)
+    engine = FakeEngine(latest)
 
-    assert latest_post_since(FakeEngine(latest), "Stock") == latest - timedelta(minutes=10)
+    assert latest_post_since(engine, "Stock") == latest - timedelta(minutes=10)
+
+
+def test_latest_post_since_future_filename_is_clamped_to_now_with_warning(monkeypatch):
+    from radar.collector import scheduler as mod
+
+    records: list[str] = []
+    monkeypatch.setattr(mod.log, "warning", lambda msg, *a: records.append(msg))
+    now = datetime(2026, 10, 29, 6, 0, tzinfo=UTC)
+
+    result = latest_post_since(FakeEngine(datetime(2099, 1, 1, tzinfo=UTC)), "Stock", now=now)
+
+    assert result == now - timedelta(minutes=10)
+    assert records
 
 
 def test_latest_post_since_without_posts_is_none():
