@@ -100,3 +100,20 @@ def test_partition_count_reads_metadata_and_caches():
 def test_partition_count_missing_topic_raises():
     with pytest.raises(KafkaException):
         make(FakeProducer()).partition_count("nope")
+
+
+def test_fake_fatal_produce_error_raises_producer_fatal_error_and_blocks_flush():
+    from confluent_kafka import KafkaError
+
+    from radar.common.kafka.producer import ProducerFatalError
+
+    class FatalOnProduce(FakeProducer):
+        def produce(self, *a, **k) -> None:
+            raise KafkaException(KafkaError(KafkaError._FATAL, "x", fatal=True))
+
+    p = make(FatalOnProduce())
+    with pytest.raises(ProducerFatalError):
+        p.send("t", "k", Event(id=1, text="a"))
+    assert p.fatal_error is not None
+    with pytest.raises(ProducerFatalError):
+        p.flush()
