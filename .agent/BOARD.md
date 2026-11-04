@@ -63,11 +63,12 @@
 | stability-design | architect | done | 0 | PR #292 |
 | producer-fatal-exit | backend | done | 0 | PR #298 |
 | connect-resilience | backend | done | 0 | PR #296 |
-| cli-wording-sha256 | backend | qa | 1 |  |
+| cli-wording-sha256 | backend | qa-fail | 1 |  |
 
 ## 卡住／待甲方決定
 
 - v0.8.1 甲方驗收清單（docs/uat/v0.8.1.md）待甲方勾選並寫 甲方驗收：PASS（含 #82 我的訂閱 2 秒內實測；S22 已 PASS）；資安重審 PASS
+- 開新單卡住：connect-resilience 在 .env.example 加了選填註解 CDC_WATCHDOG_CONNECTOR_MISSING_ALERT_S，需甲方在自己的終端機跑一次 ae check-env
 
 ## 注意事項（踩過的坑）
 
