@@ -23,7 +23,7 @@ from radar.common.db.models import Post
 from radar.common.db.session import make_engine, make_session_factory
 from radar.common.enums import CrawlReason
 from radar.common.kafka import names
-from radar.common.kafka.producer import DeliveryError, JsonProducer
+from radar.common.kafka.producer import DeliveryError, JsonProducer, ProducerFatalError
 from radar.common.log import log, setup_logging
 from radar.common.settings import SchedulerSettings, get_kafka_settings, get_postgres_settings
 from radar.common.tasks import make_list_task, resolve_list_partition
@@ -214,13 +214,17 @@ class AdvisoryLock:
             self._conn = None
 
 
-def _logged(fn: Callable[[], object]) -> Callable[[], None]:
-    """計時器工作的例外只記錄，不讓 APScheduler 印出 traceback 後繼續；下次觸發再試。"""
+def _logged(
+    fn: Callable[..., object], on_fatal: Callable[[ProducerFatalError], None]
+) -> Callable[..., None]:
+    """計時器工作的例外只記錄，下次觸發再試；producer fatal 交給 on_fatal（結束程式）。"""
 
     @functools.wraps(fn)
-    def wrapper() -> None:
+    def wrapper(*args: object) -> None:
         try:
-            fn()
+            fn(*args)
+        except ProducerFatalError as e:
+            on_fatal(e)
         except Exception:
             log.exception("scheduled job %s failed", getattr(fn, "__name__", fn))
 
@@ -250,7 +254,15 @@ def main() -> None:
     )
     # 最近一次同步到的啟用看板；sync_boards 更新、send_list_task 讀取，兩者都在 scheduler 執行緒
     enabled: list[str] = []
-    sender = make_list_task_sender(producer, lambda: enabled, engine)
+    fatal: list[ProducerFatalError] = []
+
+    def on_fatal(e: ProducerFatalError) -> None:
+        # 不在程式內重建 producer：停掉計時器、讓 main 重新丟出，交給 docker 重啟（D-042）
+        log.critical("producer fatal, stopping scheduler: %s", e)
+        fatal.append(e)
+        scheduler.shutdown(wait=False)
+
+    sender = _logged(make_list_task_sender(producer, lambda: enabled, engine), on_fatal)
     dispatcher = DuePostDispatcher(
         make_session_factory(engine),
         producer,
@@ -270,16 +282,21 @@ def main() -> None:
             scheduler.shutdown(wait=False)
 
     scheduler.add_job(
-        _logged(sync_boards),
+        _logged(sync_boards, on_fatal),
         "interval",
         seconds=settings.sync_interval_sec,
         id="sync_boards",
         next_run_time=datetime.now(UTC),
     )
     scheduler.add_job(
-        _logged(dispatcher), "interval", seconds=settings.due_posts_interval_sec, id="due_posts"
+        _logged(dispatcher, on_fatal),
+        "interval",
+        seconds=settings.due_posts_interval_sec,
+        id="due_posts",
     )
-    scheduler.add_job(_logged(lock_heartbeat), "interval", seconds=LOCK_HEARTBEAT_SEC, id="lock")
+    scheduler.add_job(
+        _logged(lock_heartbeat, on_fatal), "interval", seconds=LOCK_HEARTBEAT_SEC, id="lock"
+    )
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: scheduler.shutdown(wait=False))
     try:
@@ -290,6 +307,8 @@ def main() -> None:
         producer.flush()
         boards.close()
         engine.dispose()
+    if fatal:
+        raise fatal[0]
 
 
 if __name__ == "__main__":
