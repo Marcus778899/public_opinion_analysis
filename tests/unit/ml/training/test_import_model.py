@@ -161,6 +161,7 @@ def test_main_sha256_mismatch_shows_actual_and_redownload(
         _run_main(monkeypatch, tmp_path, "--zip", str(zip_path), "--sha256", "0" * 64)
     assert im.package_sha256(zip_path) in str(exc.value.code)
     assert "重新下載" in str(exc.value.code)
+    assert "不要把 --sha256 改填實際值" in str(exc.value.code)
 
 
 def test_main_unreadable_zip_exits_with_message(

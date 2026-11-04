@@ -132,7 +132,10 @@ def main() -> None:
         digest = package_sha256(args.zip)
         log.info("package sha256 %s", digest)
         if digest != args.sha256.strip().lower():
-            sys.exit(f"error: 整包 zip 的 sha256 不符（實際 {digest}），可能下載不完整，請重新下載")
+            sys.exit(
+                f"error: 整包 zip 的 sha256 不符（實際 {digest}），請重新下載；"
+                "不要把 --sha256 改填實際值"
+            )
         target = import_model(args.zip, MODELS_DIR, sha256=args.sha256)
     except ModelExistsError as exc:
         version = Path(str(exc)).name
