@@ -60,6 +60,10 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
+| stability-design | architect | done | 0 | PR #292 |
+| producer-fatal-exit | backend | in-progress | 0 |  |
+| connect-resilience | backend | in-progress | 0 |  |
+| cli-wording-sha256 | backend | in-progress | 0 |  |
 
 ## 卡住／待甲方決定
 

@@ -16,6 +16,8 @@ from radar.common.settings import ConnectSettings
 
 CONNECTOR_FILE = Path(__file__).resolve().parents[1] / "infra/debezium/radar-cdc.json"
 RUNNING_TIMEOUT_S = 60.0
+TASK_RESTART_LIMIT = 2
+TASK_RESTART_GRACE_S = 15.0
 
 
 @log.catch(level="CRITICAL")
@@ -27,7 +29,13 @@ def main() -> None:
         wait_until_ready(client, settings.ready_timeout_s)
         created = put_connector(client, spec)
         log.info("connector %s %s", spec.name, "created" if created else "updated")
-        wait_until_running(client, spec.name, RUNNING_TIMEOUT_S)
+        wait_until_running(
+            client,
+            spec.name,
+            RUNNING_TIMEOUT_S,
+            restart_limit=TASK_RESTART_LIMIT,
+            restart_grace_s=TASK_RESTART_GRACE_S,
+        )
     log.info("connector %s running", spec.name)
 
 

@@ -505,3 +505,35 @@ def test_freshness_watch_ignores_older_value_than_already_seen():
     w.observe(t0 + timedelta(seconds=50), t0 + timedelta(seconds=60))
     w.observe(t0, t0 + timedelta(seconds=120))
     assert not w.stalled
+
+
+def test_missing_watch_reports_missing_then_alert_then_recovered():
+    w = watchdog.MissingWatch(300)
+
+    assert w.observe(False, 0) is watchdog.MissingTransition.MISSING
+    assert w.observe(False, 300) is None
+    assert w.observe(False, 301) is watchdog.MissingTransition.ALERT
+    assert w.alerting
+    assert w.observe(True, 330) is watchdog.MissingTransition.RECOVERED
+    assert not w.alerting
+
+
+def test_check_connector_404_with_missing_watch_logs_error_after_threshold(fake_log):
+    w = watchdog.MissingWatch(300)
+    client = httpx2.Client(
+        base_url="http://connect:8083",
+        transport=httpx2.MockTransport(lambda r: httpx2.Response(404)),
+    )
+
+    for now in (0, 30, 301, 331):
+        check_connector(client, "radar-cdc", ConnectorWatch(30, 600), now, missing_watch=w)
+
+    assert fake_log.levels() == ["WARNING", "ERROR"]
+
+
+def test_is_cdc_healthy_missing_alerting_is_false():
+    w = watchdog.MissingWatch(0)
+    w.observe(False, 0)
+    w.observe(False, 1)
+
+    assert not is_cdc_healthy(connector_watch(), slot_watch(), missing=w)
