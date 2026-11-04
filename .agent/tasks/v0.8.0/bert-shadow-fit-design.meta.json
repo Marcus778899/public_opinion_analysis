@@ -1,0 +1,24 @@
+{
+  "task_id": "bert-shadow-fit-design",
+  "kind": "docs",
+  "owner": "architect",
+  "lane": "full",
+  "title": "依 4 個 BERT 模型的 evaluate 結果，判斷哪個能進 shadow、要怎麼調整，把下一步寫進開發規格 7.27；需要甲方決定的列「待決定」",
+  "issue": 192,
+  "branch": "docs/bert-shadow-fit-design",
+  "worktree": ".worktrees/bert-shadow-fit-design",
+  "pr": 193,
+  "qa": {
+    "result": "pass",
+    "sha": "85a045b91cf97cab6b1811d8ed7136d443f24e9f",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "85a045b91cf97cab6b1811d8ed7136d443f24e9f",
+    "by": "甲方"
+  },
+  "merged": true,
+  "qa_fails": 1,
+  "amend_sha": "59d2f9b8518050890c3c4ba7e7b1b49fed7cf0bb"
+}

@@ -164,3 +164,15 @@ def test_apply_pending_failure_does_not_record_version():
 
     inserts = [s for s in ch.executed if s.startswith("INSERT")]
     assert inserts == [f"INSERT INTO {MIGRATIONS_TABLE} (version, name) VALUES (1, 'm1')"]
+
+
+def test_client_timeout_s_is_applied_to_requests():
+    seen: dict = {}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.update(request.extensions["timeout"])
+        return httpx2.Response(200, text="")
+
+    settings = ClickHouseSettings(url="http://ch:8123", user="u", password=SecretStr("p"))
+    ClickHouseClient(settings, transport=httpx2.MockTransport(handler), timeout_s=4.0).execute("x")
+    assert seen["read"] == 4.0

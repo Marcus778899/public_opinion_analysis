@@ -244,6 +244,7 @@ def test_heat_settings_defaults_match_dev_spec(monkeypatch):
     s = HeatSettings()
 
     assert (s.input_topic, s.consumer_group) == ("cdc.public.comments", "heat")
+    assert s.output_topic == "alerts"
     assert (s.window_min, s.grace_min, s.max_delay_min, s.stale_after_min) == (10, 2, 30, 60)
     assert (s.z_threshold, s.min_count, s.cooldown_min, s.warmup_min) == (3.0, 30, 30, 60)
 
@@ -304,3 +305,16 @@ def test_telegram_sentiment_min_score_out_of_range_rejected(monkeypatch, value):
 
     with pytest.raises(ValidationError):
         TelegramSettings()
+
+
+def test_cdc_watchdog_stale_alert_default_is_1800_seconds(monkeypatch):
+    from radar.common.settings import CdcWatchdogSettings
+
+    monkeypatch.delenv("CDC_WATCHDOG_STALE_ALERT_S", raising=False)
+    assert CdcWatchdogSettings().stale_alert_s == 1800
+
+
+def test_scheduler_statement_timeout_default_is_30_seconds(monkeypatch):
+    monkeypatch.delenv("SCHEDULER_STATEMENT_TIMEOUT_SEC", raising=False)
+
+    assert SchedulerSettings().statement_timeout_sec == 30

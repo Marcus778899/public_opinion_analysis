@@ -1,7 +1,7 @@
 # 即時輿情雷達：開發流程規格
 
 > 狀態：v0.4，對應設計文件 [realtime-sentiment-radar-design.md](realtime-sentiment-radar-design.md)
-> 最後更新：2026-10-21（階段 8 骨架：D-020～D-024 同步進 7.27）
+> 最後更新：2026-10-28（7.27 進 shadow 門檻的統計量與順序 3 判定）
 
 設計文件回答「要做什麼、為什麼」；本文件回答「怎麼做、做到什麼程度算完成」。兩者衝突時，先修設計文件再改本文件。**文件必須與程式同步**：行為、格式、相依套件有變動時，同一個 PR 內一併更新。
 
@@ -36,7 +36,7 @@
 | 套件管理 | uv | `pyproject.toml` + `uv.lock` |
 | Lint / format | ruff | 已在 pre-commit |
 | 安全掃描 | bandit；CI 另跑 gitleaks、osv-scanner、semgrep | bandit 在 pre-commit；誤判寫進 `.gitleaksignore` 等忽略檔並附理由；`tasks/` 由 `.gitleaks.toml` 整體排除（D-018） |
-| 測試 | pytest、pytest-asyncio、pytest-cov、pytest-xdist（D-015）；整合測試用 compose 的 `test` 服務（7.26） | 覆蓋率：PR 改到的程式碼 ≥ 80%（`scripts/coverage_gate.py`），不量的路徑列在 `.coverage-exempt` |
+| 測試 | pytest、pytest-asyncio、pytest-cov、pytest-xdist（D-015）；整合測試用 compose 的 `test` 服務（7.26） | 覆蓋率：PR 改到的程式碼 ≥ 80%（CI 的 `ae ci coverage-gate`），不量的路徑列在 `.coverage-exempt` |
 | 設定 | pydantic-settings | 全部從環境變數讀，提供 `.env.example` |
 | Kafka client | confluent-kafka | |
 | Web API | FastAPI + uvicorn | 依賴以 `Annotated` 注入，測試以 `dependency_overrides` 換成 fake |
@@ -70,7 +70,7 @@
 ├── docs/labeling-guideline.md  # 情緒標註準則（LLM、Claude、人工共用）
 ├── docs/reports/            # 實驗與模型評估報告（model-evaluation.md 由人撰寫；s3-05-push-ratio.md），進 repo
 ├── .claude/skills/label-posts/ # Claude 手動標註的 skill
-├── tools/                   # 營運腳本（建 topic、ClickHouse migration、註冊 connector、seed）；scripts/ 是 agent 流程腳本
+├── tools/                   # 營運腳本（建 topic、ClickHouse migration、註冊 connector、seed）；agent 流程工具在 .claude/skills/agent-engineering/（submodule）
 ├── tests/
 │   ├── unit/
 │   ├── integration/
@@ -94,7 +94,7 @@
 | `make human-label` | 本機人工標註頁（http://127.0.0.1:8090） |
 | `make ch-migrate` | 套用 ClickHouse 尚未執行的 migration |
 | `make api` | 本機啟動管理 API（http://localhost:8000/docs） |
-| `make seed` | 透過 API 建立初始看板（冪等，需先 `make api`） |
+| `make seed` | 透過 API 建立初始看板（冪等；api 已在跑即可，本機 `make api` 或 docker 啟動的 api 都可以） |
 | `make up-app` | 基礎設施加上 api、scheduler、crawler ×3、ingest；`init` 自動建表、建 topic、ClickHouse migration、註冊 connector |
 | `make e2e-up` / `make e2e` | 啟動端到端環境（假 PTT、e2e 專用 volume）/ 執行端到端測試 |
 | `make e2e-down` | 停止端到端環境並刪除其資料 volume |
@@ -108,8 +108,8 @@
 ### 1.4 分支與提交
 
 - `main`：可部署版本；`develop`：開發整合
-- 階段 7 起改用 agent 團隊流程（`scripts/` 的 `task.py`、`pr.py`、`release.py`；規則見 CLAUDE.md 與 `docs/decisions.md` D-001～D-006）：
-  - 功能分支：`<類型>/<task_id>`，例如 `feat/dashboard-board-trend`，PR 合進 `develop`；跟上 develop 用 `pr.py sync`（merge，不 rebase）
+- 階段 7 起改用 agent 團隊流程（v0.8.1 起為 agent-engineering v3 的 `ae` 指令，工具在 `.claude/skills/agent-engineering/`；規則見 CLAUDE.md 與 `docs/decisions.md` D-001～D-006）：
+  - 功能分支：`<類型>/<task_id>`，例如 `feat/dashboard-board-trend`，PR 合進 `develop`；跟上 develop 用 `ae pr sync`（merge，不 rebase）
   - 版本以 semver 發版：階段 1～6 由 `v0.6.0` 涵蓋（`stage-3`～`stage-6` 不補打），之後每階段一版（階段 7 = `v0.7.0`），見 D-003
   - Commit：`<類型>(<task_id>): ...`
 - 階段 6 以前：功能分支 `feat/s<階段>-<簡述>`；Commit 如 `feat(crawler): ...`；`stage-<n>` tag 只打到 `stage-2`，之後見 D-003
@@ -123,7 +123,7 @@
 
 - `post_id` = `<board>.<PTT 文章檔名>`，例如 `Stock.M.1759730000.A.1B2`
 - 所有時間以 UTC 存放與傳遞（ISO 8601）；PTT 頁面時間是 `Asia/Taipei`，在 parser 轉換
-- 推文時間沒有年份：取文章年份，推文月份小於文章月份時年份 +1
+- 推文時間沒有年份：取文章年份，推文月份小於文章月份時年份 +1；補成隔年而晚於爬取時間超過 1 天的，視為轉錄／修改帶入的舊推文，退回文章年份（仍須不晚於爬取時間 + 1 天）；其餘晚於爬取時間超過 1 天的回 NULL 並記 log。PTT 截斷過長推文時會缺 HH:MM，也是 NULL
 
 ### 2.2 Kafka
 
@@ -131,7 +131,7 @@
 |---|---|
 | 序列化 | 自寫 topic 用 JSON（pydantic model 定義在 `common/schemas.py`）；CDC topic 用 Avro + Apicurio |
 | 版本 | 每則 JSON 訊息帶 `schema_version`，只做向後相容的變更（加欄位） |
-| Key | 依設計文件：`post_id`；`crawl.tasks` 的列表任務例外，用 `board`（見 7.1），且 partition 由送出端明確指定（見 7.10） |
+| Key | 依設計文件：`post_id`；`crawl.tasks` 的列表任務例外，用 `board`（見 7.1），且 partition 由送出端明確指定（見 7.10；爬蟲送的續抓任務不指定，見 7.28） |
 | Producer | `acks=all`、`enable.idempotence=true`、`compression.type=zstd`、`message.max.bytes=5MB`（`raw.html` 爆文可能超過預設 1MB） |
 | Consumer | 關閉 auto commit，處理完（含寫入下游）才 commit，at-least-once |
 | 錯誤處理 | 暫時性錯誤（網路、DB 斷線）：指數退避重試，不 commit；資料錯誤（解析、驗證失敗，或 handler 回報寫不進下游的訊息）：寫入 `dlq` 後 commit（7.13） |
@@ -182,12 +182,15 @@
   "board": "Stock",
   "url": "https://www.ptt.cc/bbs/Stock/index.html",
   "post_id": null,                // type=post 時必填
-  "reason": "schedule",           // schedule | manual | recrawl
+  "reason": "schedule",           // schedule | manual | recrawl | backfill
+  "since": null,                  // type=list 選填：往前翻到不晚於此時間的文章（7.28）
+  "backfill_depth": 0,            // reason=backfill：這條續抓鏈已讀的頁數
   "created_at": "..."
 }
 ```
 
 - `type=post` 必須帶屬於 `board` 的 `post_id`；`type=list` 不可帶
+- `since`、`backfill_depth` 只用於 `type=list`（post 任務必須是 null、0）；`reason=backfill` 只用於 `type=list`，由爬蟲送出（7.28）
 - Kafka key：list 任務用 `board`、post 任務用 `post_id`（`CrawlTask.kafka_key()`，見 7.1）
 - list 任務的 partition 依啟用中看板的名稱排序輪流指定，不靠 key hash（`resolve_list_partition`，見 7.10）
 
@@ -367,6 +370,7 @@
 | 階段 7 規劃：Dashboard 呈現方式（7.25） | ✅ 實作完成（2026-10-21）；呈現方式已定案：全用 Grafana（D-014）；`dashboard-grafana-infra`、`dashboard-views`、`dashboard-panels`、`dashboard-integration` 完成（畫面截圖由階段收尾的 uat 做） | — |
 | 階段 8 規劃：BERT 與 shadow 比較（7.27） | ✅ 文件完成（2026-10-21，`bert-design`）；D-020～D-024 定案；骨架 `bert-skeleton` | — |
 | 整合測試改用 compose `test` 服務、CI 加速（7.26，#78） | ✅ `test-infra-compose`、`test-infra-fast-waits` 完成（2026-10-20；本機 150 個全過、連跑兩次、`-n 0` 也過；CI Integration Test 1 分 56 秒） | — |
+| 停機後補抓深度、管線停擺偵測、Kafka coordinator 故障（7.28，#180） | ✅ 完成（2026-10-29）；`crawl-backfill-depth`（#225）、`pipeline-stall-alert`（#224）、`crawl-backfill-retry`（#230）已合併，Kafka 升 4.1.2 已定案（D-034），依 PR #229 完成。10-08～10-29 的停機缺口依 D-032 不補，記在 7.29 | — |
 | S5-06～S5-07 Telegram bot（7.21） | ✅ 完成；2026-10-16 在開發環境以真的 Telegram 實測指令與推送，修正 compose 漏掉 `app-env`。階段 5 驗收第 1 項（人工暴增約 10 秒收到通知）通過 | — |
 
 階段 1 拆成 5 個 PR；全部完成後依下方「驗收」逐項驗證，通過才把 `develop` 合進 `main` 並打 `stage-1` tag；階段 2 相同。階段 3 起的發版方式見 D-003。
@@ -377,7 +381,7 @@
 |---|---|---|
 | 1 | #59 文章警示門檻 | 不修的話警示多到無法使用，也會干擾階段 6 的實機測試 |
 | 2 | #52 晚到的舊快照刪掉較新的推文 | 資料正確性 |
-| 3 | ✅ 調查 Stock、Boy-Girl、Tech_Job 每天文章數偏少（2026-10-17 近 24 小時各 34、3、2 篇） | **結論：PTT 上本來就少，沒有漏抓**（2026-10-17）。三個看板列表前 3 頁共 139 篇，PG 全部都有；PTT 上 Stock 約 30 小時 42 篇（每天約 34）、Boy-Girl 15 天 51 篇（約 3.4）、Tech_Job 21 天 46 篇（約 2.2）。10/13～10/14 數字更低是開發環境停機（10/13 02Z～10/15 06Z）。看板保留；Stock 標註照「累積到 400 篇」進行 |
+| 3 | ✅ 調查 Stock、Boy-Girl、Tech_Job 每天文章數偏少（2026-10-17 近 24 小時各 34、3、2 篇） | **結論：PTT 上本來就少，沒有漏抓**（2026-10-17）。三個看板列表前 3 頁共 139 篇，PG 全部都有；PTT 上 Stock 約 30 小時 42 篇（每天約 34）、Boy-Girl 15 天 51 篇（約 3.4）、Tech_Job 21 天 46 篇（約 2.2）。10/13～10/14 數字更低是開發環境停機（10/13 02Z～10/15 06Z；所有停機缺口見 7.29）。看板保留；Stock 標註照「累積到 400 篇」進行 |
 | 4 | 階段 6：Telegram 互動與情緒呈現 | 先合併文件，再依骨架、實作兩輪進行 |
 | 5 | 階段 7：Dashboard | |
 | 6 | 階段 8：BERT 與 shadow 比較 | |
@@ -716,7 +720,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 - **ClickHouse schema**：`infra/clickhouse/migrations/NNNN_<name>.sql`，`tools/migrate_clickhouse.py` 透過 HTTP 介面依序執行，已執行的版本記在 ClickHouse 的 `schema_migrations` 表
 - **Image 內容**：`init` 在 container 內執行上述腳本，`Dockerfile` 必須 COPY `infra/clickhouse/migrations/` 與 `infra/debezium/radar-cdc.json`；migration 資料夾不存在或沒有檔案時直接報錯，不可當成「沒有待執行的 migration」默默略過
 - **等待 connector 啟動**：PUT 建立後狀態是非同步產生的，剛建立時查 `/status` 會先回 404，視為尚未就緒繼續輪詢，逾時才報錯
-- **執行順序**（`init` 服務）：Alembic → topic → ClickHouse migration → 註冊 connector。ClickHouse 先建好才開始產生 CDC 事件；Kafka engine 表從最早的 offset 讀，順序顛倒也不會掉資料
+- **執行順序**（預設 profile 先由 `secret-check` 擋密碼，通過後 postgres、clickhouse、grafana 才啟動；以下為 `init` 服務）：密碼檢查（`tools/check_secrets.py`，用 `&&` 串接，失敗就不做後面）→ Alembic → topic → ClickHouse migration → 註冊 connector。ClickHouse 先建好才開始產生 CDC 事件；Kafka engine 表從最早的 offset 讀，順序顛倒也不會掉資料
 - Apicurio、Kafka Connect、ClickHouse 放在預設 profile（`make up` 就啟動），階段 2 起它們是資料流的一部分
 
 ### 7.10 列表任務的 partition 分配（fix，2026-10-07）
@@ -936,14 +940,28 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
   - `record`：依時間範圍把 topic 的原始訊息（key、value 的 bytes，base64）存成 JSONL（`data/replay/`，不進 repo）
   - `replay`：把檔案依原本的間隔（可加速）重送到 `replay.cdc.comments`；Avro bytes 原封不動，schema ID 在同一個 Apicurio 仍有效
   - `surge`：人工製造暴增：對指定文章在 N 分鐘內送 M 則 `op=c` 推文事件到 `replay.cdc.comments`，用 Apicurio 上 `cdc.public.comments-value` 的最新 schema 序列化；`commented_at` 與 `__source_ts_ms` 都分散在到當下為止的 N 分鐘
-  - 回放與驗收時另開一個 heat：`HEAT_INPUT_TOPIC=replay.cdc.comments`、consumer group `heat-replay`，state 與正式的分開
-  - `replay.cdc.comments` 列在 `topics.yaml`，保留 24 小時
+  - `surge` 的 `--count` 預設是 `HEAT_POST_MIN_COUNT`（文章門檻，否則觸發不了文章警示）；注入完會在下一分鐘補一筆事件，讓最後一分鐘結算（回放 topic 沒有後續事件）
+  - **為什麼 surge 前一定要暖機**（F-1，#261）：看板基準累積滿 `HEAT_WARMUP_MIN`（60）個結算分鐘才會評估（7.20「觸發」）；新的 heat 狀態是空的，只跑 `surge` 一定是 0 則警示，不是壞掉。暖機資料要是同一個看板（`surge --post-id` 的看板）的 ≥ 75 分鐘真實推文：每則的推文時間（`commented_at`）要比進 PG 時間（`__source_ts_ms`）早不超過 `HEAT_MAX_DELAY_MIN`（30），超過的不計入，實測 90 分鐘錄製只有約 4 成可用，仍累積到 60 個以上結算分鐘。錄製範圍不能是系統停擺的時段
+  - **事件時間只能往前**（F-1 的根本原因，2026-10-30 實跑重現）：watermark 是該看板看過最大的觀測分鐘，比它早超過寬限（2 分鐘）的事件丟棄；新的 consumer group 從 topic 開頭按到達順序讀。`replay.cdc.comments` 若殘留上一輪的 `surge`（時間是當時的「現在」），這一輪的暖機資料（時間在過去）就全被當成遲到而丟掉，基準累積不到 60 個分鐘，警示 0 則、heat 也不報錯。UAT 第二種做法（record、replay 後再 surge）失敗就是這個原因：實測殘留時只累積 23 個樣本，topic 清乾淨後同樣步驟收到 2 則警示
+  - **完整步驟**（在專案根目錄；`UV` 代表 `uv run --env-file .env`）：
+    1. 清狀態：刪掉 `replay.cdc.comments`、`replay.alerts`（Kafka UI 或 Admin API）後執行 `make topics` 重建；刪掉上一輪的 `HEAT_STATE_DIR` 目錄。`replay`（暖機）開始前若發現 `replay.cdc.comments` 有舊訊息會印一行警告；`surge` 不檢查（暖機後 topic 本來就有資料）
+    2. 錄製：`UV python -m radar.streaming.replay record --since 2026-10-30T02:30:00+00:00 --until 2026-10-30T04:00:00+00:00 --out data/replay/x.jsonl`（時間帶時區；只讀正式 topic）
+    3. 另開終端機啟動回放用 heat（前景執行）：`HEAT_INPUT_TOPIC=replay.cdc.comments HEAT_OUTPUT_TOPIC=replay.alerts HEAT_CONSUMER_GROUP=heat-replay-$(date +%s) HEAT_STATE_DIR=/tmp/heat-replay UV python -m radar.streaming.heat`（Kafka 三個對外 port 只綁 `127.0.0.1`（D-039），主機上的程式與 `tools/` 一律用 `localhost:9092,9094,9096` 連；`KAFKA_EXTERNAL_HOST` 是 advertised listener，綁本機後只有 `localhost` 有意義。本機執行 `KAFKA_BOOTSTRAP_SERVERS` 用 `localhost:9092,…`，`SCHEMA_REGISTRY_URL` 用 `http://localhost:8080/apis/ccompat/v7`；compose 的 heat 覆寫檔由 #259 處理）。log 出現 `heat consuming replay.cdc.comments as heat-replay-…` 才算起來
+    4. 暖機：`UV python -m radar.streaming.replay replay --file data/replay/x.jsonl --speed 1000`，等 heat 追上（consumer group 的 lag 剩 0～3，約 30 秒）
+    5. 暴增：`UV python -m radar.streaming.replay surge --post-id <暖機資料裡同一看板的 post_id>`（預設 80 則、3 分鐘，並補一筆收尾事件）
+    6. 看結果：約 1 分鐘內，`replay.alerts` 預期至少 1 則警示（文章或看板）：實測 3 輪收到 1～2 則，不一定有文章警示。文章警示為 `unit_type=post`、`value=80`（z-score 約 5～8）；看板警示是暖機與暴增合起來超過看板門檻 30 時才有。看法：Kafka UI 的 `replay.alerts` Messages 頁，或 `UV python -c` 以 `isolation.level=read_committed` 的 consumer 讀（heat 是 exactly-once，沒提交的不會出現）。bot 不訂閱，不會推到 Telegram
+    7. 停掉回放 heat：在它的終端機按 Ctrl-C（背景執行就 `kill <PID>`）；不要動 compose 的正式 `heat`。自動化執行時改用會自己結束的方式（例如 Python `subprocess.run(timeout=…)`），避免留下殘留程序
+  - **沒看到警示時的查法**：①heat log 有沒有錯誤；②`replay.cdc.comments` 在步驟 1 前是否乾淨（殘留是最常見原因）；③暖機資料是否 ≥ 75 分鐘且包含 surge 的看板；④surge 的 post_id 看板是否與暖機相同；⑤同一 post_id 30 分鐘內不重複警示（`HEAT_COOLDOWN_MIN`），重做要清 state 並換 consumer group
+  - **做完要清**：回放用 heat 的 `HEAT_STATE_DIR`；consumer group `heat-replay-*`；Quix 為該 group 建的 changelog、repartition 內部 topic（名稱含 group 名稱）；`replay.cdc.comments`、`replay.alerts` 的殘留訊息（24 小時後也會自己清掉，但下一輪開始前要先清）
+  - **工具的錯誤處理**（比照 `import_model`）：每個參數都有 `--help` 說明；缺 Kafka 位址、檔案不存在或格式錯、`--since`／`--until` 格式或時區錯、`--since` 晚於 `--until`、`--speed`／`--count`／`--minutes` 非正數、post_id 格式錯，都只印一行說明並以非 0 結束
+  - `replay.cdc.comments`、`replay.alerts` 列在 `topics.yaml`，保留 24 小時
 
 ### 7.21 Telegram bot 的實作選擇（S5-06～S5-07）
 
 - **模組**：`bot/main.py`，`python -m radar.bot.main`；兩個 thread：Telegram long polling 處理指令；`BatchConsumer`（group `bot`）消費 `alerts` 推送
 - **Telegram API**：用 `httpx2` 直接呼叫 Bot API（`getUpdates`、`sendMessage`），不加 SDK（同 7.11 的 LLM 呼叫）；`TELEGRAM_BOT_TOKEN`
   - 429 依 `retry_after` 等待後重試；5xx、連線錯誤為暫時性錯誤，退避重試；400 記 WARNING 略過；403（使用者封鎖 bot）刪掉該 chat 的訂閱；推送、指令回覆、按鈕回應三條路徑都一樣處理，處理完該 update 照常確認（不會讓 bot 結束或重啟後重送）
+  - 指令迴圈（`poll_commands`）的錯誤處理：Telegram 網路錯誤（`TransientError`）依 `retry_after` 或退避等待後重試，退避上限 `POLL_BACKOFF_MAX_S`（30 秒，模組常數）；PG 斷線（`OperationalError`、`InterfaceError`）也算暫時性錯誤，同樣退避重試，且 offset 不前進，PG 恢復後重新處理該筆；單筆 update 出現其他意外例外時記 WARNING 後跳過，offset 照常前進，不卡住迴圈；定期清除「不再通知」遇到 PG 斷線只記 WARNING，下一輪再試
 - **允許的 chat**（fail closed，D-010）：`TELEGRAM_ALLOWED_CHAT_IDS`（逗號分隔）；其他 chat 的指令與按鈕不回應
   - 清單沒設或空，且 `TELEGRAM_ALLOW_ALL` 不是 true：啟動失敗（`SystemExit`，訊息指出兩個變數），不連任何外部服務
   - `TELEGRAM_ALLOW_ALL=true` 且清單空：回應所有 chat，啟動 log 警告
@@ -1081,6 +1099,7 @@ PostgreSQL 的 `INSERT ... ON CONFLICT DO UPDATE` 不能在同一個語句裡更
 | 資產 | 威脅 | 對策 |
 |---|---|---|
 | Grafana 管理權限 | 預設帳密 admin/admin 被登入、改 datasource | 密碼必填、只綁本機、關閉匿名與註冊；上雲前（階段 9）重新評估對外存取 |
+| 四個密碼（`POSTGRES_PASSWORD`、`CLICKHOUSE_PASSWORD`、`CLICKHOUSE_GRAFANA_PASSWORD`、`GRAFANA_ADMIN_PASSWORD`）（M-4，#119） | `.env` 沿用範例值 `change-me`，compose 的 `:?` 只擋空值 | `.env.example` 範例值為 `CHANGE_ME`（`ae check-env` 列為必填）；`init` 與預設 profile 的一次性服務 `secret-check`（純 python image 掛載腳本，不需 build radar-app）都先跑 `tools/check_secrets.py`；postgres、clickhouse、grafana 以 `service_completed_successfully` 依賴 `secret-check`，所以只跑 `make up` 也擋得住。空值或不分大小寫的 change-me／changeme／change_me 就非 0 結束，只印變數名稱。postgres 的 port 只綁 127.0.0.1（#254、D-035） |
 | ClickHouse 資料與設定 | datasource 帳號能執行任意 SQL（DROP、讀 named collection） | 唯讀帳號、只能 SELECT `radar.*`、無 named collection 權限 |
 | ClickHouse 資源 | 拉長時間範圍讓 `FINAL` 查詢吃滿記憶體 | 唯讀帳號的 profile 設執行時間與記憶體上限 |
 | 看 dashboard 的人 | PTT 標題（外部文字）含 HTML、連結被換成 `javascript:` | 不用會渲染 HTML 的 Text 面板顯示資料；連結限 `https://www.ptt.cc/` 開頭 |
@@ -1242,7 +1261,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 |---|---|---|---|
 | 1. 匯出訓練資料 | 甲方 | `python -m radar.ml.training.export`（與 baseline 相同，S3-06） | `data/datasets/<名稱>.jsonl` 與同名的 meta 檔：每列 `post_id`、`board`、`text`（已用 `post_text` 截斷到 `max_chars`）、`polarity`；不含作者、推文、人工測試集 |
 | 2. fine-tune | 甲方在 Colab 執行 `notebooks/bert_finetune.ipynb`，第一格參數 `BASE` 選預訓練模型（`macbert`＝`hfl/chinese-macbert-base`、`ckip`＝`ckiplab/bert-base-chinese`，D-021），兩個各執行一次 | 工作階段上傳步驟 1 的兩個檔（D-024） | 每次執行兩個模型包：fp32 `<model_version>.zip` 與 int8 動態量化 `<model_version>-int8.zip`（格式見下表），兩次共四個；notebook 最後一格印出各檔的 SHA-256 |
-| 3. 匯入 | 甲方 `python -m radar.ml.training.import_model --zip <路徑>` | 模型包 | `models/<model_version>/`（不進 git，`.gitignore` 已含 `/models/`、`*.onnx`） |
+| 3. 匯入 | 甲方 `python -m radar.ml.training.import_model --zip <路徑> [--sha256 <整包 SHA-256>]`；一律印出整包 SHA-256，給了 `--sha256` 就比對（大小寫不分），不符拒絕；檔案不存在、不是 zip、版本已存在、驗證失敗都印一行說明並以非 0 結束（無 traceback） | 模型包 | `models/<model_version>/`（不進 git，`.gitignore` 已含 `/models/`、`*.onnx`） |
 | 4. 測試集評估 | 甲方 `python -m radar.ml.training.evaluate --model models/<model_version>`，四個模型包各跑一次 | 人工測試集（只在本機） | `models/<model_version>/evaluation.md`（與 baseline 同格式），另加 CPU 推論耗時（每篇 p50／p95、每批 `INFERENCE_BATCH_SIZE` 篇的耗時，記下 `INFERENCE_THREADS`）與程序記憶體峰值；依「自行決定」選一個進 shadow |
 | 5. shadow 並行 | 甲方 `make up-shadow`（`.env` 設 `INFERENCE_SHADOW_MODEL_VERSION`） | `cdc.public.posts` | `predictions.shadow` → ClickHouse `predictions_shadow` |
 | 6. 比較 | 甲方 `python -m radar.ml.training.compare --a <現行版本> --b <shadow 版本> --since <shadow 開始時間>` | ClickHouse | `models/<b>/comparison.md`、`data/review/disagreements-<a>-vs-<b>.csv` |
@@ -1284,6 +1303,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 
 - 為什麼分開 topic 與表：`post_sentiment_latest` 與 `bot/stats.py` 的 `POST_STATS_QUERY`、`SENTIMENT_QUERY` 都取「每篇最新一筆」而不分版本，shadow 寫進 `predictions` 會直接改變 Telegram 與 Dashboard 顯示的情緒。分開後呈現層不必改，也不必新增「現行版本」設定
 - `INFERENCE_ROLE` 是列舉（`common/settings.py` 的 `InferenceRole`），group、topic、表名都由 `ml/inference/roles.py` 的固定對照表得出，不接受任意字串；`main()` 依角色查表取 topic 與表，shadow 寫 `predictions.shadow`、啟動時從 `predictions_shadow` 載入 hash 快取（`load_cache` 的 `table` 參數只接受對照表內的表名）；推論一律走 `Classifier.predict_proba`，最高分類別由 `classifier.top_class` 決定
+- shadow 啟動時先檢查：`INFERENCE_MODEL_DIR` 未設或沒有 `model_card.json`（`INFERENCE_SHADOW_MODEL_VERSION` 沒設時 compose 組成 `/app/models/`）就 log 缺哪個變數或路徑、以結束碼 78 離開，不載入模型、不連 Kafka；`inference-shadow` 設 `restart: "no"`，`up --wait` 會回報容器已結束，不再無限重啟（#215）。代價：啟動時 CH／Kafka 還沒好、致命錯誤、crash、daemon 重開之後都不會自動恢復；跑 shadow 期間要用 `docker compose ps` 確認，停了就 `make up-shadow`；上雲跑 3 天前重新評估（D-031）。primary 不做這個檢查
 - 切換預設模型：`INFERENCE_MODEL_VERSION` 改成新版本、重啟 `inference`、停掉 shadow。新版本在 `predictions` 沒有 hash，只推論新文章，舊文章保留舊版本的結果（與 7.19「換模型版本」相同）；view 的 `model_version` 欄位可分辨
 
 **比較**（`ml/training/compare.py`，一次性 CLI；查詢全部參數化）
@@ -1308,6 +1328,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 
 - 骨架（`bert-skeleton`）的驗收：`uv lock` 後在 arm64 主機以 `docker compose -f infra/docker-compose.yaml --env-file .env --profile app build init` 建 image（`radar-app` 只由 `init` 建置），再以 `--profile app run --rm --no-deps inference python -c "import onnxruntime, tokenizers"` 檢查（worktree 沒有 `.env`，`run` 用主目錄的 compose 檔，image 相同），容器內 `import onnxruntime, tokenizers` 成功；`tokenizers` 只有 `cp310-abi3` wheel、沒有 cp312 專屬的（調查 3），要實際裝過才算數。x86_64 由 CI 驗證
 - 測試用小模型：共用 helper `tests/helpers/onnx_model.py`（`bert-skeleton` 完整實作，不是骨架；之後各單只呼叫、不修改），提供以小字典建立的 `tokenizers` tokenizer、以 `onnx.helper` 產生的 fp32 與 int8 小 ONNX 模型（輸入輸出同「模型包格式」），以及打包成模型包 zip（含正確的 `model_card.files` 雜湊）；檔案寫在 pytest 的 `tmp_path`，`*.onnx` 不進 git。helper 自己的單元測試 `tests/unit/helpers/test_onnx_model_helper.py`。驗收測試的共用 fixture（`tests/unit/acceptance/conftest.py`、`tests/integration/acceptance/conftest.py`）：`tiny_model_dir`、`tiny_int8_model_dir`（import 後的資料夾）、`make_model_package`（產生模型包 zip）；單元測試的 `Classifier` 替身為 `tests/unit/ml/fakes.py` 的 `FakeClassifier`
+- 介面簽名：`import_model(zip_path, models_dir, *, sha256=None)`（`sha256` 為 keyword-only，預設 None 不比對）。改這類跨單的函式簽名時，同步修改 `tests/unit/ml/test_stage8_interfaces.py`，並把該檔列入該單的負責檔案
 - 單元測試（不需容器）：用上面的 helper；notebook 靜態檢查（沒有輸出、類別順序、card 欄位）；`import_model` 的雜湊不符、多餘檔名、路徑穿越、超過大小上限、目標已存在
 - 整合測試（compose `test` 服務）：shadow 推論只寫 `predictions.shadow`、`predictions_shadow` 有資料、`predictions` 沒有；重啟從 `predictions_shadow` 載入快取；`compare` 的查詢對預先寫入的資料算出預期值
 - notebook 本身不在 CI 執行（需要 GPU 與下載）；由甲方第一次執行時確認，ONNX 與 PyTorch 的 logits 差異在 notebook 內檢查
@@ -1317,7 +1338,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 
 | 資產 | 威脅 | 對策 |
 |---|---|---|
-| 推論主機（載入模型的程序） | 模型包在下載或傳遞途中被換掉；pickle 格式載入即執行任意程式 | 只接受 ONNX、JSON；`import_model` 比對 `model_card.files` 的 SHA-256，甲方對照 notebook 最後一格印出的值；`model_card` 用 pydantic 驗證，`labels` 必須恰好是三個 `Polarity` |
+| 推論主機（載入模型的程序） | 模型包在下載或傳遞途中被換掉；pickle 格式載入即執行任意程式 | 只接受 ONNX、JSON；`import_model` 比對 `model_card.files` 的 SHA-256，並可用 `--sha256` 比對整包 zip（甲方對照 notebook 最後一格印出的整包值）；`kind` 必須是 `onnx`，加密成員與 STORED／DEFLATED 以外的壓縮法拒絕；`model_card` 用 pydantic 驗證，`labels` 必須恰好是三個 `Polarity` |
 | 本機檔案系統 | 模型包的 zip slip、zip bomb；`model_version` 帶路徑字元 | 只解出白名單的三個檔名，不依 zip 內路徑；解壓總大小上限 2 GB；`model_version` 限 `^[a-z0-9][a-z0-9-]{0,63}$`；目標資料夾已存在就拒絕 |
 | 預訓練模型的授權 | `ckiplab/bert-base-chinese` 為 GPL-3.0，散布模型或相關程式要負擔 GPL 義務；GPL 是否及於權重查不到判定（調查 1） | 甲方接受，只在自己的機器與 VM 使用、不對外散布（D-021）；`models/` 不進 git、模型包不對外提供；日後要對外提供須重新評估 |
 | 預訓練模型的來源 | Hugging Face 上同名模型被改、含自訂程式；權重是 pickle 格式，載入即執行程式 | notebook 釘 `revision`（commit hash，含 `ckip` 用的 Google tokenizer repo）、`trust_remote_code=False`；`base_model` 連同 revision 記進 card，tokenizer 的來源與 revision 一併記入。兩個模型的 main 都只有 `pytorch_model.bin`（調查「模型 revision」節），依 D-025：`ckip` 釘 safetensors 轉換 PR 的 commit、只載 safetensors（`use_safetensors=True`）；`macbert` 無 safetensors，載 `.bin`，第一格檢查 `torch>=2.6`（`weights_only` 預設）不符就停止；pickle 只在用完即丟的 Colab VM 解開 |
@@ -1378,7 +1399,7 @@ agent 的 Bash 在 sandbox 內，testcontainers 連不到 docker socket，只能
 | `model_version` 帶預訓練模型簡稱 | `bert-<BASE>-<時間>`，四個模型包一看就分得出來；仍符合 `model_version` 的格式限制 |
 | 模型包 tokenizer 的來源、產生與驗證 | `macbert` 用自己 repo 的 tokenizer；`ckip` 用 `google-bert/bert-base-chinese` 的 tokenizer（ckiplab README 指定；詞表相同，但斷詞的行為設定如 `do_lower_case` 不在 `vocab.txt`，只載 `vocab.txt` 會吃到預設值）；都以 `BertTokenizerFast` 載入後 `save_pretrained`，打包前以 `tokenizers.Tokenizer.from_file` 重新編碼驗證集抽樣，ids 須與訓練時完全一致，logits 比對共用這組 ids（見「匯出」） |
 | 角色對照表的位置 | `ml/inference/roles.py`；`compare` 讀表名也用它，不另寫字串 |
-| 進 shadow 的門檻 | 步驟 4 每批 `INFERENCE_BATCH_SIZE` 篇的耗時 < 30 秒（新文章每分鐘不到 10 篇，留足餘裕），且記憶體峰值 ≤ 1.2 GB（D-023 的 1.5g 扣掉容器與快取的餘裕）；不到就照「評估結果與進 shadow 的調整」的順序 |
+| 進 shadow 的門檻 | 步驟 4 每批 `INFERENCE_BATCH_SIZE` 篇的耗時**p50** < 30 秒（吞吐量；新文章每分鐘不到 10 篇，留足餘裕）且**最大** ≤ 60 秒（單批不逼近 `max.poll.interval.ms` 預設 300 秒，留 5 倍），記憶體峰值 ≤ 1.2 GB（D-023 的 1.5g 扣掉容器與快取的餘裕）；統計量的理由見「評估結果與進 shadow 的調整」的順序 3 判定；不到就照該節的順序 |
 | Colab 12 小時上限 | 預估時間超過 10 小時就停；同一工作階段內從 epoch checkpoint 續跑 |
 | notebook 訓練設定 | 3 個 epoch、learning rate 2e-5、有效 batch 16（8 × 累積 2）、class weight balanced（與 baseline 同義）、fp16、warmup 6%、weight decay 0.01；驗證集為分層 10%、seed 42；依驗證集 macro-F1 選最佳 epoch |
 | Colab 套件版本 | `torch==2.7.1`、配對的 `torchvision==0.22.1`、`torchaudio==2.7.1`（Colab 預裝的版本與降級後的 torch 不配對，否則 `transformers` 載入失敗）、`transformers==4.53.3`、`optimum[onnxruntime]==1.27.0`（第一格釘版本）；第一格另移除 Colab 預裝的 diffusers（與釘版套件帶進來的 `huggingface_hub` 不相容，`optimum` 匯出時會 import）；**未在 sandbox 驗證**，甲方第一次執行時確認，不相容就調整第一格 |
@@ -1447,21 +1468,62 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 | 順序 | 做法 | 誰 | ckip fp32 每批耗時 | RSS | macro-F1 | 過了就 |
 |---|---|---|---|---|---|---|
 | 1 | `bert-evaluate-report-fix`：修報告標題與 0 篇列（見下），加「載入模型後 RSS」 | worker | — | — | — | 2 |
-| 2 | `bert-onnx-length-batching`：`OnnxClassifier.predict_proba` 依 token 數排序，切成「篇數 × 該小批最長 token 數 ≤ `INFERENCE_MAX_BATCH_TOKENS`」的小批（預設 4096 = 8 × 512），結果還原原順序 | worker | 約 0.37～0.42 倍 → 26～32 s | 中間張量約降到 1/12：fp32 估 1.0～1.4 GB，int8 估 0.6～0.9 GB | 不變（有 attention mask，只差浮點誤差） | 3 |
-| 3 | 甲方重跑步驟 4（ckip fp32），看三項：每批 < 30 s、macro-F1 與 0.612 差 ≤ 0.005、RSS ≤ 1.2 GB | 甲方 | — | — | — | 全過 → 6；任一項不過 → 4 |
+| 2 | `bert-onnx-length-batching`：`OnnxClassifier.predict_proba` 依 token 數排序，切成「篇數 × 該小批最長 token 數 ≤ `INFERENCE_MAX_BATCH_TOKENS`」的小批（預設 2048 = 4 × 512；原訂 4096 在容器內 RSS 超過門檻，見順序 3 判定的容器實測），結果還原原順序 | worker | 約 0.37～0.42 倍 → 26～32 s | 中間張量約降到 1/12：fp32 估 1.0～1.4 GB，int8 估 0.6～0.9 GB | 不變（有 attention mask，只差浮點誤差） | 3 |
+| 3 | 甲方重跑步驟 4（ckip fp32），看三項：每批耗時（p50 < 30 s 且最大 ≤ 60 s，見「自行決定」）、macro-F1 與 0.612 差 ≤ 0.005、RSS ≤ 1.2 GB | 甲方 | ✅ 2026-10-28：p50 25.8／最大 30.5 s | ✅ 峰值 932 MB（載入後 689 MB） | ✅ 0.612（差 0） | 全過 → 6；任一項不過 → 4。**結果：全過，走 6**（判定見下） |
 | 4 | 推論端截到 `max_len` 256、不重訓：開單 `bert-derive-max-len`（見下表）產生衍生版本 `bert-ckip-202610280849-len256`，甲方再跑步驟 4 | worker → 甲方 | 約 0.29 倍 → 約 21 s | 中間張量再減約一半 | 需實測（約 24% 的文章超過 256 token 會被截）；比 2 低 ≤ 0.02 才用 | 6 |
 | 5 | 4 掉分超過 0.02：甲方以 `max_len` 256 重跑 Colab（`BASE = "ckip"`，訓練約 5 分鐘）、匯入、跑步驟 4；4、5 後 evaluate 的 RSS 仍超過 1.2 GB（進 shadow 的門檻）就不進 shadow，改問甲方是否放寬 D-023（含 1.2～1.5 GB 之間：餘裕不足，同樣不進） | 甲方 | 同 4 | 同 4 | 需實測 | 6 |
 | 6 | `make up-shadow`；補資料期間看 `docker stats radar_inference_shadow` 的峰值與 `docker inspect -f '{{.State.OOMKilled}}' radar_inference_shadow`；補完所需時間 ≈ 保留期間內的文章數 × 每篇耗時（文章數需實測） | 甲方 | — | — | — | 回到派工順序 9 |
 
 - int8 照「自行決定」不用：兩個預訓練模型的 int8 掉分都超過 0.02；順序 2 之後 fp32 的耗時差距縮小，int8 的價值也變小
-- 門檻 30 s 不放寬：新文章每分鐘不到 10 篇，追上之後每批只有幾篇，延遲由每篇耗時決定；30 s 是補資料期間每批不卡住 consumer（`max.poll.interval.ms` 預設 300 s）的餘裕
+- 門檻 30 s 不放寬：新文章每分鐘不到 10 篇，追上之後每批只有幾篇，延遲由每篇耗時決定；30 s 管補資料期間的吞吐量，單批不卡住 consumer（`max.poll.interval.ms` 預設 300 s）另由「最大 ≤ 60 s」管
+
+**順序 3 判定**（2026-10-28，`bert-shadow-gate-ruling`；`models/bert-ckip-202610280849/evaluation.md`，#195、#197 合併後重跑，`INFERENCE_THREADS=2`、每批 100 篇）
+
+| 項目 | 結果 | 門檻 | 判定 |
+|---|---|---|---|
+| macro-F1 | 0.612（與順序 2 前相同） | 與 0.612 差 ≤ 0.005 | 過 |
+| 每批耗時 p50 | 25.818 s（每篇 p50 258 ms、p95 305 ms） | < 30 s | 過 |
+| 每批耗時最大 | 30.456 s | ≤ 60 s | 過 |
+| RSS 峰值／載入後 | 932／689 MB | ≤ 1.2 GB | 過（順序 2 前 5069 MB） |
+
+門檻用 p50 管吞吐量、最大另設 60 s 的理由：
+
+- 30 s 的依據是吞吐量（100 篇 30 s ≈ 每分鐘 200 篇，對新文章每分鐘不到 10 篇），補資料所需時間 ≈ 篇數 × 每篇平均耗時，由典型批次決定，不由單一最慢批決定
+- 單批最慢的風險是超過 `max.poll.interval.ms`（300 s）被踢出 group（#11），這要用最大值看，但 30 s 對 300 s 是 10 倍，拿它限最大值只是多擋；改設最大 ≤ 60 s，對 300 s 仍留 5 倍，可吸收 macOS 主機與 Linux 容器的量法差異
+- 評估只計時 3 批（人工測試集 300 篇），最大值是單一樣本，受當批長文比例影響；這次最大比 p50 多 18%，符合長度分小批後「長文多的批較慢」的預期，不是異常
+- 這是在看到結果前的設計沒寫清楚、看到結果後才補的定義，所以順序 6 的觀察以容器實測為準（下表），不以這次 evaluate 的數字放行到切換
+
+**容器內實測（shadow 容器 2 CPU、1.5g、THREADS=2，512 版，300 篇人工測試集，證據 `reports/shadow-memory-measure.json`）**
+
+| `INFERENCE_MAX_BATCH_TOKENS` | RSS 峰值 | 每批 p50／最大 | macro-F1 | 對 1.2 GB 門檻 |
+|---|---|---|---|---|
+| 4096 | 1268 MB | 27.8／34.5 s | 0.612 | 不過 |
+| 2048 | 997 MB | 23.8／30.5 s | 0.612 | 過（預設） |
+| 1024 | 951 MB | 21.5／28.7 s | 0.612 | 過 |
+
+**下一步：順序 6（啟動 shadow）**，不開 `bert-derive-max-len`（順序 4）。
+
+甲方步驟：
+
+1. `.env` 設 `INFERENCE_SHADOW_MODEL_VERSION=bert-ckip-202610280849`；`.env` 不設 `INFERENCE_MAX_BATCH_TOKENS`（用預設 2048，與 evaluate 相同）
+2. 確認 `inference`（primary）照常運作後 `make up-shadow`，記下啟動時間（UTC，給 `compare --since`）
+3. 補資料期間依下表觀察，追上後每天看一次；任一項「不過就」成立時停掉 shadow（`docker compose -f infra/docker-compose.yaml --env-file .env --profile shadow stop inference-shadow`），把觀察結果交回、回到順序 4
+4. 運作至少 3 天且兩版重疊 ≥ 500 篇後回到派工順序 9 跑 `compare`
+
+| 觀察項目 | 怎麼看 | 期望 | 不過就 |
+|---|---|---|---|
+| 容器記憶體峰值 | `docker compose -f infra/docker-compose.yaml --env-file .env exec inference-shadow cat /sys/fs/cgroup/memory.peak`（cgroup v2，容器重啟會歸零；沒有這個檔就在補資料期間反覆看 `docker stats --no-stream radar_inference_shadow` 取最大值） | ≤ 1.2 GB | 1.2～1.5 GB 記下來並回報（餘裕不足，見順序 5）；OOM 見下一列 |
+| 是否被 OOM kill | `docker inspect -f '{{.State.OOMKilled}} {{.RestartCount}}' radar_inference_shadow` | `false 0` | 回到順序 4 |
+| 補資料期間每批耗時 | `predictions_shadow` 同一批共用一個 `predicted_at`（`Predictor`），相鄰兩批的時間差 ≈ 一批的推論＋poll／送出；以 `clickhouse` 服務的 `clickhouse-client` 查：`SELECT quantileExact(0.5)(gap), max(gap), count() FROM (SELECT n, row_number() OVER w AS i, dateDiff('millisecond', lagInFrame(predicted_at) OVER w, predicted_at) / 1000 AS gap FROM (SELECT predicted_at, count() AS n FROM predictions_shadow WHERE model_version = 'bert-ckip-202610280849' GROUP BY predicted_at) WINDOW w AS (ORDER BY predicted_at ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)) WHERE i > 1 AND n >= 50`（第一批沒有前一批，`i > 1` 排除） | p50 < 30 s、最大 ≤ 60 s | 回到順序 4 |
+| consumer lag | kafka-ui 的 consumer group `inference-shadow-bert-ckip-202610280849` | 持續下降，追上後接近 0 | 不降或被踢出 group（log 有 rebalance）→ 回到順序 4 |
+| primary 不受影響 | `inference` 的 lag 與 Grafana 情緒面板照常；`predictions` 沒有 shadow 的 `model_version` | 照常 | 停 shadow 後回報 |
 
 **修正單**
 
 | task_id | 負責檔案 | 驗收條件 | 相依 |
 |---|---|---|---|
 | `bert-evaluate-report-fix` | `ml/training/evaluate.py`、`tests/unit/ml/training/test_evaluate.py` | 分數節標題由寫死的「## Baseline」改為「## 模型分數」；「LLM 標註者 vs 人工」某標註者與人工重疊 0 篇時不列 0 篇的列，改一行說明「`<labeler>` 在人工測試集沒有 `<label_version>` 的標註」（有篇數的照舊）；CPU 節加一列「載入模型後 RSS」（`main()` 在 `load_classifier` 後讀 `_peak_rss_mb()`；`RuntimeStats` 只能新增有預設值的欄位，`measure_runtime` 簽名不變） | 無 |
-| `bert-onnx-length-batching` | `ml/training/classifier.py`、`common/settings.py`（`InferenceSettings.max_batch_tokens`，預設 4096、≥ `card.max_len`）、`.env.example`（選填 `# INFERENCE_MAX_BATCH_TOKENS=4096`）、`ml/inference/main.py`、`ml/training/evaluate.py` 的 `main()`（兩處都傳入設定值）、`tests/unit/ml/test_stage8_interfaces.py`（`load_classifier` 加 keyword-only `max_batch_tokens`）、`tests/unit/ml/training/test_classifier.py` | 打亂長短的輸入，分小批結果與整批一次推論的機率差 < 1e-5、順序與輸入一致；每次 `session.run` 的篇數 × 序列長度 ≤ 上限（單篇超過上限時單獨一批）；`tests/unit/acceptance/bert-classifier/` 照常通過 | 等 `bert-evaluate-report-fix`（同改 `evaluate.py`） |
+| `bert-onnx-length-batching` | `ml/training/classifier.py`、`common/settings.py`（`InferenceSettings.max_batch_tokens`，預設 2048（原 4096，由 `bert-batch-tokens-default` 改）、≥ `card.max_len`）、`.env.example`（選填 `# INFERENCE_MAX_BATCH_TOKENS=2048`）、`ml/inference/main.py`、`ml/training/evaluate.py` 的 `main()`（兩處都傳入設定值）、`tests/unit/ml/test_stage8_interfaces.py`（`load_classifier` 加 keyword-only `max_batch_tokens`）、`tests/unit/ml/training/test_classifier.py` | 打亂長短的輸入，分小批結果與整批一次推論的機率差 < 1e-5、順序與輸入一致；每次 `session.run` 的篇數 × 序列長度 ≤ 上限（單篇超過上限時單獨一批）；`tests/unit/acceptance/bert-classifier/` 照常通過 | 等 `bert-evaluate-report-fix`（同改 `evaluate.py`） |
 | `bert-derive-max-len`（只在順序 4 才開） | 新增 `ml/training/derive_model.py` 與單元測試 | `python -m radar.ml.training.derive_model --model models/<v> --max-len 256` 產生 `models/<v>-len256/`：`model.onnx`、`tokenizer.json` 原樣複製、雜湊不變，card 的 `model_version`、`max_len` 改新值、`params.derived_from` 記原版本；目標已存在、`max_len` 不小於原值、新 `model_version` 不符 `import_model` 的格式都拒絕 | 等 3 |
 
 「LLM 標註者 vs 人工」0 篇不是計算錯誤：`evaluate` 依 card 的 `label_version`（prompt-v6）查標註，而兩個 LLM 在人工測試集只標過 v5（升 v6 時決定不重標，見 6 章 S3-01 與 `docs/reports/model-evaluation.md` 的 baseline 節）；baseline 的 `evaluation.md` 一樣是 0 篇，報告改用 v5 手算。程式的錯只有標題寫死、0 篇照列（連帶每個看板都被標「樣本少」），由上表第一張單修。要補 v6 的數字需用 v6 重標測試集，不影響進 shadow，本節不處理。
@@ -1473,9 +1535,128 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 | 選 ckip fp32 為候選 | 照上方「自行決定」的 fp32／int8 與預訓練模型規則 |
 | 先改推論端、不先重訓 | 長度排序分小批不改預測、不用甲方跑 Colab；max_len 256 也先在推論端截，掉分才重訓 |
 | 小批以 token 數為上限 | 記憶體由「篇數 × 序列長度」決定，用 token 上限才能同時限住長文的峰值與讓短文多篇一起算 |
-| `INFERENCE_MAX_BATCH_TOKENS` 預設 4096 | 8 × 512 時 attention 每份約 0.1 GB；估計耗時（0.37 倍）不比 16 × 512（0.42 倍）差，記憶體減半 |
+| `INFERENCE_MAX_BATCH_TOKENS` 預設 2048 | 原訂 4096（8 × 512），容器內 512 版實測 RSS 1268 MB 超過 1.2 GB 門檻；2048（4 × 512）997 MB、每批 p50 23.8 s 全過，macro-F1 不變 |
 | RSS 門檻 1.2 GB | 1.5g 扣掉主機與容器量法的差異、hash 快取 |
 | 衍生版本另取 `model_version` | 不改原資料夾的 card：同一版本號不可對應兩種推論結果 |
+| 每批耗時門檻的統計量 | p50 < 30 s 管吞吐量、最大 ≤ 60 s 管 `max.poll.interval.ms`（理由見「順序 3 判定」） |
+| 補資料每批耗時的量法 | 從 `predictions_shadow` 相鄰 `predicted_at` 推算，不為此加 log 或改程式；只算 ≥ 50 篇的批（補資料的滿批） |
+
+### 7.28 停機後補抓深度與管線停擺偵測（規劃，2026-10-29，#180、#219）
+
+#180 的調查（`reports/gossiping-gap-investigate.json`）找到兩個程式問題：
+
+- **補抓深度不足**：`CrawlHandler.handle_list` 在快取為空（重啟後）時只讀第一頁；快取有內容時也最多 `max_list_pages=3` 頁。Gossiping 每小時約 33 篇，停機 1 小時以上，第一頁以前的文章都不會被抓，10-08～10-28 Gossiping、HatePolitics 共漏約 1 萬篇（7.29）
+- **靜默停擺**：10-28 16:18Z 起 kafka_3 的 group coordinator 故障，crawler、ingest 等 consumer group 無限重新平衡，管線停了約 10 小時；容器都是 Up、Scheduler 照常派工，`cdc-watchdog` 只看 CDC，沒有任何警告
+
+#### A. 補抓深度
+
+| 項目 | 決定 |
+|---|---|
+| 要補到哪裡 | 該看板在 PG 最新一篇文章的時間（`posts.created_at` 最大值）減 10 分鐘，叫 `since`；爬蟲翻頁直到遇到不晚於 `since` 的文章 |
+| 誰查 PG | Scheduler：`make_list_task_sender` 每次送列表任務前查 `SELECT max(created_at) FROM posts WHERE board = :board`（Core `select()`，同 `DuePostDispatcher` 的 engine）。爬蟲照舊不碰 PG |
+| 查不到時 | 看板還沒有文章、或查詢失敗（記 WARNING）→ `since` 為 null，爬蟲只讀第一頁（手動觸發也是）；新看板不往回翻 |
+| 查詢逾時 | Scheduler 的 engine 設 `statement_timeout`（`SCHEDULER_STATEMENT_TIMEOUT_SEC`，預設 30 秒；`make_engine(statement_timeout_sec=)`，其他服務不設）。`QueryCanceled` 時記 WARNING、略過該看板這一輪（不送列表任務，下一輪照常），`DuePostDispatcher` 同樣略過該輪；其他錯誤照舊（#226） |
+| 訊息格式 | `crawl.tasks` 加 `since`、`backfill_depth`，`reason` 加 `backfill`（3.1）；只加欄位，`schema_version` 仍為 1 |
+| 翻頁規則（取代 `cache_was_empty`） | 讀完一頁後，以下全部成立才往前翻：`since` 不是 null；這頁最舊文章的時間（檔名 epoch，`created_at_from_filename`）晚於 `since`；有上一頁。不看頁面文章是否已在列表快取：補抓途中內頁暫時性錯誤、整批重試時，重讀的頁面已全進快取，若以此停止，續抓鏈會斷。正常運作時 `since`≈PG 最新－10 分鐘，第一頁通常就到 `since`，多翻一頁的內頁多數在快取不重抓 |
+| 每個任務最多幾頁 | 沿用 `max_list_pages=3`；3 頁約 63 次請求、約 3 分鐘，低於 `max.poll.interval.ms` 300 秒。3 頁後還要翻 → 送一個續抓任務，本任務結束 |
+| 續抓任務 | `type=list`、`reason=backfill`、`url`=下一個要讀的上一頁、`since` 照抄、`backfill_depth`=這條鏈已讀的頁數；key=`board`，不指定 partition（key hash）。和其他輸出一樣在 commit 前 flush |
+| 硬上限 | 一條鏈最多 80 頁（`CrawlHandler` 建構參數 `max_backfill_pages`，同 7.17 不開環境變數）。到上限記 ERROR（看板、`since`、停下那頁最舊文章的時間），更早的缺口不補 |
+| 略過積壓的列表任務 | 爬蟲記住每個看板最近一次開始處理列表任務的時間；`reason` 不是 `backfill` 且 `created_at` 早於這個時間的列表任務直接略過（同 7.12 的道理：之後已經讀過更新的列表）。續抓任務不更新這個時間：一條鏈最多約 2.4 小時，若更新，這段期間排入的一般任務都會被略過，看板最新文章要等補抓結束才抓。任務處理完（沒有拋例外）才寫入，值仍是開始處理的時間，整批重試時同一個任務不會被略過。重啟後清空 |
+| 正常運作時 | 第一頁最舊文章通常已不晚於 `since`，只讀一頁，與現在相同；從 `since` 到現在的新文章超過一頁時多讀幾頁到 `since` 為止，這些頁的內頁多數已在快取、不重抓。取代原本固定最多 3 頁 |
+| 部署 | 舊爬蟲忽略新欄位（`extra="ignore"`），新舊 Scheduler 都相容；`reason=backfill` 只有新爬蟲會送，舊爬蟲收到會驗證失敗進 DLQ，3 個爬蟲要一起更新（`make up-app` 同一個 image） |
+
+**請求量估算**（Gossiping 每天約 790 篇＝每小時 1.65 頁、HatePolitics 每小時約 22.5 篇＝1.1 頁；一頁＝1 次列表＋最多 20 次內頁＝21 次；爬蟲每次請求平均 3 秒）
+
+| 停機時間 | 兩看板補抓頁數 | 請求數 | 耗時（兩條鏈落在同一個爬蟲時） |
+|---|---|---|---|
+| 1 小時 | 約 3 頁 | 約 60 | 約 3 分鐘 |
+| 24 小時 | 約 66 頁 | 約 1,400 | 約 70 分鐘 |
+| 53 小時（10-13～10-15，最長的一次） | Gossiping 達上限 80 頁、HatePolitics 約 60 頁 | 約 2,900 | 約 2.4 小時；Gossiping 最早約 5 小時補不回 |
+
+- **最高速率不變**：每個爬蟲的 `RateLimiter` 不動，3 個爬蟲合計仍 ≤ 1 次/秒（階段 1 驗收的預算）；補抓只是讓爬蟲在上表的時間內維持最高速率。上限 80 頁＝一條鏈最多 1,680 次請求
+- **同一個 partition 的其他任務**：續抓任務排在 partition 尾端，與一般任務輪流處理，每輪最多多等一個續抓任務（約 3 分鐘）；這段期間累積的重複重爬由 7.12 略過
+- **下游**：補回的推文多數比觀測時間早 30 分鐘以上，熱度偵測不計入（7.20 `HEAT_MAX_DELAY_MIN`）；推論、串流標註把補回的文章當新文章處理一次
+
+#### B. 管線停擺偵測
+
+| 項目 | 決定 |
+|---|---|
+| 訊號 | ClickHouse `posts_history` 最新的 `changed_at`：端到端，爬蟲、Kafka、ingest、PG、CDC、ClickHouse 任一段停住都會停止前進 |
+| 門檻 | 超過 `CDC_WATCHDOG_STALE_ALERT_S`（預設 1800 秒）沒有新資料。實測 09-29～10-29 全部看板合計「有變化的分鐘」之間的間隔：超過 30 分鐘 37 次，全部落在 7.29 的停機區間、10-16 的主機間歇休眠、10-22～10-23 每 20～90 分鐘一段的間歇中斷（原因未確認，10-23 文章數也只有平常一半）與 10-20 01:45～02:45Z 一次（台北上午，原因未確認）；其餘時段的間隔都在 30 分鐘內，多數不到 10 分鐘 |
+| 誰做 | `cdc-watchdog` 加一項檢查（已有 PG、heartbeat、只跑 1 個 instance；7.16）。狀態判斷照 7.16 寫成純函式 `FreshnessWatch.observe(latest, now)`，單元測試不需要 ClickHouse |
+| 怎麼算 | `落後 = now − max(最後一次查到的 max(changed_at), watchdog 啟動時間)`；用牆上時鐘（要和資料時間比）。查詢失敗記 WARNING、沿用上次的值，ClickHouse 停太久也會在門檻後告警 |
+| 通知 | 進入停擺記一次 ERROR（loggerhelper 送 Slack）、恢復記一次 INFO；停擺期間 heartbeat 改 ping `/fail`，healthchecks.io 寄 email。沿用 7.16 的管道，不新增 |
+| 連線 | 沿用 `ClickHouseSettings`（`CLICKHOUSE_*`，compose 已有）；`ClickHouseClient` 加 `timeout_s` 參數（預設 30 秒不變），watchdog 傳 `CDC_WATCHDOG_REQUEST_TIMEOUT_S` |
+| 不自動處理 | 告警後人工處理（下方 C）；watchdog 沒有 Docker 權限，也不該有 |
+| 已知限制 | 開發機休眠醒來到管線補上前，會有一次停擺告警（heartbeat 中斷本來就會寄信）；上雲後（階段 9）不會發生 |
+
+#### C. Kafka 4.1.0 的 coordinator 故障
+
+- 就是 KAFKA-19888（症狀相同：時鐘跳動後 `CoordinatorRuntimeMetricsImpl` 記到負值，`__consumer_offsets` 寫入持續逾時、group 無限重新平衡；只有重啟該 broker 才恢復，coordinator 回到同一個 broker 後可能再發生）。修正版本 4.1.2（2026-03-17）、4.2.0；Docker Hub 有 `apache/kafka:4.1.2`
+- 升到 4.1.2：已定案（D-034）；開發環境於 2026-10-29 照下列步驟升完
+- 升級前的處理：找出 log 有 `Histogram recorded value cannot be negative` 的 broker，`docker compose -f infra/docker-compose.yaml --env-file .env restart kafka_N`
+- 升級步驟：`.env` 的 `KAFKA_VERSION` 改 4.1.2，一次一個 broker，依序 kafka_1、kafka_2、kafka_3（3 節點、`min.insync.replicas=2`）
+  1. `docker compose -f infra/docker-compose.yaml --env-file .env up -d kafka_1`（kafka_2、kafka_3 同寫法；不可用 `down -v`，資料在具名 volume `kafka_N_data`）
+  2. `docker compose -f infra/docker-compose.yaml --env-file .env ps kafka_1` 顯示 `(healthy)`
+  3. `docker compose -f infra/docker-compose.yaml --env-file .env exec kafka_1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --describe --under-replicated-partitions` 沒有輸出，才換下一台；healthcheck 只確認 broker 有回應，副本還沒追上就停下一台，ISR 會低於 `min.insync.replicas`，`acks=all` 的寫入會失敗
+
+#### 派工順序
+
+| 順序 | task_id | 負責 | 相依／平行 | 負責檔案 | 驗收測試 |
+|---|---|---|---|---|---|
+| 1 | `crawl-backfill-depth` | backend | 可與 2 平行 | `src/radar/common/schemas.py`（`CrawlTask`）、`src/radar/common/enums.py`（`CrawlReason`）、`src/radar/common/tasks.py`（`make_list_task` 加 `since`、續抓任務）、`src/radar/collector/crawler.py`、`src/radar/collector/scheduler.py`、`tests/unit/collector/`、`tests/unit/common/`、`tests/integration/collector/`（Scheduler 查 PG）、`tests/e2e/fake_ptt.py`、`tests/e2e/test_pipeline.py`（假 PTT 放超過 3 頁新文章再重啟爬蟲，全部補到） | `tests/unit/acceptance/crawl-backfill-depth/`（翻頁規則、續抓任務內容、80 頁上限、略過積壓的列表任務、訊息驗證）；`tests/integration/acceptance/crawl-backfill-depth/`（真的 PG：`since` 取該看板最新文章、沒有文章時為 null） |
+| 2 | `pipeline-stall-alert` | backend | 可與 1 平行 | `src/radar/cdc/watchdog.py`、`src/radar/common/settings.py`（`CdcWatchdogSettings`）、`src/radar/common/clickhouse.py`（`timeout_s`）、`.env.example`（選填註解 `# CDC_WATCHDOG_STALE_ALERT_S=1800`）、`tests/unit/cdc/`、`tests/unit/common/`、`tests/integration/cdc/` | `tests/unit/acceptance/pipeline-stall-alert/`（門檻前後、只在狀態改變時記、查詢失敗沿用舊值、停擺時 heartbeat 送 `/fail`）；`tests/integration/acceptance/pipeline-stall-alert/`（真的 ClickHouse：讀到 `posts_history` 最新 `changed_at`） |
+| 3 | `kafka-upgrade-4-1-2` | backend | 已定案（D-034），PR #229 完成；在 2 之後（同改 `.env.example`） | `.env.example`（`KAFKA_VERSION=4.1.2`） | 無；CI 以 `.env.example` 的版本跑全部整合測試即為驗證，開發環境由甲方改 `.env` 後照上方步驟逐台升級 |
+
+- 1、2 的 `tests/unit/common/` 不可平行改同一個檔：1 改 `test_schemas.py`、`test_tasks.py`，2 改 `test_clickhouse.py`、`test_settings.py`
+- 本節與設計文件（4.2、4.4、4.6、6.4）已先寫成目標行為；實作單不改文件，實作與文件不符時回報 manager
+- 1、2 互不相干、沒有跨模組流程，不另開整合單；各自的 compose 專案跟著 worktree，DB 不互撞
+
+#### 自行決定
+
+| 項目 | 理由 |
+|---|---|
+| 缺口終點用 PG 最新 `created_at`，不讓爬蟲記 watermark | 爬蟲不碰 PG、沒有持久狀態；PG 本來就是「已收到哪些文章」的唯一來源 |
+| `since` 減 10 分鐘 | `posts.created_at` 取文章標頭時間（只到分、作者可改），列表用檔名時間；差一點只會多讀一頁 |
+| 續抓走 Kafka，不在一個任務裡翻完 | 一次翻完 24 小時的缺口要 70 分鐘，遠超過 `max.poll.interval.ms`；續抓任務在 Kafka 裡，爬蟲中途重啟也不會斷 |
+| 續抓任務不指定 partition | handler 拿不到來源 partition，爬蟲也不知道啟用看板清單（7.10）；舊頁面不在任何爬蟲的快取，換一個爬蟲處理結果相同。代價是兩個看板的續抓可能落在同一個 partition，耗時以上表最壞情況估 |
+| 上限 80 頁、不開環境變數 | ≈ Gossiping 48 小時；與 7.17 的門檻一致寫成建構參數；最高速率不變，上限只限制持續時間 |
+| 手動觸發（API）不帶 `since` | 手動是「現在立刻爬一次」；不改 API |
+| 略過積壓的列表任務 | 10-28 停擺 10 小時，Gossiping 積了約 600 個列表任務，各 1 次請求、約 30 分鐘，續抓任務還要排在它們後面 |
+| 停擺訊號用 ClickHouse，不用 consumer lag | coordinator 故障時查 lag 本身也要走 coordinator；lag 要逐個 group 設門檻；ClickHouse 是 Dashboard 看到的終點 |
+| 不分看板偵測 | Tech_Job 一天約 2 篇，分看板要各設門檻；全部看板合計已能抓到 10-08～10-28 每一次停擺 |
+| 門檻 30 分鐘 | 實測正常時段的間隔都在 30 分鐘內（上方 B） |
+| 放在 `cdc-watchdog` | 已有 heartbeat 與 email 管道、單一 instance；另開服務要多一個 healthchecks check |
+
+#### 需調查
+
+| 項目 | 現況 |
+|---|---|
+| 10-13 01:17～06:31Z、10-20 01:45～02:45Z、10-22～10-23 間歇、10-24 21:08～23:46Z 的靜默原因 | ClickHouse 活著但全管線沒有新資料；容器已重建、沒有當時的 log。要查需開發環境保留 log（compose 的 logging 設定或 Loki），另開單 |
+| 4.1.0 → 4.1.2 其他變更的影響 | patch 版；以 CI 整合測試與開發環境升級後的 `/status`、本節 B 的告警確認 |
+
+### 7.29 開發環境停機缺口（2026-10-08～10-30，D-032）
+
+依 D-032 不回頭補，只記錄。PG 與 ClickHouse 逐日逐板一致（CDC 沒有遺漏）；細節與查詢見 `reports/gossiping-gap-investigate.json`。時間為 UTC，依 ClickHouse `posts_history` 全部看板都沒有新事件的區間。
+
+| # | 區間（UTC） | 長度 | 原因 |
+|---|---|---|---|
+| 1 | 10-08 09:52 → 10-09 08:20 | 22.5 h | 環境停機（主機休眠或關機） |
+| 2 | 10-10 11:32 → 10-12 05:06 | 41.6 h | 環境停機 |
+| 3 | 10-13 01:17 → 10-15 06:26 | 53.2 h | 前 5.2 h ClickHouse 活著但管線靜默（原因未確認），之後環境停機 |
+| 4 | 10-16 11:04 → 14:52 | 3.8 h | 疑似主機間歇休眠 |
+| 5 | 10-18 17:43 → 10-19 16:59 | 23.3 h | 環境停機 |
+| 6 | 10-21 08:53 → 10-22 07:00 | 22.1 h | 環境停機 |
+| 7 | 10-24 21:08 → 23:46 | 2.6 h | 原因未確認（ClickHouse 活著） |
+| 8 | 10-27 00:36 → 10-28 07:27 | 30.8 h | 環境停機 |
+| 9 | 10-28 16:18 → 10-29 02:35 | 10.3 h | Kafka coordinator 故障（KAFKA-19888，7.28 C），重啟 kafka_3 後恢復 |
+| 10 | 10-30 04:05 → 07:15 | 3.2 h | 開發機合蓋休眠（pmset 紀錄 04:04Z 起合蓋、07:20Z 開蓋）；爬蟲源頭沒有產出，Debezium 從上次 LSN 續跑，PG 與 ClickHouse 的 posts 一致（`reports/comments-cdc-gap-investigate.json`） |
+
+- **區間 10 的告警**：`cdc-watchdog` 在 05:06 有記 ERROR，但休眠中沒有網路，`/fail` 沒送出去；恢復後的 6 則警示是失真結果（7.20 已知限制，#264）
+- **遺失量**（估計，區間 1～8）：Gossiping 約 6,200 篇、約 22 萬則推文；HatePolitics 約 4,300 篇；區間 9 另約 340、230 篇。重啟後只補回第一頁（7.28 A），停機日這兩個看板的文章數明顯偏低（異常日：10-11、10-13、10-14、10-19、10-22、10-27）
+- **其他看板沒有遺失**：Stock、Boy-Girl、Tech_Job 每天不到 100 篇，重啟後前 1～3 頁就補完；停機日的推文是重爬補進來的最終狀態，不是當時的快照
+- **用到這段資料時**：逐日、逐小時的統計與趨勢圖，這些區間要排除或標示；不可當成「當天討論少」。訓練與標註資料只是少了樣本，不受影響
+- 另有 246 則推文的 `commented_at` 落在未來（年份推斷錯誤），由 D-033 重爬修正，與本節無關
 
 ## 8. 風險清單
 
@@ -1486,7 +1667,7 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 | ~~ClickHouse 讀不了 Apicurio 的 Avro 格式~~ | 階段 2 卡住 | **已排除（S2-01，2026-10-07）**：可直接讀，條件見設計文件 6.2 |
 | Debezium / Apicurio 升級後行為改變 | CDC 或 ClickHouse 讀取中斷 | 版本固定在 `.env.example`；升級時重跑設計文件 6.2 的檢查（2.x → 3.x 時就發現設定名稱被移除且不報錯） |
 | Connect task 失敗後停止 | ClickHouse 停止更新、WAL 累積 | Converter 快取設定減少失敗；`cdc-watchdog` 自動重啟並監看 replication slot（7.16） |
-| PTT 封鎖 IP | 資料中斷 | 請求速率預算（≤ 1 次/秒）、隨機間隔、7.2 的重爬門檻 |
+| PTT 封鎖 IP | 資料中斷 | 請求速率預算（≤ 1 次/秒）、隨機間隔、7.2 的重爬門檻；停機後補抓不提高速率，一條續抓鏈最多 80 頁（7.28 A） |
 | PTT 版面改版 | parser 失效 | `raw.html` 保留 3 天可重新解析；parser 失敗記 ERROR（可送 Slack），驗證失敗的訊息進 DLQ，`/status` 可看到 DLQ 數量 |
 | PTT 恢復伺服器端的 over18 檢查 | 列表頁變成確認頁 | 2026-10 實測伺服器端已不檢查（只在瀏覽器以 JS 導向）；爬蟲仍帶 `over18=1` cookie，parser 遇到確認頁會拋 `ParseError` |
 | LLM 免費額度不足或政策改變 | 標註進度變慢或成本上升 | 實測 `gemini-3.5-flash` 免費只有 20 次/天、`gemini-3.1-pro` 為 0；`Labeler` 介面可換服務商（Groq、OpenRouter、Gemini）或改付費 Batch API；backfill 可中斷續跑 |
@@ -1494,7 +1675,8 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 | PTT 回 HTTP 520（Cloudflare） | 該篇內頁本輪略過 | 24 小時驗收：520 ×23、525 ×14、521 ×4，佔請求 < 0.1%；**決定維持不重試**（重試會增加觸發 #11 的機會）。已在 PG 的文章由重爬補抓；新文章不記進列表快取，下一輪列表輪詢再抓（7.17）；單次記 WARNING，連續 20 次失敗才記 ERROR |
 | 使用者把文章情緒誤讀成推文的風向 | 錯誤解讀輿情 | 介面寫「文章情緒」並附信心，低於門檻顯示「不確定」；推噓、爭議度分開呈現（設計文件 15.8）；推文層級情緒列入「後續階段」14 |
 | Telegram 選單的回呼資料超過 64 bytes 或格式改版 | 按鈕失效 | `callback_data` 帶版本號，解析失敗時重送主選單；單元測試檢查最長的 post_id 在上限內（7.23） |
-| 開發機休眠 | 長時間驗收中斷、數據缺一段 | 驗收期間 `caffeinate -dims` 並接電源、不闔上螢幕（闔上仍會強制睡眠）；`cdc-watchdog` 的外部 heartbeat 停止時會寄 email（7.16）；上雲後（階段 9）不再依賴開發機 |
+| 開發機休眠 | 長時間驗收中斷、數據缺一段 | 驗收期間 `caffeinate -dims` 並接電源、不闔上螢幕（闔上仍會強制睡眠）；`cdc-watchdog` 的外部 heartbeat 停止時會寄 email（7.16）；重啟後由列表任務補抓到 PG 最新文章為止，最多 80 頁（7.28 A）；10-08～10-29 的缺口見 7.29；上雲後（階段 9）不再依賴開發機 |
+| 容器都在跑，但管線靜默停擺（例：Kafka coordinator 故障，KAFKA-19888） | 沒有新資料、沒有任何警告（10-28 停 10 小時） | `cdc-watchdog` 檢查 ClickHouse 最新資料時間，超過 30 分鐘記 ERROR 並讓 heartbeat 送 `/fail`（7.28 B）；Kafka 已升 4.1.2（D-034，PR #229，7.28 C） |
 | 標註的系統性偏差 | 模型學到錯誤標準，資料越多越確定 | 固定主要標註者、改 prompt 修偏差、兩個不同家族的標註者交叉比對、人工測試集裁決（7.11） |
 | Grafana 的 ClickHouse plugin 與 Grafana、ClickHouse 版本不相容 | 升級後 dashboard 全部失效 | 版本釘完整 patch 號、plugin 在建置 image 時裝好（執行時不下載、不自動更新）；升級任一方都要過 `test_grafana_infra.py` 與 `tests/integration/dashboard/`（7.25） |
 | Python 端讀不了 CDC 的 Avro | S3-08 串流標註、階段 4 推論卡住 | 採用 `confluent-kafka[avro]`（fastavro + 官方 schema registry client，打 Apicurio 的 ccompat API）；已用 mock schema registry 與 S2-01 實測的欄位驗證解碼，待以實際 CDC 訊息確認 |

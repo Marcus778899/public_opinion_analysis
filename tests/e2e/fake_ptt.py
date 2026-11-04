@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 PTT_TZ = ZoneInfo("Asia/Taipei")
 _DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
@@ -76,6 +76,13 @@ class NewComments(BaseModel):
     boos: int = 0
 
 
+LIST_PAGE_SIZE = 20  # PTT 一頁 20 篇
+
+
+class PageSize(BaseModel):
+    size: int = Field(ge=1, le=LIST_PAGE_SIZE)
+
+
 class FakePtt:
     """記憶體中的看板與文章；控制端點與頁面端點共用。"""
 
@@ -83,6 +90,8 @@ class FakePtt:
         self.posts: dict[str, FakePost] = {}
         self._counter = itertools.count(1)
         self._lock = threading.Lock()
+        # 各看板的列表頁大小；測試縮小它，不用造幾十篇文章就能跨很多頁
+        self.page_sizes: dict[str, int] = {}
 
     def add_post(self, data: NewPost) -> FakePost:
         with self._lock:
@@ -118,18 +127,28 @@ class FakePtt:
     def reset(self) -> None:
         with self._lock:
             self.posts.clear()
+            self.page_sizes.clear()
 
-    def render_list(self, board: str) -> str:
+    def render_list(self, board: str, page: int | None = None) -> str:
+        """page 為 None 是最新頁（index.html）；第 1 頁最舊，與 PTT 相同。"""
         posts = sorted(
             (p for p in self.posts.values() if p.board == board), key=lambda p: p.created_at
         )
-        rows = "".join(_list_row(p) for p in posts)
+        size = self.page_sizes.get(board, LIST_PAGE_SIZE)
+        last = max(1, -(-len(posts) // size))
+        page = last if page is None else min(max(page, 1), last)
+        rows = "".join(_list_row(p) for p in posts[(page - 1) * size : page * size])
+        prev = (
+            f'<a class="btn wide" href="/bbs/{board}/index{page - 1}.html">&lsaquo; 上頁</a>'
+            if page > 1
+            else '<a class="btn wide disabled">&lsaquo; 上頁</a>'
+        )
         return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>看板 {board} 文章列表 - 批踢踢實業坊</title></head>
 <body>
 <div class="btn-group btn-group-paging">
 <a class="btn wide" href="/bbs/{board}/index1.html">最舊</a>
-<a class="btn wide disabled">&lsaquo; 上頁</a>
+{prev}
 <a class="btn wide disabled">下頁 &rsaquo;</a>
 <a class="btn wide" href="/bbs/{board}/index.html">最新</a>
 </div>
@@ -209,7 +228,8 @@ def create_app(state: FakePtt | None = None) -> FastAPI:
     """頁面：/bbs/{board}/index.html、/bbs/{board}/{filename}.html
     控制：POST /_control/posts、POST /_control/posts/{post_id}/comments、
          DELETE /_control/posts/{post_id}/comments/{floor}、
-         DELETE /_control/posts/{post_id}、POST /_control/reset
+         DELETE /_control/posts/{post_id}、PUT /_control/boards/{board}/page_size、
+         POST /_control/reset
     """
     ptt = state or FakePtt()
     app = FastAPI(title="fake PTT")
@@ -217,7 +237,8 @@ def create_app(state: FakePtt | None = None) -> FastAPI:
     @app.get("/bbs/{board}/{page}", response_class=HTMLResponse)
     def page(board: str, page: str) -> str:
         if page.startswith("index"):
-            return ptt.render_list(board)
+            number = page.removeprefix("index").removesuffix(".html")
+            return ptt.render_list(board, int(number) if number.isdigit() else None)
         body = ptt.render_post(board, page.removesuffix(".html"))
         if body is None:
             raise HTTPException(404)
@@ -250,6 +271,10 @@ def create_app(state: FakePtt | None = None) -> FastAPI:
             ptt.delete(post_id)
         except KeyError as e:
             raise HTTPException(404) from e
+
+    @app.put("/_control/boards/{board}/page_size", status_code=204)
+    def set_page_size(board: str, data: PageSize) -> None:
+        ptt.page_sizes[board] = data.size
 
     @app.post("/_control/reset", status_code=204)
     def reset() -> None:

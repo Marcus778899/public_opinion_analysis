@@ -493,3 +493,15 @@ def test_run_once_without_heartbeat_client_skips_ping(fake_log, monkeypatch):
     )
 
     assert fake_log.records == []
+
+
+def test_freshness_watch_ignores_older_value_than_already_seen():
+    from datetime import UTC, datetime, timedelta
+
+    from radar.cdc.watchdog import FreshnessWatch
+
+    t0 = datetime(2026, 10, 29, tzinfo=UTC)
+    w = FreshnessWatch(100, t0)
+    w.observe(t0 + timedelta(seconds=50), t0 + timedelta(seconds=60))
+    w.observe(t0, t0 + timedelta(seconds=120))
+    assert not w.stalled

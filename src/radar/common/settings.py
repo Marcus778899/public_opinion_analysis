@@ -59,6 +59,8 @@ class SchedulerSettings(BaseSettings):
     due_posts_limit: int = 500
     # 重爬間隔的倍率；只在端到端測試調小，正式環境維持 1
     time_scale: float = 1.0
+    # Scheduler 的 PG 查詢逾時（秒）；逾時只略過該輪，不讓派工卡住（7.28 A）
+    statement_timeout_sec: float = 30.0
 
 
 class CrawlerSettings(BaseSettings):
@@ -98,7 +100,7 @@ class InferenceSettings(BaseSettings):
     # ONNX 的 intra-op thread 數（D-023）
     threads: int = Field(default=2, ge=1)
     # ONNX 每次 run 的篇數 × 序列長度上限；須 ≥ card.max_len（load_classifier 檢查）
-    max_batch_tokens: int = Field(default=4096, ge=1)
+    max_batch_tokens: int = Field(default=2048, ge=1)
 
 
 class CdcWatchdogSettings(BaseSettings):
@@ -115,6 +117,8 @@ class CdcWatchdogSettings(BaseSettings):
     heartbeat_url: str | None = None
     # Connect、heartbeat、PG 查詢共用；卡住時 heartbeat 會停，外部服務才會發現
     request_timeout_s: float = 10.0
+    # posts_history 最新 changed_at 超過這麼久沒前進就告警（開發規格 7.28 B）
+    stale_alert_s: float = 1800.0
 
     @field_validator("heartbeat_url", mode="before")
     @classmethod
@@ -133,6 +137,8 @@ class HeatSettings(BaseSettings):
     # 回放與驗收時改成 replay.cdc.comments，並換 consumer_group，state 才不會和正式的混在一起
     input_topic: str = "cdc.public.comments"
     consumer_group: str = "heat"
+    # 回放時改成 replay.alerts，警示才不會進正式 alerts 而推到 Telegram
+    output_topic: str = "alerts"
     state_dir: Path = Path("state")
     window_min: int = 10
     grace_min: int = 2

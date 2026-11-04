@@ -1,0 +1,22 @@
+{
+  "task_id": "bert-classifier",
+  "status": "done",
+  "files_changed": [
+    "src/radar/ml/training/classifier.py",
+    "src/radar/ml/training/evaluate.py",
+    "tests/unit/ml/training/test_classifier.py",
+    "tests/unit/ml/training/test_evaluate.py",
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "cd .worktrees/bert-classifier && make check（含 tests/unit/acceptance/bert-classifier 與 tests/unit/ml）",
+    "exit_code": 0,
+    "tail": "make check：1257 passed；ruff 通過（含 review 修正：evaluate 分批推論）"
+  },
+  "open_questions": [
+    "實作決定已回寫 docs/development-spec.md 7.27「載入」節",
+    "evaluate main() 讀 ClickHouse 與 .env，sandbox 內未實際執行（與既有狀況相同）。",
+    "inference/main.py 的 predict() 仍保留原樣，由 bert-shadow-inference 改用 SklearnClassifier；PR 的 CI 尚未確認。",
+    "review 建議但未做（不擋合併）：evaluate_by_board 會重複推論一次，BERT 評估時間約兩倍"
+  ]
+}

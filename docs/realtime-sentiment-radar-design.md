@@ -116,7 +116,7 @@
 
 | Topic | Producer | Consumer | Partitions | 保留 |
 |---|---|---|---|---|
-| `crawl.tasks` | Scheduler、FastAPI | 爬蟲 | 3 | 1 天 |
+| `crawl.tasks` | Scheduler、FastAPI、爬蟲（只送續抓任務，4.6） | 爬蟲 | 3 | 1 天 |
 | `raw.posts` | 爬蟲 | Ingest | 3 | 7 天 |
 | `raw.html` | 爬蟲 | 重新解析時使用 | 3 | 3 天（zstd） |
 | `cdc.public.posts` | Debezium | ClickHouse、標註、推論 | 3 | 7～14 天 |
@@ -162,7 +162,7 @@ Apicurio 使用 SQL 儲存，不建立 topic。PG connector 不需要 schema his
   - 「爆」固定視為 100，所以「爆 → 爆」算沒變，由 4.5 的重爬排程定期抓；「99 → 爆」算變化
   - 被刪除的文章（列表上沒有連結）不抓
   - 爬蟲重啟或 rebalance 後快取清空，只會多抓幾次內頁，upsert 會擋掉沒變化的寫入
-- **往前翻頁**：第一頁的文章全都沒見過、且快取不是空的，代表兩次輪詢間新文章超過一頁，再往前翻，最多 3 頁；剛啟動（快取為空）只讀一頁
+- **往前翻頁**（2026-10-29 改，開發規格 7.28 A）：Scheduler 在列表任務帶上該看板 PG 最新文章的時間 `since`；一頁的文章全都沒見過、且最舊的一篇仍晚於 `since`，就往前翻。重啟或停擺後也會一路補到 `since`；一個任務最多 3 頁，沒翻完由爬蟲送續抓任務（`reason=backfill`）接著翻，一條鏈最多 80 頁。`since` 為 null（新看板、查詢失敗、手動觸發）只讀第一頁
 - 置底公告（`r-list-sep` 以下）不列入
 
 #### 近期文章：依年齡分級重爬
@@ -219,7 +219,7 @@ PTT 網頁版的文章頁約 10 分鐘才更新一次（開發規格 7.22），�
 
 | 計時器 | 頻率 | 動作 |
 |---|---|---|
-| `board:<name>` | 看板的 `interval_sec` | 派發列表頁任務（`reason=schedule`，key=board） |
+| `board:<name>` | 看板的 `interval_sec` | 查該看板 PG 最新文章的時間當 `since`，派發列表頁任務（`reason=schedule`，key=board；4.2「往前翻頁」） |
 | `sync_boards` | 30 秒（啟動時立刻執行） | 同步看板設定 |
 | `due_posts` | 30 秒 | 派發到期的文章重爬任務（4.5） |
 | `lock` | 30 秒 | 確認仍持有 advisory lock，失去就停止 |
@@ -259,12 +259,14 @@ LIMIT 500;                                               -- 其餘留到下一�
 
 ### 4.6 爬蟲
 
-- 屬於同一個 consumer group，消費 `crawl.tasks`，結果寫入 `raw.posts` 與 `raw.html`（皆以 `post_id` 為 key）
+- 屬於同一個 consumer group，消費 `crawl.tasks`，結果寫入 `raw.posts` 與 `raw.html`（皆以 `post_id` 為 key）；續抓任務寫回 `crawl.tasks`（key=board）
 - 不碰 PG、不讀設定
 - 一次處理一個任務：一個列表任務可能牽動約 20 次請求，整批重試代價高
 - **略過重複的重爬任務**：爬蟲以 LRU 記住 `post_id → 最後一次抓內頁的時間`；文章任務的 `created_at` 早於這個時間，代表派發之後已經抓過，不發請求直接略過
   - 文章任務的 key 是 `post_id`，同一篇固定由同一個爬蟲處理，記錄在本機就夠
   - 重啟或 rebalance 後清空，只會多抓幾次
+- **略過積壓的列表任務**：列表任務的 `created_at` 早於這個爬蟲最近一次開始處理同看板列表任務的時間，就略過（停擺後積壓的任務；續抓任務不略過，開發規格 7.28 A）
+- **續抓任務**：往前翻頁超過一個任務的上限時，爬蟲把下一頁送回 `crawl.tasks`（4.2）；這是爬蟲唯一寫入 `crawl.tasks` 的情況
 - **速率限制**：每次請求間隔 2 秒 + 0～2 秒隨機，平均約 3 秒一次；3 個爬蟲合計約 1 次/秒
 - **HTTP 回應**：
   - 200、404 正常處理；文章頁 404 視為被刪除，送出 `is_deleted=true` 的快照（推噓數為 0、沒有推文）
@@ -469,6 +471,7 @@ Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED
 | 減少失敗 | Converter 快取設定（6.1） | 快取過期後，向 Apicurio 刷新時偶發的連線錯誤 |
 | 自動恢復 | 常駐服務 `cdc-watchdog` 定期查 connector 狀態，`FAILED` 時呼叫 Connect REST API 重啟失敗的 task，間隔以指數退避拉長 | 其他原因造成的 task 失敗（例如 Apicurio 停機期間遇到新的 schema） |
 | 讓人知道 | `cdc-watchdog` 同時檢查 replication slot：`active=false` 持續太久，或 WAL 延遲超過門檻，就記 ERROR，由 loggerhelper 送到 Slack | 自動恢復失敗、PG 端的問題 |
+| 整條管線停擺 | `cdc-watchdog` 查 ClickHouse `posts_history` 最新的 `changed_at`，超過 30 分鐘沒有新資料就記 ERROR，heartbeat 改 ping `/fail`（開發規格 7.28 B） | 容器都在跑但資料不動（2026-10-28 Kafka coordinator 故障，爬蟲與 ingest 無限重新平衡 10 小時） |
 | 監看 watchdog 本身 | `cdc-watchdog` 每輪 ping 外部的 heartbeat 服務（healthchecks.io）；CDC 異常時改 ping `/fail`。外部服務超過期限沒收到 ping，或收到 `/fail`，就寄 email | watchdog crash、卡住、開發機睡眠或 Docker 停止；Slack 漏看 |
 
 - **為什麼要外部服務**：監控程式和被監控的服務在同一台機器上，無法回報「整台機器停了」（2026-10-10 的驗收監控腳本就是無聲無息地停了 10 小時）；只有「該收到卻沒收到就通知」的外部服務能涵蓋這種情況
@@ -477,7 +480,7 @@ Kafka Connect 的 task 遇到非 `RetriableException` 的錯誤就進入 `FAILED
 - **不用 Connect 內建的錯誤處理**：`errors.retry.timeout` 只重試 `RetriableException`；`errors.tolerance=all` 會丟掉訊息，資料不完整
 - **不設 `max_slot_wal_keep_size`**：超過上限時 PG 會讓 slot 失效，必須重新 snapshot；寧可記 ERROR 讓人處理
 - **重啟後會重送**：Debezium 從最後一次 flush 的 offset 接續，之後的事件會再送一次。`posts_latest`、`comments_latest` 以 LSN 去重不受影響；`posts_history` 是 `MergeTree`，會出現 `(post_id, lsn)` 相同的重複列，畫曲線時要以 LSN 去重
-- `cdc-watchdog` 只讀 PG 的系統表，不寫入任何表（5.4）
+- `cdc-watchdog` 只讀 PG 的系統表與 ClickHouse 的 `posts_history`，不寫入任何表（5.4）
 
 ---
 

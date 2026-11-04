@@ -326,3 +326,18 @@ def test_alert_unit_type_outside_mvp_rejected():
 def test_alert_negative_value_rejected():
     with pytest.raises(ValidationError):
         alert(value=-1)
+
+
+def test_post_task_rejects_backfill_fields():
+    base = {
+        "task_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "type": "post",
+        "board": "Stock",
+        "url": "https://www.ptt.cc/bbs/Stock/M.1.A.001.html",
+        "post_id": "Stock.M.1.A.001",
+        "reason": "recrawl",
+        "created_at": "2026-10-29T00:00:00Z",
+    }
+    for extra in ({"backfill_depth": 1}, {"since": "2026-10-29T00:00:00Z"}, {"reason": "backfill"}):
+        with pytest.raises(ValidationError):
+            CrawlTask.model_validate({**base, **extra})

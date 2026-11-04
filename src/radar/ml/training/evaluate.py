@@ -15,6 +15,7 @@ from pathlib import Path
 
 from sklearn.metrics import confusion_matrix, f1_score
 
+from radar.common.cli import fail, load_settings
 from radar.common.clickhouse import ClickHouseClient
 from radar.common.enums import Polarity
 from radar.common.log import log, setup_logging
@@ -276,23 +277,39 @@ def _agreement_row(a: Agreement, scope: str) -> str:
     return f"| `{a.labeler}` | {scope} | {a.n} | {a.accuracy:.1%} | {a.cohen_kappa:.3f} |"
 
 
+def check_model_dir(model_dir: Path) -> None:
+    if not model_dir.is_dir():
+        fail(f"找不到模型資料夾 {model_dir}")
+
+
 @log.catch(level="CRITICAL")
 def main() -> None:
     setup_logging("evaluate")
     parser = argparse.ArgumentParser(description="在人工測試集上評估（S3-06）")
-    parser.add_argument("--model", type=Path, required=True)
-    args = parser.parse_args()
-    settings = InferenceSettings(model_dir=args.model)
-    classifier, card = load_classifier(
-        args.model, threads=settings.threads, max_batch_tokens=settings.max_batch_tokens
+    parser.add_argument(
+        "--model",
+        type=Path,
+        required=True,
+        help="模型資料夾（含 model_card.json），例如 models/<model_version>",
     )
+    args = parser.parse_args()
+    check_model_dir(args.model)
+    settings = InferenceSettings(model_dir=args.model)
+    try:
+        classifier, card = load_classifier(
+            args.model, threads=settings.threads, max_batch_tokens=settings.max_batch_tokens
+        )
+    except FileNotFoundError as exc:
+        fail(f"{args.model} 不是模型資料夾（找不到 {exc.filename}）；請先用 import_model 匯入")
+    # NOTE: 放在載入模型之後：bert-onnx-length-batching 的驗收測試不設 ClickHouse 變數
+    ch_settings = load_settings(ClickHouseSettings)
     load_rss_mb = _peak_rss_mb()
     human_labels = load_human_labels(TESTSET_DIR)
     human = {
         pid: next(s.polarity for s in lbl.sentiments if s.target is None)
         for pid, lbl in human_labels.items()
     }
-    ch = ClickHouseClient(ClickHouseSettings())
+    ch = ClickHouseClient(ch_settings)
     try:
         posts = fetch_posts(ch, sorted(human))
         llm_labels = {

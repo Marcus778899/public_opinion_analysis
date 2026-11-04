@@ -1,0 +1,16 @@
+{
+  "task_id": "gitleaks-revision-allowlist",
+  "status": "done",
+  "files_changed": [
+    ".gitleaks.toml"
+  ],
+  "verification": {
+    "command": "gitleaks 8.30.1: gitleaks git --redact --no-banner . （worktree，掃全部 ref，含 feat/bert-notebook 的 fdc8226）",
+    "exit_code": 0,
+    "tail": "修正 qa FAIL 3248580：regex 改為名稱 (?i:...) 不分大小寫、值只接受引號包住或後接非英數字元／行尾的剛好 40 位小寫 hex（RE2 無 lookahead）。worktree 掃描：gitleaks git --redact --no-banner . -> no leaks found。反向確認（暫時 repo，隨機值，新設定 6 筆被抓 / 僅預設規則 8 筆）：API_KEY+40hex、auth_token+40hex、TOKENIZER_SHA+非hex、TOKENIZER_REV+48位hex、TOKENIZER_REV+40位大寫hex 皆被抓；TOKENIZER_REV+40位小寫hex（雙引號與 YAML 單引號兩種寫法）被放行。38 位 hex 連預設規則也不報，與 allowlist 無關。"
+  },
+  "open_questions": [
+    "剩餘風險（調查報告已列）：名稱同時含 key／secret 與 commit／sha 等（例 secret_commit）且值為 40 位小寫 hex 的真密鑰會被放過；專用前綴規則不受影響。",
+    "本機執行的是 $TMPDIR/gitleaks/gitleaks 8.30.1；PR 的 CI 全綠需推送後確認，我沒有 push。"
+  ]
+}

@@ -705,3 +705,17 @@ def test_heat_config_post_min_count_defaults_to_80_and_reads_env(monkeypatch):
     monkeypatch.setenv("HEAT_POST_MIN_COUNT", "120")
 
     assert HeatConfig.from_settings(HeatSettings()).post_min_count == 120
+
+
+def test_build_app_output_topic_follows_settings(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from radar.streaming import heat
+
+    monkeypatch.setenv("HEAT_OUTPUT_TOPIC", "replay.alerts")
+    app = MagicMock()
+    monkeypatch.setattr(heat, "Application", lambda **_kw: app)
+
+    heat.build_app(HeatSettings(), MagicMock(), MagicMock(), MagicMock())
+
+    assert "replay.alerts" in [c.args[0] for c in app.topic.call_args_list]

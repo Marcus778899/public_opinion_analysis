@@ -14,6 +14,10 @@ on:
       - develop
       - main
 
+# 覆蓋率閘門與 sync_branch.yml 由 agent-engineering 的 ae ci 執行（邏輯與 diff-cover 版本在工具裡，升級 submodule 就生效）
+env:
+  AE: .claude/skills/agent-engineering/bin/ae
+
 jobs:
   check:
     name: Check
@@ -70,8 +74,8 @@ jobs:
           fi
           files=$(git diff --name-only "$base" HEAD)
           if [ -z "$files" ]; then echo "code=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          # 變更全在 docs/、tasks/、reports/ 或根目錄 *.md 就跳過
-          if echo "$files" | grep -qvE '^(docs/|tasks/|reports/)|^[^/]+\.md$'; then
+          # 變更全在 docs/、.agent/ 或根目錄 *.md 就跳過
+          if echo "$files" | grep -qvE '^(docs/|\.agent/)|^[^/]+\.md$'; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
             echo "只改文件，略過整合測試"; echo "code=false" >> "$GITHUB_OUTPUT"
@@ -110,22 +114,39 @@ jobs:
           export IT_CLICKHOUSE_URL="http://127.0.0.1:$(port IT_CLICKHOUSE_HOST_PORT)"
           export IT_GRAFANA_URL="http://127.0.0.1:$(port IT_GRAFANA_HOST_PORT)"
           make coverage
-      # 改到的程式碼覆蓋率（scripts/coverage_gate.py，門檻 80%）：發版 PR 是已逐張檢查過的累積，不檢查
-      - name: Set up Python for coverage gate  # 不要刪：coverage_gate.py 與 diff-cover 需要，跟專案語言無關
+      # 改到的程式碼覆蓋率（ae ci coverage-gate，門檻 80%）：發版 PR 是已逐張檢查過的累積，不檢查
+      # 工具本體（ae）是 submodule 指到的版本；private 時到 repo secrets 設 AE_TOKEN（只給 agent-engineering 的 Contents 唯讀）
+      # 放在跑測試的步驟之後才 checkout：測試、lint 不會掃到工具本體
+      - name: Locate agent-engineering
+        id: ae
+        if: steps.changes.outputs.code == 'true' && github.event_name == 'pull_request' && github.base_ref == 'develop'
+        run: |
+          url=$(git config -f .gitmodules --get submodule..claude/skills/agent-engineering.url)
+          repo=${url#https://github.com/}
+          echo "repo=${repo%.git}" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD:.claude/skills/agent-engineering)" >> "$GITHUB_OUTPUT"
+      - name: Checkout agent-engineering
+        if: steps.changes.outputs.code == 'true' && github.event_name == 'pull_request' && github.base_ref == 'develop'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.ae.outputs.repo }}
+          ref: ${{ steps.ae.outputs.sha }}
+          path: .claude/skills/agent-engineering
+          token: ${{ secrets.AE_TOKEN || github.token }}
+          persist-credentials: false   # 後面會跑專案的程式，不留 token
+      - name: Set up Python for coverage gate  # 不要刪：ae 需要 3.11 以上，跟專案語言無關
         if: steps.changes.outputs.code == 'true' && github.event_name == 'pull_request' && github.base_ref == 'develop'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Coverage of changed lines (diff-cover)
+      - name: Coverage of changed lines
         if: steps.changes.outputs.code == 'true' && github.event_name == 'pull_request' && github.base_ref == 'develop'
         env:
-          DIFF_COVER_VERSION: "10.6.0"
           COVERAGE_SRC_ROOTS: ""
-        run: |
-          pip install -q "diff-cover==${DIFF_COVER_VERSION}"
-          python3 scripts/coverage_gate.py "origin/${GITHUB_BASE_REF}"
+        run: '"$AE" ci coverage-gate'
 
-  # 資安稽核：每個 PR 都跑，pr.py merge 要求所有 check 綠。工具與語言無關，版本固定，升級改這裡
+  # 資安稽核：每個 PR 都跑，合併前要求所有 check 綠。工具與語言無關，版本固定，升級改這裡
+  # NOTE: 不改用 ae ci security：它不驗下載檔 SHA256（#238 加的）、PR 只掃新增 commit，換過去會降低防護
   # 要忽略某個發現，寫進 osv-scanner.toml／.gitleaksignore／.semgrepignore 並附理由；這些檔在 fast 通道是受保護路徑，發版前 security 也會逐條檢查
   security:
     name: Security
@@ -133,6 +154,9 @@ jobs:
     env:
       GITLEAKS_VERSION: "8.30.1"
       OSV_SCANNER_VERSION: "2.6.0"
+      # 來源：各 release 的 gitleaks_<版本>_checksums.txt、osv-scanner_SHA256SUMS；升版時一併更新
+      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+      OSV_SCANNER_SHA256: "ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108"
       SEMGREP_VERSION: "1.178.0"
     steps:
       - name: Checkout
@@ -141,11 +165,14 @@ jobs:
           fetch-depth: 0  # 密鑰掃描要看整段歷史，刪掉的 secret 仍在 git 裡
       - name: Secrets (gitleaks)
         run: |
-          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar -xz -C "$RUNNER_TEMP" gitleaks
+          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tar.gz" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum -c -
+          tar -xz -C "$RUNNER_TEMP" -f "$RUNNER_TEMP/gitleaks.tar.gz" gitleaks
           "$RUNNER_TEMP/gitleaks" git --redact --no-banner .
       - name: Dependencies (osv-scanner)
         run: |
           curl -sSfL -o "$RUNNER_TEMP/osv-scanner" "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  $RUNNER_TEMP/osv-scanner" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/osv-scanner"
           set +e
           "$RUNNER_TEMP/osv-scanner" scan source -r .

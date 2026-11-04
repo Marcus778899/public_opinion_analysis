@@ -100,6 +100,7 @@ def env(monkeypatch, tmp_path: Path, kafka_settings, worker_clickhouse_settings,
         monkeypatch.setenv(key, value)
     get_kafka_settings.cache_clear()
     card = make_card(e.model_version)
+    (tmp_path / "model_card.json").write_text(card.model_dump_json(), encoding="utf-8")
     monkeypatch.setattr(
         inference_main,
         "load_classifier",

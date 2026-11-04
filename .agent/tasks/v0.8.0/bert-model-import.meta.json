@@ -1,0 +1,32 @@
+{
+  "task_id": "bert-model-import",
+  "kind": "feat",
+  "owner": "backend",
+  "lane": "full",
+  "title": "`python -m radar.ml.training.import_model --zip <路徑>` 把模型包安全解到 `models/<model_version>/`",
+  "issue": 158,
+  "branch": "feat/bert-model-import",
+  "worktree": ".worktrees/bert-model-import",
+  "pr": 160,
+  "qa": {
+    "result": "pass",
+    "sha": "16d7c02fc5432b9d611d71660641fadbede7ab77",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "16d7c02fc5432b9d611d71660641fadbede7ab77",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "03da98914f0331bb4715f949a5735a3a42069737",
+    "sha": "16d7c02fc5432b9d611d71660641fadbede7ab77"
+  },
+  "rulings": 1,
+  "ruling": {
+    "result": "test_wrong",
+    "sha": "fbdab12a5b7801d253dfdfbd780a48c17ee555e7",
+    "after_fails": 0
+  }
+}

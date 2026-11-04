@@ -257,12 +257,13 @@ def test_ci_check_job_only_runs_make_check(ci: dict) -> None:
     assert "make check" in joined
     assert "make coverage" not in joined
     assert "coverage_gate" not in joined
+    assert "coverage-gate" not in joined
 
 
 def test_ci_integration_job_runs_coverage_and_gate_only_for_pr_to_develop(ci: dict) -> None:
     steps = _steps(ci, "integration")
     cov = [s for s in steps if "make coverage" in _step_text(s)]
-    gate = [s for s in steps if "coverage_gate.py" in _step_text(s)]
+    gate = [s for s in steps if "coverage-gate" in _step_text(s)]
     assert len(cov) == 1 and gate
     for s in gate:
         cond = s.get("if", "")
@@ -295,8 +296,12 @@ def test_ci_integration_first_step_diffs_changed_files(ci: dict) -> None:
     )
     text = _step_text(steps[idx])
     assert "github.event.before" in text
-    for path in ("docs/", "tasks/", "reports/"):
+    for path in ("docs/", ".agent/"):
         assert path in text, path
+    # 不含 .agent/ 前綴的 v1 路徑不應再出現
+    stripped = text.replace(".agent/", "")
+    for path in ("tasks/", "reports/"):
+        assert path not in stripped, path
 
 
 def test_ci_integration_later_steps_are_skippable_by_if(ci: dict) -> None:

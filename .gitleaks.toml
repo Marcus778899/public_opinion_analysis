@@ -1,4 +1,5 @@
 # 擴充預設規則；只排除 tasks/ 封存路徑（D-018）
+# NOTE: tasks/ 已搬到 .agent/tasks/，但 CI 掃整段 git 歷史，舊 commit 仍有 tasks/，這條要留著
 # NOTE: 封存派工單與報告會引用誤判內容，逐筆加 fingerprint 會無限循環
 title = "radar gitleaks config"
 
@@ -10,7 +11,7 @@ description = "tasks/ 封存派工單、qa／review 紀錄（D-018）"
 paths = ['''^tasks/''']
 
 [[allowlists]]
-description = "Git／Hugging Face revision：變數名含 rev/revision/commit/sha 且值為 40 位小寫 hex（D-026）"
+description = "Git／Hugging Face revision：變數名最後一段是 rev/revision/commit/sha（整段比對）且值為 40 位小寫 hex（D-026）"
 targetRules = ["generic-api-key"]
 regexTarget = "match"
-regexes = ['''(?i:rev|revision|commit|sha)[a-zA-Z0-9_]*\s*[:=]+\s*(?:"[0-9a-f]{40}"|'[0-9a-f]{40}'|[0-9a-f]{40}(?:[^0-9a-zA-Z]|$))''']
+regexes = ['''(?i:(?:^|[^a-z0-9])(?:rev|revision|commit|sha))\s*[:=]+\s*(?:"[0-9a-f]{40}"|'[0-9a-f]{40}'|[0-9a-f]{40}(?:[^0-9a-zA-Z]|$))''']

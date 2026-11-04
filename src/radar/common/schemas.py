@@ -41,6 +41,8 @@ class CrawlTask(KafkaMessage):
     url: str
     post_id: str | None = None
     reason: CrawlReason
+    since: UtcDatetime | None = None
+    backfill_depth: int = Field(default=0, ge=0)
     created_at: UtcDatetime
 
     @model_validator(mode="after")
@@ -52,6 +54,12 @@ class CrawlTask(KafkaMessage):
             raise ValueError("post task requires post_id")
         else:
             _check_belongs_to_board(self.post_id, self.board)
+            if (
+                self.since is not None
+                or self.backfill_depth != 0
+                or self.reason is CrawlReason.BACKFILL
+            ):
+                raise ValueError("since, backfill_depth and reason=backfill are for list tasks")
         return self
 
     def kafka_key(self) -> str:

@@ -41,6 +41,9 @@ topics:
   - name: replay.cdc.comments
     partitions: 3
     retention_hours: 24
+  - name: replay.alerts
+    partitions: 1
+    retention_hours: 24
   - name: dlq
     partitions: 1
     retention_hours: 720

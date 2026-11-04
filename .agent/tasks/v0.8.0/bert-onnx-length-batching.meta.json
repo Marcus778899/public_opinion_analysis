@@ -1,0 +1,30 @@
+{
+  "task_id": "bert-onnx-length-batching",
+  "kind": "feat",
+  "owner": "backend",
+  "lane": "full",
+  "title": "ONNX 推論依 token 長度排序後切小批，每次 `session.run` 的篇數 × 序列長度不超過 `INFERENCE_MAX_BATCH_TOKENS`，預測不變、耗時與記憶體下降，讓 ckip fp32 有機會過進 shadow 門檻",
+  "issue": 196,
+  "branch": "feat/bert-onnx-length-batching",
+  "worktree": ".worktrees/bert-onnx-length-batching",
+  "pr": 197,
+  "qa": {
+    "result": "pass",
+    "sha": "54b75d9ce0dbc80c9482abcf13feb5540e0b9ef0",
+    "by": "qa",
+    "carried_from": "61ae81bc7f6508f6ca6261da1a6f990485075aa7"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "54b75d9ce0dbc80c9482abcf13feb5540e0b9ef0",
+    "by": "architect",
+    "carried_from": "61ae81bc7f6508f6ca6261da1a6f990485075aa7"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "aa236836cb8d5501f1f6cf8cefa577046eb0e619",
+    "sha": "54b75d9ce0dbc80c9482abcf13feb5540e0b9ef0",
+    "carried_from": "61ae81bc7f6508f6ca6261da1a6f990485075aa7"
+  },
+  "amend_sha": "7004c5a8053f5f51b86f67b338b045b25316c5ae"
+}

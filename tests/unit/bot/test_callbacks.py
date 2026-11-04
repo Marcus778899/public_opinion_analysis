@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from radar.bot.callbacks import handle_callback
+from radar.bot.callbacks import handle_callback, timed
 from radar.bot.stats import BoardOverview, PostStats
 from radar.bot.views import Action, Callback, ChatPrefs
 
@@ -243,3 +243,109 @@ def test_toggle_board_alerts_back_on_says_enabled():
     run(Callback(Action.TOGGLE, "board"), prefs=prefs)
 
     assert run(Callback(Action.TOGGLE, "board"), prefs=prefs).toast == "已開啟看板警示"
+
+
+def test_sub_toggle_answers_after_write_before_requery_and_marks_answered():
+    order: list[str] = []
+
+    class Spy(FakeSubs):
+        def subscribe(self, chat_id, board):
+            order.append("write")
+            return super().subscribe(chat_id, board)
+
+        def boards_of(self, chat_id):
+            order.append("boards_of")
+            return super().boards_of(chat_id)
+
+    result = handle_callback(
+        Callback(Action.SUB, "Stock"),
+        CHAT,
+        Spy(),  # type: ignore[arg-type]
+        FakePrefs(),  # type: ignore[arg-type]
+        FakeQueries(),
+        min_score=0.6,
+        now=NOW,
+        answer=lambda toast: order.append(f"answer:{toast}"),
+    )
+
+    assert order == ["boards_of", "write", "answer:已訂閱 Stock", "boards_of"]
+    assert result.answered is True and result.toast == "已訂閱 Stock"
+
+
+def test_sub_toggle_without_answer_hook_leaves_answered_false():
+    result = run(Callback(Action.SUB, "Stock"), FakeSubs())
+
+    assert result.answered is False
+
+
+def test_sub_toggle_unknown_board_does_not_call_answer():
+    called: list[str | None] = []
+
+    handle_callback(
+        Callback(Action.SUB, "Off"),
+        CHAT,
+        FakeSubs(),  # type: ignore[arg-type]
+        FakePrefs(),  # type: ignore[arg-type]
+        FakeQueries(),
+        min_score=0.6,
+        now=NOW,
+        answer=called.append,
+    )
+
+    assert called == []
+
+
+class _LogSpy:
+    def __init__(self) -> None:
+        self.lines: list[tuple] = []
+
+    def info(self, *args) -> None:
+        self.lines.append(args)
+
+
+def test_timed_logs_step_name_chat_and_milliseconds(monkeypatch):
+    spy = _LogSpy()
+    monkeypatch.setattr("radar.bot.callbacks.log", spy)
+
+    with timed("pg_write", 9):
+        pass
+
+    fmt, step, chat, ms = spy.lines[0]
+    assert (step, chat) == ("pg_write", 9) and ms >= 0 and "ms=" in fmt
+
+
+def test_timed_logs_even_when_step_raises(monkeypatch):
+    spy = _LogSpy()
+    monkeypatch.setattr("radar.bot.callbacks.log", spy)
+
+    try:
+        with timed("answerCallbackQuery", 9):
+            raise ValueError("boom")
+    except ValueError:
+        pass
+
+    assert spy.lines[0][1] == "answerCallbackQuery"
+
+
+def test_sub_toggle_logs_every_step(monkeypatch):
+    spy = _LogSpy()
+    monkeypatch.setattr("radar.bot.callbacks.log", spy)
+
+    handle_callback(
+        Callback(Action.SUB, "Stock"),
+        CHAT,
+        FakeSubs(),  # type: ignore[arg-type]
+        FakePrefs(),  # type: ignore[arg-type]
+        FakeQueries(),
+        min_score=0.6,
+        now=NOW,
+        answer=lambda toast: None,
+    )
+
+    assert [line[1] for line in spy.lines] == [
+        "enabled_boards",
+        "boards_of",
+        "pg_write",
+        "answerCallbackQuery",
+        "requery_boards_of",
+    ]

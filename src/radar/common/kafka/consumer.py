@@ -48,6 +48,7 @@ _RETRIABLE_COMMIT_CODES = frozenset(
     }
 )
 _COMMIT_MAX_RETRIES = 6
+_SLEEP_SEGMENT_S = 0.5
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,7 @@ class BatchConsumer[T: BaseModel]:
         backoff: Callable[[], Iterator[float]] = backoff_delays,
         decode: Callable[[Message], T] | None = None,
         clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         """decode 預設把訊息當 JSON 驗證成 model；CDC 的 Avro 訊息傳入自訂 decode。"""
         self._consumer = consumer or Consumer(consumer_config(settings, group_id))
@@ -96,6 +98,7 @@ class BatchConsumer[T: BaseModel]:
         self._batch_timeout_s = batch_timeout_s
         self._backoff = backoff
         self._clock = clock
+        self._sleep = sleep
         self._stop = threading.Event()
         self._retrying = False
 
@@ -255,10 +258,19 @@ class BatchConsumer[T: BaseModel]:
                     delay,
                     err,
                 )
-                self._stop.wait(delay)
+                self._sleep_interruptible(delay)
                 if self._stop.is_set():
                     log.warning("stopping during commit retry, batch left uncommitted: %s", err)
                     return
+
+    def _sleep_interruptible(self, delay_s: float) -> None:
+        """分段 sleep，每段後檢查 stop；不用 Event.wait，避免與 signal handler 互等。"""
+        deadline = self._clock() + delay_s
+        while not self._stop.is_set():
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                return
+            self._sleep(min(remaining, _SLEEP_SEGMENT_S))
 
     def _install_signal_handlers(self) -> dict[int, object]:
         # NOTE: signal 只能在主執行緒註冊；在其他執行緒跑時由呼叫端負責 stop()

@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from radar.bot import main as bot_main
+from radar.bot.callbacks import CallbackResult
 from radar.bot.commands import COMMANDS
 from radar.bot.main import (
     PURGE_INTERVAL,
@@ -23,6 +24,7 @@ from radar.bot.telegram import (
     TelegramForbiddenError,
     Update,
 )
+from radar.bot.views import Screen
 from radar.common.kafka.consumer import TransientError
 from radar.common.settings import TelegramSettings
 
@@ -237,6 +239,43 @@ def test_handle_update_edit_bad_request_is_skipped():
     assert telegram.answered == [("cb1", None)]
 
 
+def _sub_press(monkeypatch, error):
+    """SUB 回呼：on_callback 內（寫入後）呼叫 answer，answer 丟 error。"""
+
+    def fake_on_callback(callback, sessions, queries, min_score, now, answer=None):
+        assert answer is not None
+        answer("已訂閱 Stock")
+        return CallbackResult(Screen("x", []), "已訂閱 Stock", answered=True)
+
+    class AnswerFails(FakeTelegram):
+        def answer_callback_query(self, callback_id, text=None):
+            raise error
+
+    monkeypatch.setattr("radar.bot.main.on_callback", fake_on_callback)
+    telegram = AnswerFails()
+    handle_update(
+        button(1, chat_id=8, data="1:sub:Stock"),
+        telegram,  # type: ignore[arg-type]
+        settings(()),
+        lambda: FakeSession(),  # type: ignore[arg-type, return-value]
+        FakeQueries(),
+        NOW,
+    )
+    return telegram
+
+
+def test_handle_update_sub_answer_bad_request_skips_edit(monkeypatch):
+    telegram = _sub_press(monkeypatch, TelegramBadRequestError("query is too old"))
+
+    assert telegram.edited == []
+
+
+def test_handle_update_sub_answer_forbidden_forgets_chat(monkeypatch, forgotten):
+    telegram = _sub_press(monkeypatch, TelegramForbiddenError(8))
+
+    assert (telegram.edited, forgotten) == ([], [8])
+
+
 def test_handle_update_other_update_type_is_noop():
     telegram = handle(Update(update_id=1))
 
@@ -390,3 +429,71 @@ def test_poll_commands_forbidden_reply_advances_offset(forgotten):
     telegram, _ = run([[msg(1)]], error=TelegramForbiddenError(5))
 
     assert (telegram.offsets, forgotten) == ([None, 2], [5])
+
+
+# --- poll_commands 韌性（#79、#67） ---
+
+
+def _pg_down():
+    from sqlalchemy.exc import OperationalError
+
+    return OperationalError("SELECT 1", {}, Exception("refused"))
+
+
+def test_poll_commands_purge_pg_down_retries_next_round_and_handles_commands(monkeypatch):
+    calls: list[int] = []
+
+    def purge(_s, _set, _now):
+        calls.append(1)
+        if len(calls) == 1:
+            raise _pg_down()
+        return 0
+
+    monkeypatch.setattr(bot_main, "purge_muted", purge)
+
+    telegram, _ = run([[msg(1)], []])
+
+    assert len(calls) == 2
+    assert [c for c, _ in telegram.sent] == [5]
+
+
+def test_poll_commands_unexpected_update_error_skips_and_advances_offset(monkeypatch):
+    monkeypatch.setattr(bot_main, "purge_muted", lambda *_a: 0)
+
+    telegram, _ = run([[msg(1)], []], error=RuntimeError("bug"))
+
+    assert telegram.offsets[:2] == [None, 2]
+
+
+def test_poll_commands_update_pg_down_keeps_offset_and_waits(monkeypatch):
+    monkeypatch.setattr(bot_main, "purge_muted", lambda *_a: 0)
+
+    telegram, waits = run([[msg(1)], [msg(1)]], error=_pg_down())
+
+    assert telegram.offsets[:2] == [None, None]
+    assert len(waits) == 2
+
+
+@pytest.mark.parametrize("update_factory", [lambda: msg(1), lambda: button(1)])
+def test_poll_commands_reply_transient_error_retries_same_update(monkeypatch, update_factory):
+    monkeypatch.setattr(bot_main, "purge_muted", lambda *_a: 0)
+
+    telegram, waits = run(
+        [[update_factory()], [update_factory()]],
+        error=TransientError("429", retry_after_s=3),
+    )
+
+    assert telegram.offsets[:2] == [None, None]
+    assert waits[0] == 3
+
+
+def test_filter_recipients_drops_unlisted_chats():
+    assert bot_main.filter_recipients([1, 2, 3], [2]) == [2]
+
+
+def test_filter_recipients_empty_allowlist_keeps_all():
+    assert bot_main.filter_recipients([1, 2], []) == [1, 2]
+
+
+def test_filter_recipients_no_subscribers_returns_empty():
+    assert bot_main.filter_recipients([], [1]) == []

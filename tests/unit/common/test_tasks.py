@@ -1,6 +1,9 @@
+from datetime import UTC, datetime
+
 from confluent_kafka import KafkaError, KafkaException
 
-from radar.common.tasks import list_task_partition, resolve_list_partition
+from radar.common.enums import CrawlReason
+from radar.common.tasks import list_task_partition, make_list_task, resolve_list_partition
 
 INITIAL = ["Gossiping", "Stock", "Tech_Job"]
 
@@ -41,3 +44,10 @@ def test_resolve_list_partition_metadata_failure_returns_none():
         raise KafkaException(KafkaError(KafkaError.UNKNOWN_TOPIC_OR_PART))
 
     assert resolve_list_partition("Stock", INITIAL, fail) is None
+
+
+def test_make_list_task_since_defaults_to_none_and_passes_through():
+    since = datetime(2026, 10, 29, 4, 0, tzinfo=UTC)
+
+    assert make_list_task("Stock", CrawlReason.SCHEDULE).since is None
+    assert make_list_task("Stock", CrawlReason.SCHEDULE, since=since).since == since

@@ -1,0 +1,27 @@
+{
+  "task_id": "notebook-logits-check-fix",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "`notebooks/bert_finetune.ipynb` 的 PyTorch／ONNX logits 比對在真實 Colab 不再誤擋正常匯出的模型，同時仍能擋住真的匯出錯誤",
+  "issue": 186,
+  "branch": "fix/notebook-logits-check-fix",
+  "worktree": ".worktrees/notebook-logits-check-fix",
+  "pr": 187,
+  "qa": {
+    "result": "pass",
+    "sha": "6773e1141afe8aec5b62708b3cf4842b8e58bda4",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "6773e1141afe8aec5b62708b3cf4842b8e58bda4",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "014ea466b5b73f62391890b45980df3f948dcd78",
+    "sha": "9095224053e4100c445274d6e91401ebd2ff20a2"
+  },
+  "amend_sha": "138e75a636c7a04707948c83bbc7afe7770db868"
+}

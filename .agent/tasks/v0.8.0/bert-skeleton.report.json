@@ -1,0 +1,53 @@
+{
+  "task_id": "bert-skeleton",
+  "status": "done",
+  "files_changed": [
+    ".env.example",
+    "Makefile",
+    "docs/development-spec.md",
+    "docs/realtime-sentiment-radar-design.md",
+    "infra/clickhouse/migrations/0006_predictions_shadow.sql",
+    "infra/docker-compose.e2e.yaml",
+    "infra/docker-compose.yaml",
+    "infra/kafka/topics.yaml",
+    "notebooks/bert_finetune.ipynb",
+    "pyproject.toml",
+    "src/radar/common/kafka/names.py",
+    "src/radar/common/settings.py",
+    "src/radar/ml/inference/main.py",
+    "src/radar/ml/inference/roles.py",
+    "src/radar/ml/training/classifier.py",
+    "src/radar/ml/training/compare.py",
+    "src/radar/ml/training/evaluate.py",
+    "src/radar/ml/training/import_model.py",
+    "src/radar/ml/training/train.py",
+    "tests/helpers/onnx_model.py",
+    "tests/integration/acceptance/conftest.py",
+    "tests/unit/acceptance/conftest.py",
+    "tests/unit/common/test_settings.py",
+    "tests/unit/common/test_shadow_migration.py",
+    "tests/unit/helpers/test_onnx_model_helper.py",
+    "tests/unit/ml/fakes.py",
+    "tests/unit/ml/inference/test_main.py",
+    "tests/unit/ml/inference/test_roles.py",
+    "tests/unit/ml/test_fakes.py",
+    "tests/unit/ml/test_stage8_interfaces.py",
+    "tests/unit/ml/training/test_train.py",
+    "uv.lock"
+  ],
+  "verification": {
+    "command": "make check；docker compose -f .worktrees/bert-skeleton/infra/docker-compose.yaml --env-file .env --profile app build init；docker compose -f infra/docker-compose.yaml --env-file .env --profile app run --rm --no-deps inference python -c \"import platform, onnxruntime, tokenizers; ...\"；docker compose --env-file .env -f .worktrees/bert-skeleton/compose.yaml run --rm test pytest tests/integration -q -n auto --dist loadgroup（之後 down -v）",
+    "exit_code": 0,
+    "tail": "make check: pre-commit 全 Passed；1214 passed in 3.78s\nbuild init: radar-app:latest  Built（uv sync 安裝 onnxruntime==1.31.0、tokenizers==0.23.3）\n容器內: aarch64 3.12.15 onnxruntime 1.31.0 tokenizers 0.23.3 ['AzureExecutionProvider', 'CPUExecutionProvider']\n整合測試: 330 passed in 41.82s；Linux 容器內 tests/unit/helpers+ml+common: 526 passed\n本機 diff-cover（只跑單元測試）: 改到的程式碼 89%\nreview 修正（573b966，只改 docs/development-spec.md 7.27）後 make check：pre-commit Passed；1214 passed in 3.57s\n第二輪 review 修正（只改 docs/development-spec.md 7.27）後 make check：1214 passed"
+  },
+  "open_questions": [
+    "派工單的驗證指令 `docker compose ... build inference` 會失敗（no such service: init）：inference 沒有 build 區段、image 只由 init 建置。改用 `--profile app build init`；`run` 要從主目錄的 compose 檔下（worktree 沒有 .env，env_file: ../.env 找不到），image 相同。開發規格 7.27「測試」已改寫成可執行的指令",
+    "超出負責檔案：infra/docker-compose.e2e.yaml 加 inference-shadow 的 e2e log volume（3 行）。新增 compose 服務後，既有單元測試 test_e2e_volumes／test_e2e_no_dev_volumes 要求每個掛 app_logs 的服務都有 e2e 覆寫，不加 make check 不過。已寫進 7.27 檔案分工的 bert-skeleton 列",
+    "tests/integration/conftest.py 的 CLICKHOUSE_TOPICS 要加 names.PREDICTIONS_SHADOW（Kafka engine 表訂閱前 topic 要存在）：不在本單負責檔案，沒改；7.27 檔案分工已指派給 bert-shadow-inference（它的整合測試需要）。現行 330 個整合測試不受影響",
+    "tokenizers 會連帶裝 huggingface-hub、hf-xet、fsspec、tqdm、filelock（進 image）；執行期不呼叫，D-020 核可的是 tokenizers 本身，請 manager 確認是否需要告知甲方",
+    "建 image 時 tag radar-app:latest 是開發環境共用的 tag，現在內容是本分支；make up-app 會 --build 重建，不影響使用",
+    "自行決定（已寫進 7.27「自行決定」表）：model_version 改為 bert-<BASE>-<時間>；兩個預訓練模型以人工測試集 macro-F1 擇優、差距 < 0.01 取 macbert；notebook 以 BASE 參數一次訓一個；角色對照表放 ml/inference/roles.py；骨架期間 shadow 角色拒絕啟動（require_primary），避免 shadow 結果寫進 predictions",
+    "review 必改 4 條已改（573b966）：①威脅表「只載 safetensors」改為做不到、引用調查「模型 revision」節，pickle 權重載入列待決定 D-025（選項 A/B/C 與建議寫在 7.27，manager 開立）；②「匯出」補 tokenizer 規定（BertTokenizerFast save_pretrained、Tokenizer.from_file 重編碼 ids 一致、logits 比對共用 ids），並列入自行決定表；③需調查改寫：revision 值引用調查、甲方首次執行以 HF API 核對，新增需調查 1（safetensors 轉換 PR）與 2（ckiplab tokenizer 是否用 Google 版），結果引用調查末節；④派工順序 bert-notebook 相依改為「等 1 與 D-025」",
+    "第二輪 review 必改 3 條已改：①tokenizer：macbert 用自己 repo、ckip 照 ckiplab README 用 google-bert/bert-base-chinese（釘 revision，值引用調查末節第 4 項），皆 BertTokenizerFast save_pretrained；自行決定表與威脅表（revision 含 Google tokenizer repo、card 記 tokenizer 來源與 revision）同步；②「需調查」改為「已調查」，引用結果不重抄 hash；③D-025 段縮成一行引用 docs/decisions.md。notebook 第一格 BASE_MODELS 需加 tokenizer 來源欄位，留給 bert-notebook"
+  ]
+}
