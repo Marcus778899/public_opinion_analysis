@@ -56,14 +56,14 @@ def zip_sha256(path: Path) -> str:
 
 def test_cli_missing_zip_exits_nonzero_with_hint_and_no_traceback(tmp_path):
     missing = tmp_path / "nope.zip"
-    out = assert_clean_failure(run_cli(["--zip", str(missing)], tmp_path))
+    out = assert_clean_failure(run_cli(["--zip", str(missing), "--sha256", "0" * 64], tmp_path))
     assert "nope.zip" in out
 
 
 def test_cli_not_a_zip_exits_nonzero_with_hint_and_no_traceback(tmp_path):
     bogus = tmp_path / "bogus.zip"
     bogus.write_bytes(b"this is not a zip")
-    out = assert_clean_failure(run_cli(["--zip", str(bogus)], tmp_path))
+    out = assert_clean_failure(run_cli(["--zip", str(bogus), "--sha256", "0" * 64], tmp_path))
     assert "zip" in out.lower()
 
 
@@ -71,9 +71,10 @@ def test_cli_existing_version_exits_nonzero_with_hint_and_no_traceback(
     make_model_package: MakePackage, tmp_path
 ):
     zip_path = make_model_package()
-    first = run_cli(["--zip", str(zip_path)], tmp_path)
+    args = ["--zip", str(zip_path), "--sha256", zip_sha256(zip_path)]
+    first = run_cli(args, tmp_path)
     assert first.returncode == 0, output_of(first)
-    out = assert_clean_failure(run_cli(["--zip", str(zip_path)], tmp_path))
+    out = assert_clean_failure(run_cli(args, tmp_path))
     version = zip_path.stem
     assert version in out
 
@@ -84,11 +85,12 @@ def test_cli_tampered_package_exits_nonzero_without_traceback(
     members = read_zip(make_model_package())
     members["model.onnx"] += b"x"
     bad = write_zip(tmp_path / "bad.zip", members)
-    assert_clean_failure(run_cli(["--zip", str(bad)], tmp_path))
+    assert_clean_failure(run_cli(["--zip", str(bad), "--sha256", zip_sha256(bad)], tmp_path))
 
 
 def test_cli_failure_message_is_short(tmp_path):
-    out = output_of(run_cli(["--zip", str(tmp_path / "nope.zip")], tmp_path))
+    args = ["--zip", str(tmp_path / "nope.zip"), "--sha256", "0" * 64]
+    out = output_of(run_cli(args, tmp_path))
     lines = [ln for ln in out.splitlines() if ln.strip()]
     assert len(lines) <= 3, lines
 
@@ -116,9 +118,9 @@ def test_help_describes_every_argument(tmp_path):
 # ---------- #177 --sha256 ----------
 
 
-def test_cli_prints_package_sha256_without_option(make_model_package: MakePackage, tmp_path):
+def test_cli_prints_package_sha256_with_option(make_model_package: MakePackage, tmp_path):
     zip_path = make_model_package()
-    proc = run_cli(["--zip", str(zip_path)], tmp_path)
+    proc = run_cli(["--zip", str(zip_path), "--sha256", zip_sha256(zip_path)], tmp_path)
     assert proc.returncode == 0, output_of(proc)
     assert zip_sha256(zip_path) in output_of(proc)
 
