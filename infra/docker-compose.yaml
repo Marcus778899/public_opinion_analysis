@@ -346,10 +346,13 @@ services:
       CONFIG_STORAGE_TOPIC: 'connect_configs'
       OFFSET_STORAGE_TOPIC: 'connect_offsets'
       STATUS_STORAGE_TOPIC: 'connect_statuses'
-      # 新環境建內部 topic 的副本數；既有 topic 不受影響（開發規格 7.30 B）
+      # 新環境建內部 topic 的副本數與 min.isr；既有 topic 不受影響（開發規格 7.30 B）
       CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: '2'
       CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: '2'
       CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: '2'
+      CONNECT_CONFIG_STORAGE_MIN_INSYNC_REPLICAS: '1'
+      CONNECT_OFFSET_STORAGE_MIN_INSYNC_REPLICAS: '1'
+      CONNECT_STATUS_STORAGE_MIN_INSYNC_REPLICAS: '1'
       HEAP_OPTS: ${CONNECT_HEAP_OPTS}
     ports:
       - "127.0.0.1:8083:8083"
