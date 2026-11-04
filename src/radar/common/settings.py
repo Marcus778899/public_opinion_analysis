@@ -119,6 +119,8 @@ class CdcWatchdogSettings(BaseSettings):
     request_timeout_s: float = 10.0
     # posts_history 最新 changed_at 超過這麼久沒前進就告警（開發規格 7.28 B）
     stale_alert_s: float = 1800.0
+    # connector 查詢持續 404 超過這麼久記 ERROR 並讓 heartbeat 送 /fail（開發規格 7.30 B）
+    connector_missing_alert_s: float = 300.0
 
     @field_validator("heartbeat_url", mode="before")
     @classmethod
