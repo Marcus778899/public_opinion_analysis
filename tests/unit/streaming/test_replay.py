@@ -421,3 +421,16 @@ def test_main_surge_does_not_check_topic_for_leftovers(monkeypatch):
     replay_mod.main()
 
     assert checked == []
+
+
+def test_warn_if_dirty_message_is_chinese_and_mentions_old_messages(monkeypatch, caplog):
+    consumer = _consumer_with_marks([(0, 5)])
+    monkeypatch.setattr(replay_mod, "Consumer", lambda _conf: consumer)
+    monkeypatch.setattr(replay_mod, "consumer_config", lambda *_a: {})
+    messages: list[str] = []
+    monkeypatch.setattr(replay_mod.log, "warning", lambda fmt, *a: messages.append(fmt % a))
+
+    warn_if_replay_topic_dirty(MagicMock())
+
+    assert len(messages) == 1
+    assert "舊訊息" in messages[0]
