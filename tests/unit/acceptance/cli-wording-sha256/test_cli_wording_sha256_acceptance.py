@@ -37,15 +37,22 @@ def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def assert_one_line_error(proc: subprocess.CompletedProcess[str]) -> str:
+def assert_one_line_error(
+    proc: subprocess.CompletedProcess[str], zip_path: Path | None = None
+) -> str:
     out = proc.stdout + proc.stderr
     assert proc.returncode == 1, out
     assert "Traceback" not in out, out
     errors = [ln for ln in out.splitlines() if ln.startswith("error:")]
     assert len(errors) == 1, out
     assert CJK.search(errors[0]), errors[0]
-    # 一行：error 行之外不可再有其他非空行
-    assert len([ln for ln in out.splitlines() if ln.strip()]) == 1, out
+    # error 行之外：檔案不存在時不可有其他行；否則最多一行，且必須是整包 SHA-256
+    others = [ln for ln in out.splitlines() if ln.strip() and not ln.startswith("error:")]
+    if zip_path is None:
+        assert not others, out
+    else:
+        assert len(others) <= 1, out
+        assert all(sha(zip_path) in ln for ln in others), out
     return errors[0]
 
 
@@ -62,7 +69,7 @@ def test_not_a_zip_prints_one_chinese_line(tmp_path):
     bogus = tmp_path / "bogus.zip"
     bogus.write_bytes(b"not a zip")
     line = assert_one_line_error(
-        run_import(["--zip", str(bogus), "--sha256", sha(bogus)], tmp_path)
+        run_import(["--zip", str(bogus), "--sha256", sha(bogus)], tmp_path), bogus
     )
     assert "zip" in line.lower()
 
@@ -73,7 +80,7 @@ def test_existing_version_says_no_overwrite_and_next_step(
     zip_path = make_model_package()
     args = ["--zip", str(zip_path), "--sha256", sha(zip_path)]
     assert run_import(args, tmp_path).returncode == 0
-    line = assert_one_line_error(run_import(args, tmp_path))
+    line = assert_one_line_error(run_import(args, tmp_path), zip_path)
     assert zip_path.stem in line
     assert "不會覆寫" in line
     assert "models/" in line
@@ -84,7 +91,7 @@ def test_sha256_mismatch_prints_actual_and_says_redownload(
 ):
     zip_path = make_model_package()
     line = assert_one_line_error(
-        run_import(["--zip", str(zip_path), "--sha256", "0" * 64], tmp_path)
+        run_import(["--zip", str(zip_path), "--sha256", "0" * 64], tmp_path), zip_path
     )
     assert sha(zip_path) in line
     assert "重新下載" in line
@@ -94,7 +101,7 @@ def test_validation_failure_prints_one_chinese_line(make_model_package: MakePack
     members = read_zip(make_model_package())
     members["model.onnx"] += b"x"
     bad = write_zip(tmp_path / "bad.zip", members)
-    assert_one_line_error(run_import(["--zip", str(bad), "--sha256", sha(bad)], tmp_path))
+    assert_one_line_error(run_import(["--zip", str(bad), "--sha256", sha(bad)], tmp_path), bad)
 
 
 def test_missing_sha256_option_exits_2_and_names_option(make_model_package: MakePackage, tmp_path):
@@ -142,7 +149,7 @@ def assert_reason_is_chinese(line: str) -> None:
 
 def _fail_line(zip_path: Path, cwd: Path) -> str:
     return assert_one_line_error(
-        run_import(["--zip", str(zip_path), "--sha256", sha(zip_path)], cwd)
+        run_import(["--zip", str(zip_path), "--sha256", sha(zip_path)], cwd), zip_path
     )
 
 
@@ -192,3 +199,37 @@ def test_card_kind_not_onnx_reason_is_chinese(make_model_package: MakePackage, t
     card["kind"] = "sklearn"
     members["model_card.json"] = json.dumps(card).encode()
     assert_reason_is_chinese(_fail_line(write_zip(tmp_path / "x.zip", members), tmp_path))
+
+
+# C1：失敗路徑的輸出（stdout+stderr）都要含整包 SHA-256
+def _output(zip_path: Path, cwd: Path, given: str | None = None) -> str:
+    proc = run_import(["--zip", str(zip_path), "--sha256", given or sha(zip_path)], cwd)
+    return proc.stdout + proc.stderr
+
+
+def test_not_a_zip_output_contains_package_sha256(tmp_path):
+    bogus = tmp_path / "bogus.zip"
+    bogus.write_bytes(b"not a zip")
+    assert sha(bogus) in _output(bogus, tmp_path)
+
+
+def test_existing_version_output_contains_package_sha256(make_model_package: MakePackage, tmp_path):
+    zip_path = make_model_package()
+    assert run_import(["--zip", str(zip_path), "--sha256", sha(zip_path)], tmp_path).returncode == 0
+    assert sha(zip_path) in _output(zip_path, tmp_path)
+
+
+def test_validation_failure_output_contains_package_sha256(
+    make_model_package: MakePackage, tmp_path
+):
+    members = read_zip(make_model_package())
+    members["model.onnx"] += b"x"
+    bad = write_zip(tmp_path / "bad.zip", members)
+    assert sha(bad) in _output(bad, tmp_path)
+
+
+def test_package_sha256_mismatch_output_contains_actual_sha256(
+    make_model_package: MakePackage, tmp_path
+):
+    zip_path = make_model_package()
+    assert sha(zip_path) in _output(zip_path, tmp_path, given="0" * 64)
