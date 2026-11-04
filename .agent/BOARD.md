@@ -86,6 +86,7 @@
 | agent-v1-cleanup | architect | done | 0 | PR #273 |
 | joserfc-vuln-upgrade | backend | done | 0 | PR #275 |
 | ci-v1-path-cleanup | architect | done | 0 | PR #279 |
+| dev-stall-recover | backend | done | 0 | reports/dev-stall-recover.json（已恢復；只調查，已作廢 PR） |
 
 ## 卡住／待甲方決定
 
