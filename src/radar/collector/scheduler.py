@@ -14,7 +14,7 @@ from apscheduler.schedulers.base import BaseScheduler
 from apscheduler.schedulers.blocking import BlockingScheduler
 from confluent_kafka import KafkaException
 from pydantic import ValidationError
-from sqlalchemy import Connection, Engine, func, select, text
+from sqlalchemy import BigInteger, Connection, Engine, cast, func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from radar.api.schemas import BoardOut
@@ -99,8 +99,12 @@ def enabled_board_names(boards: list[BoardOut]) -> list[str]:
     return [b.board for b in boards if b.enabled]
 
 
-def latest_post_since(engine: Engine | None, board: str) -> datetime | None:
-    """該看板 PG 最新文章時間減 10 分鐘；沒有文章、沒有 engine 或查詢失敗回傳 None。
+def latest_post_since(
+    engine: Engine | None, board: str, now: datetime | None = None
+) -> datetime | None:
+    """該看板 post_id 檔名 epoch 最大值減 10 分鐘（7.30 E）；沒有文章、engine 或查詢失敗回 None。
+
+    檔名時間晚於現在時以現在計並記 WARNING。
 
     查詢逾時（statement_timeout）例外照拋，由呼叫端略過這一輪。
     """
@@ -109,7 +113,11 @@ def latest_post_since(engine: Engine | None, board: str) -> datetime | None:
     try:
         with engine.connect() as conn:
             latest = conn.execute(
-                select(func.max(Post.created_at)).where(Post.board == board)
+                select(
+                    func.to_timestamp(
+                        func.max(cast(func.split_part(Post.post_id, ".", 3), BigInteger))
+                    )
+                ).where(Post.board == board)
             ).scalar_one()
     except Exception as e:
         if is_query_timeout(e):
@@ -117,7 +125,14 @@ def latest_post_since(engine: Engine | None, board: str) -> datetime | None:
         # 查不到就退回只讀第一頁，不讓計時器停掉
         log.warning("query latest post of %s failed, since=null: %r", board, e)
         return None
-    return None if latest is None else latest - SINCE_MARGIN
+    if latest is None:
+        return None
+    latest_at: datetime = latest
+    current = now or datetime.now(UTC)
+    if latest_at > current:
+        log.warning("latest filename time of %s is in the future: %s", board, latest_at)
+        latest_at = current
+    return latest_at - SINCE_MARGIN
 
 
 def make_list_task_sender(

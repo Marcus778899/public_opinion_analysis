@@ -1,4 +1,4 @@
-"""開發規格 7.28 A：Scheduler 送列表任務前查 PG，since ＝ 該看板最新 created_at 減 10 分鐘。"""
+"""開發規格 7.28 A、7.30 E：Scheduler 送列表任務前查 PG，since ＝ 該看板最大檔名時間減 10 分鐘。"""
 
 import json
 from datetime import UTC, datetime, timedelta
@@ -37,8 +37,9 @@ def engine(postgres_env):
     eng.dispose()
 
 
-def add_post(engine, post_id: str, created_at: datetime, *, deleted: bool = False) -> None:
-    board = post_id.split(".", 1)[0]
+def add_post(engine, board: str, created_at: datetime, *, deleted: bool = False) -> str:
+    """檔名 epoch 與 created_at 一致；回傳 post_id（<board>.M.<epoch>.A.<seq>）。"""
+    post_id = f"{board}.M.{int(created_at.timestamp())}.A.001"
     with engine.begin() as conn:
         conn.execute(
             text(
@@ -54,6 +55,7 @@ def add_post(engine, post_id: str, created_at: datetime, *, deleted: bool = Fals
                 "d": deleted,
             },
         )
+    return post_id
 
 
 def sender_for(engine):
@@ -70,10 +72,10 @@ def parse(ts: str) -> datetime:
     return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
 
-def test_since_is_latest_created_at_minus_ten_minutes(engine):
-    add_post(engine, "Gossiping.M.1.A.001", T0 - timedelta(hours=5))
-    add_post(engine, "Gossiping.M.2.A.002", T0)
-    add_post(engine, "Gossiping.M.3.A.003", T0 - timedelta(hours=1))
+def test_since_is_latest_filename_time_minus_ten_minutes(engine):
+    add_post(engine, "Gossiping", T0 - timedelta(hours=5))
+    add_post(engine, "Gossiping", T0)
+    add_post(engine, "Gossiping", T0 - timedelta(hours=1))
     send, fake = sender_for(engine)
 
     send("Gossiping")
@@ -86,8 +88,8 @@ def test_since_is_latest_created_at_minus_ten_minutes(engine):
 
 
 def test_since_only_looks_at_the_same_board(engine):
-    add_post(engine, "Gossiping.M.1.A.001", T0 - timedelta(hours=2))
-    add_post(engine, "HatePolitics.M.2.A.002", T0)
+    add_post(engine, "Gossiping", T0 - timedelta(hours=2))
+    add_post(engine, "HatePolitics", T0)
     send, fake = sender_for(engine)
 
     send("Gossiping")
@@ -99,7 +101,7 @@ def test_since_only_looks_at_the_same_board(engine):
 
 
 def test_since_is_null_when_board_has_no_posts(engine):
-    add_post(engine, "Gossiping.M.1.A.001", T0)
+    add_post(engine, "Gossiping", T0)
     send, fake = sender_for(engine)
 
     send("Stock")
@@ -110,10 +112,10 @@ def test_since_is_null_when_board_has_no_posts(engine):
 
 
 def test_since_follows_newest_post_on_every_dispatch(engine):
-    add_post(engine, "Gossiping.M.1.A.001", T0 - timedelta(hours=3))
+    add_post(engine, "Gossiping", T0 - timedelta(hours=3))
     send, fake = sender_for(engine)
     send("Gossiping")
-    add_post(engine, "Gossiping.M.2.A.002", T0)
+    add_post(engine, "Gossiping", T0)
 
     send("Gossiping")
 
@@ -123,8 +125,8 @@ def test_since_follows_newest_post_on_every_dispatch(engine):
 
 
 def test_deleted_post_still_counts_as_latest(engine):
-    add_post(engine, "Gossiping.M.1.A.001", T0 - timedelta(hours=1))
-    add_post(engine, "Gossiping.M.2.A.002", T0, deleted=True)
+    add_post(engine, "Gossiping", T0 - timedelta(hours=1))
+    add_post(engine, "Gossiping", T0, deleted=True)
     send, fake = sender_for(engine)
 
     send("Gossiping")
