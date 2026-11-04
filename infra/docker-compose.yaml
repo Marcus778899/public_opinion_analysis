@@ -55,7 +55,7 @@ services:
     hostname: kafka_1
     restart: unless-stopped
     ports:
-      - "9092:9092"
+      - "127.0.0.1:9092:9092"
     environment:
       <<: *kafka-env
       KAFKA_NODE_ID: 1
@@ -72,7 +72,7 @@ services:
     hostname: kafka_2
     restart: unless-stopped
     ports:
-      - "9094:9094"
+      - "127.0.0.1:9094:9094"
     environment:
       <<: *kafka-env
       KAFKA_NODE_ID: 2
@@ -89,7 +89,7 @@ services:
     hostname: kafka_3
     restart: unless-stopped
     ports:
-      - "9096:9096"
+      - "127.0.0.1:9096:9096"
     environment:
       <<: *kafka-env
       KAFKA_NODE_ID: 3
