@@ -104,7 +104,7 @@ def test_encrypted_flag_is_rejected_before_reading(tmp_path: Path) -> None:
         pos = data.find(b"PK\x01\x02", pos + 4)
     zip_path.write_bytes(bytes(data))
     assert all(i.flag_bits & 1 for i in zipfile.ZipFile(zip_path).infolist())
-    with pytest.raises(ModelPackageError, match="encrypted"):
+    with pytest.raises(ModelPackageError, match="加密"):
         import_model(zip_path, tmp_path / "models")
 
 
@@ -116,7 +116,7 @@ def test_bzip2_compression_is_rejected(tmp_path: Path) -> None:
     with zipfile.ZipFile(bad, "w", compression=zipfile.ZIP_BZIP2) as zf:
         for name, data in members.items():
             zf.writestr(name, data)
-    with pytest.raises(ModelPackageError, match="compression"):
+    with pytest.raises(ModelPackageError, match="壓縮"):
         import_model(bad, tmp_path / "models")
 
 
@@ -194,7 +194,7 @@ def test_corrupted_member_data_raises_package_error(tmp_path: Path) -> None:
         for name, data in members.items():
             zf.writestr(name, data)
     _corrupt_first_member_data(bad)
-    with pytest.raises(ModelPackageError, match="corrupted"):
+    with pytest.raises(ModelPackageError, match="損毀"):
         import_model(bad, tmp_path / "models")
     assert not (tmp_path / "models").exists()
 
@@ -211,7 +211,7 @@ def test_main_corrupted_zip_exits_with_message(
     _corrupt_first_member_data(bad)
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, tmp_path, "--zip", str(bad), "--sha256", im.package_sha256(bad))
-    assert "corrupted" in str(exc.value.code)
+    assert "損毀" in str(exc.value.code)
 
 
 def test_file_name_constants_match_classifier() -> None:
