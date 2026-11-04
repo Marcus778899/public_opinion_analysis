@@ -18,7 +18,7 @@ from radar.streaming import replay as replay_mod
 from radar.streaming.replay import RecordedMessage
 
 POST = "Gossiping.M.1000000001.A.BBB"
-WARNING_KEYWORD = "old messages"
+WARNING_KEYWORD = "舊訊息"
 
 
 class FakeTopic:

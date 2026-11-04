@@ -67,8 +67,15 @@ def derive_model(model_dir: Path, max_len: int) -> Path:
 def main() -> None:
     setup_logging("derive_model")
     parser = argparse.ArgumentParser(description="衍生只改 max_len 的模型版本")
-    parser.add_argument("--model", type=Path, required=True)
-    parser.add_argument("--max-len", type=int, required=True)
+    parser.add_argument(
+        "--model", type=Path, required=True, help="來源模型目錄，例 models/<model_version>"
+    )
+    parser.add_argument(
+        "--max-len",
+        type=int,
+        required=True,
+        help="新的 max_len，須小於來源值；產生 models/<model_version>-len<N>/",
+    )
     args = parser.parse_args()
     try:
         target = derive_model(args.model, args.max_len)

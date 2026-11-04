@@ -65,7 +65,7 @@ human-label:  ## 本機人工標註頁（http://127.0.0.1:8090）
 api:  ## 本機啟動管理 API（http://localhost:8000/docs）
 	$(UV_ENV) uvicorn radar.api.main:app --reload --port 8000
 
-setup:  ## 本機建立 .venv 與相依（check_env.py setup 會呼叫；worktree 共用主目錄的 .venv）
+setup:  ## 本機建立 .venv 與相依（ae check-env setup 會呼叫；worktree 共用主目錄的 .venv）
 	uv sync
 
 ci-setup:  ## CI 安裝相依
