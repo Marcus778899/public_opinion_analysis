@@ -459,10 +459,20 @@ class FakeBoards:
         pass
 
 
+class LogRecorder:
+    """攔截 loggerhelper 執行期才查找的 _resolve；裝飾時已綁定的 catch 也收得到。"""
+
+    def __init__(self) -> None:
+        self.levels: list[object] = []
+
+    def log(self, level: object, *args: Any, **kwargs: Any) -> None:
+        self.levels.append(level)
+
+
 class WiredScheduler:
     def __init__(self) -> None:
         self.scheduler: FakeScheduler | None = None
-        self.emitted: list[tuple[Any, ...]] = []
+        self.emitted: list[object] = []
 
 
 @pytest.fixture
@@ -489,9 +499,9 @@ def wired(monkeypatch) -> WiredScheduler:
     monkeypatch.setattr(scheduler_module, "BoardsClient", FakeBoards)
     monkeypatch.setattr(scheduler_module, "BlockingScheduler", make_scheduler)
     monkeypatch.setattr(scheduler_module.signal, "signal", lambda *a, **k: None)
-    monkeypatch.setattr(
-        type(log), "_emit_failure", lambda self, level, *a, **k: state.emitted.append((level, *a))
-    )
+    recorder = LogRecorder()
+    monkeypatch.setattr(log, "_resolve", lambda: recorder)
+    state.emitted = recorder.levels
     return state
 
 
@@ -519,7 +529,7 @@ def test_main_list_task_fatal_stops_scheduler_and_reraises_with_critical(monkeyp
         scheduler_module.main()
 
     assert wired.scheduler.shutdown_calls == [{"wait": False}]
-    assert any(is_critical(e[0]) for e in wired.emitted)
+    assert any(is_critical(e) for e in wired.emitted)
 
 
 def test_main_due_posts_fatal_stops_scheduler_and_reraises_with_critical(monkeypatch, wired):
@@ -530,7 +540,7 @@ def test_main_due_posts_fatal_stops_scheduler_and_reraises_with_critical(monkeyp
         scheduler_module.main()
 
     assert wired.scheduler.shutdown_calls == [{"wait": False}]
-    assert any(is_critical(e[0]) for e in wired.emitted)
+    assert any(is_critical(e) for e in wired.emitted)
 
 
 def test_main_fatal_releases_advisory_lock_before_reraising(monkeypatch, wired):
@@ -550,7 +560,7 @@ def test_main_ordinary_job_error_does_not_stop_scheduler(monkeypatch, wired):
     scheduler_module.main()
 
     assert wired.scheduler.shutdown_calls == []
-    assert not any(is_critical(e[0]) for e in wired.emitted)
+    assert not any(is_critical(e) for e in wired.emitted)
 
 
 # --- 4. BatchConsumer 服務 ---
@@ -649,16 +659,13 @@ def test_api_fatal_detected_at_flush_also_returns_503_and_exits(exits):
 
 
 def test_api_fatal_logs_critical(monkeypatch, exits):
-    levels: list[str] = []
-    monkeypatch.setattr(
-        type(log), "_emit_failure", lambda self, level, *a, **k: levels.append(str(level))
-    )
-    for name in ("critical",):
-        monkeypatch.setattr(api_main.log, name, lambda *a, **k: levels.append("CRITICAL"))
+    recorder = LogRecorder()
+    monkeypatch.setattr(log, "_resolve", lambda: recorder)
+    levels = recorder.levels
 
     api_client(fatal_producer()).post("/boards/Gossiping/crawl")
 
-    assert any(level.upper() == "CRITICAL" for level in levels)
+    assert any(is_critical(level) for level in levels)
 
 
 def test_api_non_fatal_kafka_error_returns_503_without_exit(exits):
