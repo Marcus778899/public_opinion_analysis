@@ -1,0 +1,22 @@
+{
+  "task_id": "ci-tool-checksum",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "CI 下載 gitleaks、osv-scanner 執行檔後先驗證 SHA-256，對不上就讓 CI 失敗（#70）",
+  "issue": 237,
+  "branch": "chore/ci-tool-checksum",
+  "worktree": ".worktrees/ci-tool-checksum",
+  "pr": 238,
+  "qa": {
+    "result": "pass",
+    "sha": "c61707fcc4407bbc442b3304e71aa908ccf655d8",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "c61707fcc4407bbc442b3304e71aa908ccf655d8",
+    "by": "architect"
+  },
+  "merged": true
+}

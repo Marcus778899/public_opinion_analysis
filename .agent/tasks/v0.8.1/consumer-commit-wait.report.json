@@ -1,0 +1,4 @@
+{"task_id":"consumer-commit-wait","status":"done",
+"files_changed":["src/radar/common/kafka/consumer.py","tests/unit/common/kafka/test_consumer.py"],
+"verification":{"command":"make check; uv run pytest tests/unit/acceptance/consumer-commit-wait tests/unit/common","exit_code":0,"tail":"1420 passed in 14.50s; grep _stop.wait src/radar 無結果"},
+"open_questions":[]}

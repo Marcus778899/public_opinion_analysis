@@ -1,0 +1,14 @@
+{
+  "task_id": "heat-replay-cleanup",
+  "status": "done",
+  "files_changed": [],
+  "verification": {
+    "command": "docker compose --env-file .env -f infra/docker-compose.yaml exec -T kafka_1 /opt/kafka/bin/kafka-{consumer-groups,topics}.sh --bootstrap-server localhost:29092 --list",
+    "exit_code": 0,
+    "tail": "刪除前 9 組 group（heat-replay-1793345392/346444/346937/347268/347724/348379/348902/349029/349233）describe --state 全是 Empty、0 成員；topic 20 個（changelog__heat-replay[-epoch]--repartition.replay.cdc.comments.board--default 與 repartition__heat-replay[-epoch]--replay.cdc.comments--board 各 10，含不帶 epoch 的 heat-replay）。kafka-consumer-groups --delete 回 successful；kafka-topics --delete --topic '(changelog|repartition)__heat-replay.*' 無錯誤。刪除後 group 清單：heat clickhouse-* (6) inference inference-shadow-bert-ckip-202610280849 bot ingest crawler uat-read-1793349393，無 heat-replay；topic 清單無 heat-replay，仍有 replay.alerts、replay.cdc.comments、changelog__heat--repartition.cdc.public.comments.board--default、repartition__heat--cdc.public.comments--board。"
+  },
+  "open_questions": [
+    "sandbox 看不到程序清單（pgrep／ps 被拒：Cannot get process list），無法確認 PID 74977 或任何 radar.streaming.heat 本機程序是否還在。回放 heat 的 group 刪除時全是 Empty 0 成員，表示沒有程序連著 Kafka，但仍請甲方在自己終端機跑：pgrep -fl 'radar.streaming.heat'; ps -p 74977 。若有結果，先 kill 再確認 Kafka 沒有重建 heat-replay-* group／topic。",
+    "未動 uat-read-1793349393 group（名稱不含 heat-replay，屬禁區外），是否清除由 manager／甲方另決定。"
+  ]
+}

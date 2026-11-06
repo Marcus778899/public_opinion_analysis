@@ -1,0 +1,15 @@
+{
+  "task_id": "inference-ckip-up",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "開發環境啟動正式情緒推論 `inference`，使用甲方在 `.env` 設好的 `INFERENCE_MODEL_VERSION=bert-ckip-202610280849`（D-040），確認模型載入、推論結果正常寫出、記憶體與積壓可接受。不改程式",
+  "issue": 288,
+  "branch": "chore/inference-ckip-up",
+  "worktree": ".worktrees/inference-ckip-up",
+  "pr": null,
+  "qa": null,
+  "review": null,
+  "merged": false,
+  "cancelled": true
+}

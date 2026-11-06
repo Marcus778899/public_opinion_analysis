@@ -1,0 +1,17 @@
+{
+  "task_id": "comment-time-recrawl",
+  "status": "done",
+  "files_changed": ["tools/recrawl_posts.py", "tests/unit/tools/test_recrawl_posts.py"],
+  "verification": {
+    "command": "make check (worktree .worktrees/comment-time-recrawl，commit 14c8dbd)",
+    "exit_code": 0,
+    "tail": "tests/unit/tools/test_recrawl_posts.py ......  1466 passed. 查詢（唯讀，開發 PG）: select count(*), count(distinct post_id) from comments where commented_at > now(); 前 251|55；送出 55 個 reason=recrawl 的 post 任務後（2026-10-29 03:04Z 送，05:31Z 查）10|3，crawler lag 已清空。剩 3 篇皆 posts.is_deleted=t（PTT 已刪文，爬蟲拿到 404 不會覆寫推文）: Gossiping.M.1792476838.A.1A9(1 則)、Gossiping.M.1792490846.A.0B3(4 則)、Gossiping.M.1793178844.A.353(5 則)。"
+  },
+  "open_questions": [
+    "驗收條件「落在未來的推文降到 0」未達成：剩 10 則（3 篇已被 PTT 刪除的文章），重爬收到 404 只標記刪除、不同步推文（7.14），無法經爬蟲修正。這 10 則是否接受留著（文章已刪，熱度／統計影響極小），或要另開決策（直接寫 PG 違反單一寫入者規則，需 architect／甲方決定）。",
+    "NULL 數：查詢當下 comments.commented_at IS NULL 共 100 則（全表，非只這批；重爬前的基準數我沒有查，無法列出這批新增的 NULL 筆數）。",
+    "違反協調者後來的提醒：我在收到提醒前用 `docker compose cp` 把 tools/recrawl_posts.py 複製進正在跑的 ingest 容器的 /tmp/recrawl_posts.py 並用 exec 執行（只新增一個檔，容器內其他內容未改）。該檔留在容器 /tmp，下次容器重建即消失，需要的話可由 manager 重建 ingest。",
+    "重爬 backlog 約 2 小時才輪到（crawl.tasks 當時積壓約 4,500 筆，開發規格 7.12 已知問題），非本單造成。",
+    "沒有改動 .env.example、文件；工具為營運腳本，沒有新增設定（沿用 KAFKA_BOOTSTRAP_SERVERS）。"
+  ]
+}

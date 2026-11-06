@@ -1,0 +1,26 @@
+{
+  "task_id": "consumer-commit-wait",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "`BatchConsumer._commit()` 重試等待改成分段 sleep，消除與 signal handler 互等的死結可能（#146）",
+  "issue": 208,
+  "branch": "fix/consumer-commit-wait",
+  "worktree": ".worktrees/consumer-commit-wait",
+  "pr": 210,
+  "qa": {
+    "result": "pass",
+    "sha": "15551838cd5a358bc9addfa343c74d49ea2f3070",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "15551838cd5a358bc9addfa343c74d49ea2f3070",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "eca10400e440d9db7fbcd656a7558c44a3b2a5ba",
+    "sha": "6b3dd91493e896e0767be1fc838728d7d9d83125"
+  }
+}

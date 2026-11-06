@@ -1,0 +1,29 @@
+{
+  "task_id": "ml-cli-usability",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "`evaluate`、`compare`、`cross_check` 指令列的錯誤提示、`--help` 說明與 CSV 輸出安全（#173 evaluate 部分、#174 evaluate／compare 部分、#175、#176、#168）",
+  "issue": 214,
+  "branch": "fix/ml-cli-usability",
+  "worktree": ".worktrees/ml-cli-usability",
+  "pr": 216,
+  "qa": {
+    "result": "pass",
+    "sha": "ce2961229ae17e661a90c49deb9d3558e057144a",
+    "by": "qa",
+    "carried_from": "49c5db64020ee2736ceb5b0a6eb00dda3c4b8cae"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "ce2961229ae17e661a90c49deb9d3558e057144a",
+    "by": "architect",
+    "carried_from": "49c5db64020ee2736ceb5b0a6eb00dda3c4b8cae"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "3bdde9abefb10604d8c1b0af5dcb4e8730db9bf4",
+    "sha": "ce2961229ae17e661a90c49deb9d3558e057144a",
+    "carried_from": "49c5db64020ee2736ceb5b0a6eb00dda3c4b8cae"
+  }
+}

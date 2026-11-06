@@ -1,0 +1,24 @@
+{
+  "task_id": "subscription-toggle-latency",
+  "status": "done",
+  "files_changed": [
+    "src/radar/bot/callbacks.py",
+    "src/radar/bot/main.py",
+    "tests/unit/bot/test_callbacks.py",
+    "tests/unit/bot/test_main.py"
+  ],
+  "verification": {
+    "command": "uv run pytest tests/unit/acceptance/subscription-toggle-latency tests/unit/bot; make check",
+    "exit_code": 0,
+    "tail": "acceptance+bot: 211 passed; make check: 1737 passed in 73.85s; ruff passed"
+  },
+  "open_questions": [
+    "【實測】真實 PG（整合測試 compose，PG 容器內本機連線、fsync=off、30 次、20 個看板）單步耗時：enabled_boards 中位 1.34ms、boards_of 中位 0.66ms、subscribe（含 commit）中位 1.90ms、unsubscribe 中位 1.73ms；第一次含連線建立 8～13ms，最大 27ms。已 down -v。方法：臨時整合測試（未提交）用 perf_counter 包 SubscriptionRepository 各方法。注意 fsync=off 且無網路，真實開發環境的 commit 會較慢，但一次切換的 PG 合計實測約 5ms，不可能是秒級延遲。",
+    "【未實測】Telegram 的 answerCallbackQuery、editMessageText 網路往返（sandbox 連不到）。已在 callback 流程加 INFO log：'callback step=<步驟> chat=<id> ms=<毫秒>'，步驟為 enabled_boards、boards_of、pg_write、answerCallbackQuery、requery_boards_of、editMessageText。部署後請從開發環境 bot log 取值；甲方發版前也會手點。",
+    "【推論】PG 實測只有毫秒級，所以甲方回饋的明顯延遲主要來源很可能在 Telegram 呼叫（editMessageText 或 answer 的網路往返）或 getUpdates 迴圈，不在 PG。這次改動讓 answer 提早的幅度只有幾毫秒，不一定解決 #82；等 log 數字出來再判斷，若來源不在這四步，建議 manager 另開單。",
+    "【已補測試】SUB 回呼在流程內 answer 時丟 TelegramBadRequestError（略過 edit）與 TelegramForbiddenError（呼叫 forget_blocked_chat）：test_handle_update_sub_answer_bad_request_skips_edit、test_handle_update_sub_answer_forbidden_forgets_chat（以 monkeypatch on_callback 在其中呼叫 answer）。另有 timed 與各步驟 log 的單元測試。移除了先前名不符實的測試。",
+    "介面變動：CallbackResult 新增選填欄位 answered；handle_callback、on_callback 新增選填參數 answer；callbacks.py 新增 helper timed（此處 log 步驟耗時，main.py 也引用）。向下相容。",
+    "開發規格要改的地方（派工單禁止我改）：階段 6 驗收與 7.21／7.23 補述「訂閱切換在 PG 寫入後先 answerCallbackQuery，再重查並 editMessageText」，以及 callback 步驟耗時 log 的格式。",
+    "review 附註（既有行為，非本單引入）：poll_commands 遇 PG 暫時性錯誤整筆重做，寫入後的 boards_of 失敗會重複切換一次，供 manager 決定是否開 issue。"
+  ]
+}

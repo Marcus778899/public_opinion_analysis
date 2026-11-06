@@ -1,0 +1,14 @@
+{
+  "task_id": "kafka-port-bind-local",
+  "status": "done",
+  "files_changed": ["infra/docker-compose.yaml", "docs/development-spec.md"],
+  "verification": {
+    "command": "uv run ruff check . && uv run pytest tests/unit -q -n 4",
+    "exit_code": 0,
+    "tail": "All checks passed!\n1890 passed in 61.17s (0:01:01)"
+  },
+  "open_questions": [
+    "開發規格的 Kafka 綁本機說明寫在 7.20 步驟 3 的括號內（那裡本來就講主機端用 localhost），未另開章節",
+    "開發環境 Kafka 未重啟（依禁區），綁定要等甲方部署後才生效"
+  ]
+}

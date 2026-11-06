@@ -1,0 +1,24 @@
+{
+  "task_id": "pipeline-gap-design",
+  "kind": "docs",
+  "owner": "architect",
+  "lane": "full",
+  "title": "設計兩個修正並記下歷史缺口：①爬蟲重啟後補抓深度不足 ②資料管線靜默停擺（容器都 Up 但沒新資料）時要發警告；③依 D-032 在開發規格記下 10-08～10-28 的停機缺口",
+  "issue": 219,
+  "branch": "docs/pipeline-gap-design",
+  "worktree": ".worktrees/pipeline-gap-design",
+  "pr": 221,
+  "qa": {
+    "result": "pass",
+    "sha": "89326bf2d47b965c681702ee7860c32815426bdb",
+    "by": "qa",
+    "carried_from": "854e0eaa4977da9377aadf59c1de0d00bfa2ea0c"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "89326bf2d47b965c681702ee7860c32815426bdb",
+    "by": "甲方",
+    "carried_from": "854e0eaa4977da9377aadf59c1de0d00bfa2ea0c"
+  },
+  "merged": true
+}

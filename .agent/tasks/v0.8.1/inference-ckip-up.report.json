@@ -1,0 +1,24 @@
+{
+  "task_id": "inference-ckip-up",
+  "status": "done",
+  "files_changed": [
+    ".agent/reports/inference-ckip-up.json"
+  ],
+  "verification": {
+    "command": "docker compose -f infra/docker-compose.yaml --env-file .env --profile app --profile inference up -d --wait inference",
+    "exit_code": 0,
+    "tail": "radar_inference Healthy；log: 'inference primary with bert-ckip-202610280849 (trained on prompt-v6)'；04:27Z 仍 Up 11 minutes（無重啟）、cgroup oom_kill 0；ClickHouse radar.predictions model_version=bert-ckip-202610280849 共 1241 筆（1188 篇）；consumer group inference lag 19104 -> 10019（04:27:06Z）。"
+  },
+  "open_questions": [
+    "【啟動前 lag】04:15Z group inference 無成員，cdc.public.posts 三個 partition lag 6063 / 6612 / 6429，合計 19104。",
+    "【啟動】依派工單指令啟動，04:16:17Z log 載入 0 筆 post hash、'inference primary with bert-ckip-202610280849 (trained on prompt-v6)'。log 只有一則 librdkafka GETPID 'Coordinator load in progress: retrying'（Kafka 剛逐台重建的暫時性 warning，之後無再出現）；沒有 ERROR／traceback。附帶：compose 依賴會重建一次性容器 radar_init（Exited 0）與跑 secret_check、apicurio_db_init，皆為 inference 的 depends_on 一次性任務，沒有重建其他長駐服務。",
+    "【predictions 範例】topic predictions：{post_id:Gossiping.M.1793609606.A.279, model_version:bert-ckip-202610280849, predicted_at:2026-11-04T04:17:44Z, polarity:negative, scores:{positive:0.120,negative:0.703,neutral:0.177}, text_hash:12068b1b…}。",
+    "【ClickHouse】SELECT count(), uniqExact(post_id), min(predicted_at), max(predicted_at) FROM radar.predictions WHERE model_version='bert-ckip-202610280849' -> 1241, 1188, 04:16:46Z, 04:27:07Z（持續增加；舊版 tfidf-lr-202610151237 共 27800 筆，最後 11-02 07:33Z）。",
+    "【記憶體】docker stats 在 sandbox 被擋（只允許 docker compose），改讀容器 cgroup（docker compose -p radar exec inference …/memory.current、memory.peak、memory.events）：04:17Z current 1.33 GB；峰值 memory.peak 1,463,742,464 B（約 1.46 GB，含 page cache，比開發規格的 RSS 932 MB 高）；04:27Z current 1.33 GB，峰值不再增加，沒有持續上升。memory.max=max、cpu.max=max（確認 compose 沒設 mem_limit／cpus）。",
+    "【OOM／重啟】cgroup memory.events oom_kill 0；docker inspect 同樣被 sandbox 擋，改以 docker compose ps：radar_inference 'Up 11 minutes' 自啟動未重啟（容器啟動時間即 04:16Z），無重啟迴圈。",
+    "【每批耗時】inference 沒有每批 log（main.py 只有啟動兩行 info），無法直接給每批耗時；建議之後補批次 log（耗時、筆數、略過數）。以 offset 推算：04:21:31Z lag 16413、04:24:33Z 12956、04:27:06Z 10019，約每分鐘消化 1150 筆 offset（含新進約 10 筆／分）。同時間只寫出約 120 筆／分預測：多數 CDC 訊息沒有走推論（推測為 text_hash 去重、刪除或不需推論的訊息；我沒有查程式確認原因），所以實際吃重的批次比例遠低於「每批都是滿的」。",
+    "【估計補完積壓】剩餘 lag 10019（04:27:06Z），以 1150/分消化、扣掉新進約 10/分，約 9～10 分鐘（約 04:37Z）補完；補完後只剩即時新進量。",
+    "【建議】1) 正式 inference 的 compose 仍沒設 mem_limit／INFERENCE_THREADS，這次實測 cgroup 峰值約 1.46 GB（無限制下），建議架構角色考慮設 mem_limit 約 2g 與 threads=2（D-023 的 shadow 是 1.5g，ckip 正式推論會超過 1.5g，不宜直接套用）。2) 補 per-batch log。3) 未做任何設定修改，也未停止服務；inference 目前仍在跑。",
+    "【交付前檢查清單】本單不改程式／設定／migration／端點，無適用項；沒有讀 .env、沒有開 shadow、沒有動 consumer group offset。"
+  ]
+}

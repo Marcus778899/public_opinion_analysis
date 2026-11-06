@@ -1,0 +1,15 @@
+{
+  "task_id": "gossiping-gap-investigate",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "查清 Gossiping 在 10-19 等日期推文數幾乎為 0 的原因：開發環境停機，還是程式問題（#180）。只調查、不改程式",
+  "issue": 209,
+  "branch": "chore/gossiping-gap-investigate",
+  "worktree": ".worktrees/gossiping-gap-investigate",
+  "pr": null,
+  "qa": null,
+  "review": null,
+  "merged": false,
+  "cancelled": true
+}

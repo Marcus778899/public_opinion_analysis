@@ -14,7 +14,7 @@
 
    指令結束後所有容器都應該是 `running`／`healthy`（`radar_secret_check`、`radar_init`、`radar_apicurio_db_init` 是一次性工作，`exited (0)` 是正常的；`radar_secret_check` 是 `exited (1)` 代表有密碼還是範例值，log 會列出是哪幾個變數）。
 
-   > **已經有資料後要換密碼**：PG 與 Grafana 的密碼只在第一次建立 volume 時套用，只改 `.env` 不會生效。PG 先執行 `docker compose -f infra/docker-compose.yaml --env-file .env exec postgres psql -U radar -d radar -c "ALTER USER radar PASSWORD '<新密碼>'"` 再改 `.env`；Grafana 用 `docker compose -f infra/docker-compose.yaml --env-file .env exec grafana grafana cli admin reset-admin-password '<新密碼>'` 再改 `.env`；ClickHouse 改 `.env` 後重新執行第 3 步即可。PG 剛重建時 init 可能因 CDC connector 還在恢復而失敗，等 20 秒再執行一次第 3 步。
+   > **已經有資料後要換密碼**：PG 與 Grafana 的密碼只在第一次建立 volume 時套用，只改 `.env` 不會生效。PG 先執行 `docker compose -f infra/docker-compose.yaml --env-file .env exec postgres psql -U radar -d radar -c "ALTER USER radar PASSWORD '<新密碼>'"` 再改 `.env`；Grafana 用 `docker compose -f infra/docker-compose.yaml --env-file .env exec grafana grafana cli admin reset-admin-password '<新密碼>'` 再改 `.env`；ClickHouse 改 `.env` 後重新執行第 3 步即可。
 
    > **選擇性啟動**：上面的 `--profile` 決定開哪些服務，拿掉就不開。Kafka、PostgreSQL、ClickHouse、Debezium、Grafana、Kafka UI 不分 profile 一律啟動。
    >
@@ -25,6 +25,8 @@
    > | `inference` | inference | `.env` 沒設 `INFERENCE_MODEL_VERSION` 時拿掉 |
    > | `shadow` | inference-shadow | 預設不開；匯入 BERT 模型、設好 `INFERENCE_SHADOW_MODEL_VERSION` 後才加（見下方階段 8 第 5 步） |
    > | `labeling` | label-stream | 預設不開；會持續呼叫 LLM API（花額度），要串流標註時才加 |
+   >
+   > 全新環境一定要帶 `--profile app`：CDC connector 由 `init` 建立，沒有它時 `connect` 的健康檢查一直失敗、`--wait` 會在 5 分鐘後逾時（#309）。
    >
    > 注意：指令最後**不要**接服務名稱（例如 `… up -d inference`），接了就只會啟動那個服務和它依賴的基礎設施，其他服務（Grafana、watchdog、api、爬蟲、bot…）都不會起來。
 
@@ -75,7 +77,7 @@
    7. 最後一格會印出兩行 `bert-macbert-<時間>.zip  size=…  sha256=…`，把這兩行複製存起來（第 3 步匯入要對照），瀏覽器會自動下載這兩個 zip 到「下載」資料夾（瀏覽器問「允許下載多個檔案」請按允許；沒下載到就從左側資料夾圖示進 `/content/packages/` 右鍵下載）
    8. 第二次跑：把第一格的 `BASE = "macbert"` 改成 `BASE = "ckip"`，再「執行階段 → 全部執行」，到上傳那格要**重新選一次**同樣兩個檔，其餘同 4～7，得到 `bert-ckip-<時間>.zip` 與 `-int8.zip`
    9. 中途出錯：紅字最後一行會說原因（例如沒開 GPU、上傳的檔不對、預估超過 10 小時要把 `MAX_LEN = 512` 改成 `256`），照著改完再「全部執行」；看不懂就把紅字貼給我
-3. 匯入（4 個 zip 各做一次）：`uv run --env-file .env python -m radar.ml.training.import_model --zip ~/Downloads/<檔名>.zip --sha256 <第 2 步存下來的 sha256 值>`，會放到 `models/<檔名去掉 .zip>/`。`--sha256` 對不上就拒絕匯入（擋整包被換掉）；不給也能匯入，但會少這道檢查，所以請一定要給。同版本已存在不會覆寫；檔案不存在、不是 zip 等錯誤會印一行說明
+3. 匯入（4 個 zip 各做一次）：`uv run --env-file .env python -m radar.ml.training.import_model --zip ~/Downloads/<檔名>.zip --sha256 <第 2 步存下來的 sha256 值>`，會放到 `models/<檔名去掉 .zip>/`。`--sha256` 必填，對不上就拒絕匯入（擋整包被換掉；不符時請重新下載，不要改填印出的實際值）。同版本已存在不會覆寫；檔案不存在、不是 zip、驗證失敗等錯誤會印一行中文說明與下一步
 4. 評估：`uv run --env-file .env python -m radar.ml.training.evaluate --model models/<模型版本>`，結果在該資料夾的 `evaluation.md`；依開發規格 7.27「自行決定」挑一個進 shadow
 5. 啟動 shadow：`.env` 設 `INFERENCE_SHADOW_MODEL_VERSION`（`models/` 下的資料夾名稱；沒設容器會不斷重啟），再執行：
 
@@ -96,6 +98,7 @@
 | 情緒推論 | v0.6.0 | 新文章即時推論情緒，結果寫 ClickHouse |
 | 熱度偵測與警示 | v0.6.0 | 依推文速度與平常的倍數發出文章、看板警示（3 天驗收待做，見開發規格第 6 章）；v0.8.1 起回放與人工暴增寫到 `replay.alerts`、不推 Telegram，步驟見開發規格 7.20 |
 | 停機補抓與停擺警告 | v0.8.1 | 爬蟲重啟後依停機時間往回補抓（最多 80 頁）；`cdc-watchdog` 在 ClickHouse 超過 30 分鐘沒新資料時記 ERROR 並送 heartbeat 失敗（開發規格 7.28） |
+| 穩定性與自我恢復 | v0.8.2 | Kafka producer 進入 fatal 時服務結束、由 docker 重啟；Connect 內部 topic 2 份副本，停任一台 broker 照樣運作，健康檢查會發現 connector 不見（D-041）；init 遇 connector task 失敗先重啟；推論上限 2 CPU、2g |
 | Telegram bot | v0.6.0 | 按鈕操作訂閱、現在熱門、看板概況、通知設定；警示含推／噓／箭頭、爭議度與情緒；v0.7.0 起沒設允許清單就拒絕啟動（D-010） |
 | Dashboard | v0.7.0 | Grafana 6 個面板：各看板推文量、情緒分布與趨勢、爭議度最高的文章、近 24 小時警示、熱門文章排行（D-014） |
 | BERT 與 shadow 比較 | v0.8.0 | Colab fine-tune 中文 BERT、匯入 ONNX 模型包、shadow 並行推論、ClickHouse 比較兩版（見上方「BERT 與 shadow 比較」）；2026-11-04 起正式推論改用 `bert-ckip-202610280849`（D-040） |
@@ -133,6 +136,7 @@
 | v0.7.0 | 2026-10-21 | 階段 7：Grafana Dashboard（情緒信心下限為下拉選單）；整合測試改用 compose test 服務並平行執行（#78）；bot 允許清單 fail closed（D-010） |
 | v0.8.0 | 2026-10-28 | 階段 8：BERT fine-tune notebook（已在 Colab 實跑 macbert、ckip）、ONNX 模型包匯入、shadow 並行推論、兩版比較；ONNX 推論依長度分小批（選填 `INFERENCE_MAX_BATCH_TOKENS`）；authlib 漏洞升級；gitleaks 誤判根治（D-018、D-026）。模型進 shadow 與切換由 #178 追蹤（D-027） |
 | v0.8.1 | 2026-11-04 | backlog 修正：停機後依時間補抓與停擺警告（#180）；Kafka 升 4.1.2（D-034）；推文年份推斷、未來時間推文重爬（D-033）；密碼範例值擋啟動、PG 只綁本機（#119、D-035）；bot 斷線重試、推送照允許清單、訂閱切換先回應；scheduler 查詢逾時；模型匯入 `--sha256` 與錯誤提示；回放不推 Telegram；gitleaks 放行收緊、CI 工具驗 checksum；joserfc 漏洞升級（#274）；CI 改用 agent-engineering v3 的 `ae ci`、移除 v1 流程副本（D-036）；Kafka 對外 port 只綁 127.0.0.1（D-039）；清掉回放殘留的 consumer group 與內部 topic（D-038） |
+| v0.8.2 | 2026-11-04 | 穩定性小版（D-042）：producer fatal 後結束交給 restart（#281）；Connect 內部 topic 2 份副本、`/health` 與 connector 存在的健康檢查、watchdog 發現 connector 不見會告警（#282、D-041）；推論 2 CPU、2g、`INFERENCE_THREADS=2`（#289）；init 遇 task FAILED 先重啟（#262）；補抓終點改用檔名時間，標頭未來時間不會讓補抓停掉（#268）；模型匯入 `--sha256` 必填、錯誤訊息中文一行（#263、#270）；CI 先 checkout 工具再跑 PR 程式（#277） |
 
 ## 授權
 

@@ -1,0 +1,14 @@
+{
+  "task_id": "bert-shadow-gate-ruling",
+  "status": "done",
+  "files_changed": ["docs/development-spec.md"],
+  "verification": {
+    "command": "pre-commit run --files docs/development-spec.md",
+    "exit_code": 0,
+    "tail": "trim trailing whitespace....Passed\nfix end of files....Passed\ncheck yaml....(no files to check)Skipped\nruff (legacy alias)....(no files to check)Skipped\nruff format....Passed\nbandit....(no files to check)Skipped"
+  },
+  "open_questions": [
+    "門檻定義是看到結果後才補寫的：每批 p50 < 30 s 管吞吐量，最大 ≤ 60 s 管 max.poll.interval.ms（300 s）。這屬於自行決定、可逆，已寫進 7.27 的「自行決定」表，請甲方核可設計時一併確認",
+    "順序 6 的容器記憶體峰值用 /sys/fs/cgroup/memory.peak 量（需要 cgroup v2），補資料期間的每批耗時從 predictions_shadow 相鄰 predicted_at 的時間差推算；兩者都還沒在甲方主機上跑過，查詢或檔案不存在時再回報"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "task_id": "shadow-memory-measure",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "在 shadow 容器的限制下（`inference-shadow` 服務：2 CPU、mem_limit 1.5g、`INFERENCE_THREADS=2`）實測 ckip 512 與 len256 兩版在不同 `INFERENCE_MAX_BATCH_TOKENS` 的記憶體峰值、耗時與 macro-F1，找出能在 1.5g 內穩定運作的組合（本單只量測，不改 repo 檔案）",
+  "issue": 204,
+  "branch": "chore/shadow-memory-measure",
+  "worktree": ".worktrees/shadow-memory-measure",
+  "pr": null,
+  "qa": null,
+  "review": null,
+  "merged": false,
+  "cancelled": true
+}

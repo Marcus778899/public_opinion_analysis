@@ -1,0 +1,35 @@
+{
+  "task_id": "agent-v1-cleanup",
+  "kind": "chore",
+  "owner": "architect",
+  "lane": "full",
+  "title": "清掉 agent-engineering v1 殘留：CI 改呼叫 ae ci，刪除根目錄 scripts/、templates/、contracts/",
+  "issue": 272,
+  "branch": "chore/agent-v1-cleanup",
+  "worktree": ".worktrees/agent-v1-cleanup",
+  "pr": 273,
+  "qa": {
+    "result": "pass",
+    "sha": "2c1a2e89a673afd5ce4503f2c295b3650576edc1",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "2c1a2e89a673afd5ce4503f2c295b3650576edc1",
+    "by": "architect"
+  },
+  "merged": true,
+  "amend_sha": "09d2ffcdc5ce6d62b9910d03a75d22aa7deb1430",
+  "rulings": 1,
+  "ruling": {
+    "result": "test_wrong",
+    "sha": "09d2ffcdc5ce6d62b9910d03a75d22aa7deb1430",
+    "after_fails": 0
+  },
+  "amend_extra": true,
+  "acceptance_lock": {
+    "patch": "f1b3327743c7462a181e80cefedadd611b8ab39d",
+    "sha": "2c1a2e89a673afd5ce4503f2c295b3650576edc1",
+    "carried_from": "603437f590c4a2da25130d8199b94b03452e4675"
+  }
+}

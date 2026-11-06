@@ -1,0 +1,26 @@
+{
+  "task_id": "bot-push-allowlist",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "警示推送也照允許清單過濾：不在 `TELEGRAM_ALLOWED_CHAT_IDS` 的 chat 不再收到推送，不刪任何訂閱資料（#121）",
+  "issue": 244,
+  "branch": "fix/bot-push-allowlist",
+  "worktree": ".worktrees/bot-push-allowlist",
+  "pr": 247,
+  "qa": {
+    "result": "pass",
+    "sha": "76c154ea0021589c0d56431024ef185dcc9a63f1",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "76c154ea0021589c0d56431024ef185dcc9a63f1",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "f4d7565986993f57f14b1c5c9143a174d8b5e98c",
+    "sha": "8c103bdc1a7f53f858e7443e814749691c3f73f2"
+  }
+}

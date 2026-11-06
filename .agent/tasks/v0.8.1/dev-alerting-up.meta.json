@@ -1,0 +1,15 @@
+{
+  "task_id": "dev-alerting-up",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "開發環境把熱度偵測 heat 與 Telegram bot 重新啟動起來，並刪掉遺留的 consumer group `uat-read-1793349393`。不改程式",
+  "issue": 285,
+  "branch": "chore/dev-alerting-up",
+  "worktree": ".worktrees/dev-alerting-up",
+  "pr": null,
+  "qa": null,
+  "review": null,
+  "merged": false,
+  "cancelled": true
+}

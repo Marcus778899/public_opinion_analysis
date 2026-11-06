@@ -7,7 +7,7 @@ E2E_RUNNING := docker ps -aq --filter name=^radar_fake_ptt$$
 
 .PHONY: setup ci-setup check coverage stop-e2e stop-dev up up-app up-labeling up-inference up-shadow up-alerting testset human-label down logs migrate topics connector ch-migrate seed api lint test test-int e2e-up e2e e2e-down
 
-up: stop-e2e  ## 啟動基礎設施
+up: stop-e2e  ## 只啟動基礎設施；沒有 init 時 connect 會 unhealthy、--wait 回非 0（已知限制，開發規格 7.30 B），要完整啟動請用 make up-app
 	$(COMPOSE) up -d --wait
 
 up-app: stop-e2e  ## 連同 api、scheduler、crawler ×3、ingest 一起啟動（會重新建 image，並自動建表與 topic）
@@ -65,7 +65,7 @@ human-label:  ## 本機人工標註頁（http://127.0.0.1:8090）
 api:  ## 本機啟動管理 API（http://localhost:8000/docs）
 	$(UV_ENV) uvicorn radar.api.main:app --reload --port 8000
 
-setup:  ## 本機建立 .venv 與相依（check_env.py setup 會呼叫；worktree 共用主目錄的 .venv）
+setup:  ## 本機建立 .venv 與相依（ae check-env setup 會呼叫；worktree 共用主目錄的 .venv）
 	uv sync
 
 ci-setup:  ## CI 安裝相依

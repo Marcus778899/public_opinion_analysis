@@ -1,0 +1,25 @@
+{
+  "task_id": "gitleaks-allowlist-boundary",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "gitleaks 的 revision 放行規則改成整段變數名比對，不再因為名稱裡含 sha／rev 子字串就放行（#171）",
+  "issue": 240,
+  "branch": "chore/gitleaks-allowlist-boundary",
+  "worktree": ".worktrees/gitleaks-allowlist-boundary",
+  "pr": 241,
+  "qa": {
+    "result": "pass",
+    "sha": "07e43b64d594af34d1eb558b3b2045e57f7ece3b",
+    "by": "qa",
+    "carried_from": "c34dde29775d724068d4643c330ddfb289d31a00"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "07e43b64d594af34d1eb558b3b2045e57f7ece3b",
+    "by": "architect",
+    "carried_from": "c34dde29775d724068d4643c330ddfb289d31a00"
+  },
+  "merged": true,
+  "amend_sha": "5d935053a18393a1ae19c17eb8faef190a4dda92"
+}

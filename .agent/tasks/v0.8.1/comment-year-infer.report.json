@@ -1,0 +1,24 @@
+{
+  "task_id": "comment-year-infer",
+  "status": "done",
+  "files_changed": [
+    "src/radar/collector/parsers/ptt.py",
+    "tests/unit/collector/parsers/test_ptt_comment_bound.py",
+    "tests/unit/collector/parsers/test_ptt_post.py",
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "uv run pytest tests/unit/acceptance/comment-year-infer tests/unit/collector; make check",
+    "exit_code": 0,
+    "tail": "168 passed (acceptance + collector); make check: 1436 passed"
+  },
+  "open_questions": [
+    "成因（已抽樣，PG comments＋Kafka raw.html 原始 HTML，未對 PTT 發請求）：future 推文是「推文時間早於文章標頭時間」。例 Gossiping.M.1793238717.A.B3C（文章 2026-10-29）原始 HTML 的 push 為 02/15 03:43，Gossiping.M.1793178844.A.353 為 02/16 22:07，HatePolitics.M.1793061234.A.EA9（文章 2026-10-27）為 05/01 09:35；都是轉錄／修改帶入的舊推文。parser 因月份小於文章月份而 +1 年，變成 2027-02～05。我先前『文章被晚很久推』的推測不成立，已撤回。",
+    "PG 目前未來(>now+1d) 251 則、其中約 74 則距文章超過 300 天（上述 +1 年型）；另有 11/09、11/16、11/17 等推文（如 Gossiping.M.1792171863.A.FEC floor 1-3，文章 10/16，推文月份大於文章月份，parser 給 2026-11）同為帶入舊推文，真實年份無從判斷（可能 2025）。",
+    "NULL 的 68 則（PG 目前）：抽樣 Stock.M.1793101231.A.CDE，原始 HTML 的長推文被 PTT 截斷，時間只剩 '10/28' 沒有 HH:MM（例 q1mail 那則），regex 要求 HH:MM 所以回 NULL。屬 PTT 原始資料本來沒有完整時間，不是 parser 錯誤，不修，已寫進 2.1。",
+    "依 manager 指示保留真實時間，但受鎖定的驗收測試 test_unreasonable_comment_time_logs_one_warning 限制：文章 10/28、推文 11/05 的輸入必須回 None 並記 warning。因此只對『parser 補成隔年且落在未來』者退回文章年份（可還原 02/15、05/01 這類），推文月份 >= 文章月份而在未來者回 None。若要連後者也退一年還原（如 2025-11-09），需要 qa 修改該驗收測試，由 manager 決定。這不是契約矛盾，故未列 disputes。",
+    "回應 review 問題 1：已刪『不早於文章時間』的走不到分支，2.1 改成實際行為；單元測試改用 parser 真的會產生的輸入（2027-05-01 退 2026-05-01、2026-11-05 回 None、2/29 回 None、退後仍在未來回 None）。",
+    "早於文章時間但未落在未來的帶入推文（例 10/20 文章裡的 10/05）維持原樣保存，未處理（review 非阻擋項）。",
+    "舊資料未處理：已入庫錯誤資料需重爬或另行回填；回填時 +1 年型可直接用新規則還原。"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "task_id": "bert-derive-max-len",
+  "kind": "feat",
+  "owner": "backend",
+  "lane": "full",
+  "title": "新增 `python -m radar.ml.training.derive_model`，從既有模型包產生只改 `max_len` 的衍生版本（例 `bert-ckip-202610280849-len256`），不重訓",
+  "issue": 202,
+  "branch": "feat/bert-derive-max-len",
+  "worktree": ".worktrees/bert-derive-max-len",
+  "pr": 203,
+  "qa": {
+    "result": "pass",
+    "sha": "ccfff0e0496bc7ee28bea186ead8fd815f30c7bb",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "ccfff0e0496bc7ee28bea186ead8fd815f30c7bb",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "03b47e655dcdcee168f83054fd5d3472a6a71df0",
+    "sha": "ac661cd7e186494466d36ed0fbc91d4ebc7cdab4"
+  },
+  "amend_sha": "87e44d4bd625792c62aeddd77b640448169e99e9"
+}

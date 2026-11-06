@@ -1,0 +1,24 @@
+{
+  "task_id": "joserfc-vuln-upgrade",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "把間接相依 joserfc 從 1.7.5 升到 1.7.6，修 osv-scanner 回報的 GHSA-9pg5-8c7x-5hfx（Medium 6.9），讓 CI Security job 恢復綠燈",
+  "issue": 274,
+  "branch": "chore/joserfc-vuln-upgrade",
+  "worktree": ".worktrees/joserfc-vuln-upgrade",
+  "pr": 275,
+  "qa": {
+    "result": "pass",
+    "sha": "5bf437590ab04c7a2daffc9a11af0399d31677c1",
+    "by": "qa",
+    "carried_from": "f7b6011fbb045e2ec2875ae0ee7a0e24d4ffc4af"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "5bf437590ab04c7a2daffc9a11af0399d31677c1",
+    "by": "architect",
+    "carried_from": "f7b6011fbb045e2ec2875ae0ee7a0e24d4ffc4af"
+  },
+  "merged": true
+}

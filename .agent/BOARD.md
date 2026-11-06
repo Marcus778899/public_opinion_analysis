@@ -2,18 +2,21 @@
 
 <!-- 只放目前這一階段；只有 manager 透過 ae board 修改；階段完成時整份封存到 .agent/tasks/<tag>.md -->
 
-> 上一階段：.agent/tasks/v0.8.0.md（派工單在 .agent/tasks/v0.8.0/
+> 上一階段：`.agent/tasks/v0.8.1.md`（派工單在 `.agent/tasks/v0.8.1/`）
 
 ## 目標與範圍
 
-- 本輪：處理 backlog 小項後發 v0.8.1（階段 9 暫緩）：第 3 批剩 #80、#254（D-035）；agent-v1-cleanup 清掉 v1 殘留（CI 改 ae ci、刪 scripts/、templates/、contracts/）；清掉遺留 heat-replay-* group 與內部 topic（D-038）；Kafka 對外 port 改綁 127.0.0.1（D-039）
-- 不做：階段 9 上雲；#57（v0.8.1 發版後討論）；#68 #69 #251 #281 #282；多天驗收（D-031）；#178 #181
+- 本輪：v0.8.2 穩定性小版（D-042）：#281 producer fatal 後結束程式交給 restart；#282 Connect 內部 topic 改 2 份副本（D-041）與 connect 健康檢查；#289 推論 2 CPU、2g、INFERENCE_THREADS=2；#262 init 遇 task FAILED 先重啟；#268 未來時間不讓補抓失效；小項 #276 #263 #270 #277 #269、#271 剩下兩項；#309 make up 補 connect 限制說明（UAT F-2）
+- 不做：#264 #259 #251 #68 #69 #57 #178 #181 #310；階段 9 上雲；多天驗收（D-031）
 - 驗收條件：
-  - CI 改成 ae ci 後在 PR 上綠燈，kafka／postgres／clickhouse 整合測試、gitleaks、改到的程式碼覆蓋率門檻都還在跑
-  - repo 裡沒有任何東西再呼叫 scripts/，根目錄的 scripts/、templates/、contracts/ 已移除
-  - Kafka 三個對外 port 只綁 127.0.0.1，本機服務與工具照常連得上
-  - 開發環境的 Kafka 沒有 heat-replay-* 的 consumer group 與內部 topic，其他 topic、group 不受影響
-  - v0.8.1 甲方驗收清單 PASS（docs/uat/v0.8.1.md）
+  - 模擬 producer 進入 fatal 狀態，服務記 CRITICAL 並結束，被 docker 自動重啟後恢復送訊息
+  - Connect 內部 topic 都是 2 份副本；停掉任一台 broker，connect 照樣啟動且 connector 還在；connect 健康檢查會發現 connector 不存在
+  - 推論容器有 CPU 與記憶體上限，在上限內補完積壓、沒有因記憶體不足被砍
+  - 重建 postgres 後跑一次 init 就成功，不用重跑
+  - PTT 標頭是未來時間時，補抓不會停掉（有測試）
+  - 小項 #276 #263 #270 #277 #269 與 #271 剩下兩項完成，CI 綠燈
+  - make up 的說明寫清楚沒有 init 時 connect 會 unhealthy，以及該用哪個指令（#309）
+  - v0.8.2 甲方驗收清單 PASS（docs/uat/v0.8.2.md，只列 agent 驗不到的項目）
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
@@ -51,56 +54,28 @@
 | 2026-11-04 | D-038 | 遺留 heat-replay-* 的 group 與內部 topic 清掉（v0.8.1） |
 | 2026-11-04 | D-039 | Kafka 三個對外 port 改綁 127.0.0.1（v0.8.1） |
 | 2026-11-04 | D-040 | 正式推論直接換 bert-ckip-202610280849，shadow 不開；#178 上雲後驗證 |
+| 2026-11-04 | D-041 | Connect 內部 topic 改 2 份副本（#282） |
+| 2026-11-04 | D-042 | v0.8.2 穩定性小版範圍（#281 #282 #289 #262 #268＋小項） |
 
 ## 任務狀態
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
-| bert-shadow-gate-ruling | architect | done | 0 | PR #200 |
-| shadow-restart-investigate | backend | done | 0 | reports/shadow-restart-investigate.json（只調查，已作廢 PR） |
-| bert-derive-max-len | backend | done | 0 | PR #203 |
-| shadow-memory-measure | backend | done | 0 | reports/shadow-memory-measure.json（只量測，已作廢 PR） |
-| bert-batch-tokens-default | backend | done | 0 | PR #206 |
-| comment-year-infer | backend | done | 0 | PR #211 |
-| consumer-commit-wait | backend | done | 0 | PR #210 |
-| gossiping-gap-investigate | backend | done | 0 | reports/gossiping-gap-investigate.json（只調查，已作廢 PR） |
-| init-exit-code | backend | done | 0 | PR #213（只加回歸測試，255 無法重現） |
-| ml-cli-usability | backend | done | 0 | PR #216 |
-| shadow-missing-model-exit | backend | done | 0 | PR #217 |
-| comment-time-recrawl | backend | done | 0 | PR #220（剩 10 則在 3 篇已刪文，接受） |
-| pipeline-gap-design | architect | done | 0 | PR #221 |
-| crawl-backfill-depth | backend | done | 0 | PR #225（e2e 新測試待發版前在 e2e 環境實跑） |
-| pipeline-stall-alert | backend | done | 0 | PR #224 |
-| crawl-backfill-retry | backend | done | 0 | PR #230 |
-| kafka-version-upgrade | backend | done | 0 | PR #229；開發環境三台已逐台升 4.1.2，無 under-replicated |
-| import-model-hardening | backend | done | 0 | PR #233 |
-| scheduler-statement-timeout | backend | done | 0 | PR #239 |
-| bot-poll-resilience | backend | done | 0 | PR #242 |
-| ci-tool-checksum | backend | done | 0 | PR #238 |
-| gitleaks-allowlist-boundary | backend | done | 0 | PR #241 |
-| spec-docs-sync | backend | done | 1 | PR #246 |
-| bot-push-allowlist | backend | done | 0 | PR #247 |
-| grafana-readonly-verify | backend | done | 0 | PR #249（權限已夠緊；收斂權限另開 #251） |
-| subscription-toggle-latency | backend | done | 0 | PR #250（Telegram 往返待部署後從 bot log 實測） |
-| secret-placeholder-guard | backend | done | 0 | PR #253 |
-| infra-secret-guard | backend | done | 0 | PR #256 |
-| heat-replay-align | backend | done | 0 | PR #258 |
-| comments-cdc-gap-investigate | backend | done | 0 | reports/comments-cdc-gap-investigate.json（開發機休眠，非程式問題；watchdog 有記 ERROR） |
-| replay-alert-repro | backend | done | 1 | PR #265 |
-| gap-record-update | backend | done | 0 | PR #267 |
-| agent-v1-cleanup | architect | done | 0 | PR #273 |
-| joserfc-vuln-upgrade | backend | done | 0 | PR #275 |
-| ci-v1-path-cleanup | architect | done | 0 | PR #279 |
-| dev-stall-recover | backend | done | 0 | reports/dev-stall-recover.json（已恢復；只調查，已作廢 PR） |
-| kafka-port-bind-local | backend | done | 0 | PR #286；開發環境已重建生效 |
-| heat-replay-cleanup | backend | done | 0 | reports/heat-replay-cleanup.json（刪 9 組 group、20 個內部 topic；只清理，已作廢 PR） |
-| dev-alerting-up | backend | done | 0 | reports/dev-alerting-up.json（heat、bot 已啟動；只操作，已作廢 PR） |
-| kafka-rolling-restart | backend | done | 0 | reports/kafka-rolling-restart.json（三台已綁 127.0.0.1；只操作，已作廢 PR） |
-| inference-ckip-up | backend | done | 0 | reports/inference-ckip-up.json（ckip 已上線；只操作，已作廢 PR） |
+| stability-design | architect | done | 0 | PR #292 |
+| producer-fatal-exit | backend | done | 0 | PR #298 |
+| connect-resilience | backend | done | 0 | PR #296 |
+| cli-wording-sha256 | backend | done | 1 | PR #297 |
+| backfill-since-filename | backend | done | 0 | PR #302 |
+| ci-token-order | backend | done | 0 | PR #301 |
+| inference-resource-limit | backend | done | 0 | PR #304 |
+| heat-alert-dup-investigate | backend | done | 0 | 調查完成（作廢 PR），.agent/reports/heat-alert-dup-investigate.json |
+| connect-rf-reassign | backend | done | 0 | 操作完成（作廢 PR），.agent/reports/connect-rf-reassign.json |
+| stability-dev-verify | backend | done | 0 | 開發環境驗證完成（作廢 PR），.agent/reports/stability-dev-verify.json |
+| make-up-connect-hint | backend | done | 0 | PR #313 |
 
 ## 卡住／待甲方決定
 
-- v0.8.1 甲方驗收清單（docs/uat/v0.8.1.md）待甲方勾選並寫 甲方驗收：PASS（含 #82 我的訂閱 2 秒內實測；S22 已 PASS）；資安重審 PASS
+- v0.8.2 甲方驗收清單（docs/uat/v0.8.2.md）：make e2e 已 PASS（13 passed）；待甲方驗 Grafana、Telegram、模型重匯後寫 甲方驗收：PASS
 
 ## 注意事項（踩過的坑）
 

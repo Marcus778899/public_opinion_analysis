@@ -1,0 +1,21 @@
+{
+  "task_id": "shadow-missing-model-exit",
+  "status": "done",
+  "files_changed": [
+    "src/radar/ml/inference/main.py",
+    "tests/unit/ml/inference/test_main.py",
+    "infra/docker-compose.yaml",
+    "docs/development-spec.md",
+    "tests/integration/acceptance/bert-shadow-inference/test_shadow_service.py"
+  ],
+  "verification": {
+    "command": "uv run pytest tests/unit/ml/inference tests/unit/acceptance/shadow-missing-model-exit -p no:xdist --cov=radar.ml.inference.main --cov-report=term-missing; make check",
+    "exit_code": 0,
+    "tail": "main.py 89%（未量到 223-260,264 為既有的 main 後半段，改到的 195-214 全覆蓋）; make check: 1477 passed"
+  },
+  "open_questions": [
+    "依仲裁在 test_shadow_service.py 的 env fixture 加一行寫入 model_card.json（已 commit），但整合測試沒跑成：docker compose 建置失敗，.env 的 GRAFANA_VERSION 值尾端有多餘字元（解析成 grafana/grafana-oss:13.0.2ㄥ），我不能讀或改 .env；請甲方修正後由 manager 重跑 `docker compose --env-file .env -f .worktrees/shadow-missing-model-exit/compose.yaml run --rm test pytest -q tests/integration/acceptance/bert-shadow-inference/test_shadow_service.py`，再 down -v",
+    "compose up --wait 實測待合併後由 manager 驗（舊 image 沒有新程式）；預期容器 exit 78、up --wait 回報已結束",
+    "review 3 項已處理：只在 model_dir 為唯一缺失欄位時 exit 78，其他驗證錯誤照常丟出；test_main.py 直接呼叫 main() 補覆蓋；7.27 已補 restart: no 的代價"
+  ]
+}

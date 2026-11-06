@@ -1,0 +1,18 @@
+{
+  "task_id": "gap-record-update",
+  "kind": "docs",
+  "owner": "backend",
+  "lane": "fast",
+  "title": "開發規格 7.29 補上 2026-10-30 的停機缺口（D-032）",
+  "issue": 266,
+  "branch": "docs/gap-record-update",
+  "worktree": ".worktrees/gap-record-update",
+  "pr": 267,
+  "qa": {
+    "result": "pass",
+    "sha": "cc653aa0fb55ae687c219d619c5284b8cf56a23b",
+    "by": "qa"
+  },
+  "review": null,
+  "merged": true
+}

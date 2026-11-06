@@ -1,0 +1,14 @@
+{
+  "task_id": "joserfc-vuln-upgrade",
+  "status": "done",
+  "files_changed": ["uv.lock"],
+  "verification": {
+    "command": "uv lock --upgrade-package joserfc && uv sync && uv run pytest tests/unit -q",
+    "exit_code": 0,
+    "tail": "Updated joserfc v1.7.5 -> v1.7.7; 1886 passed in 100.93s; git diff --stat uv.lock: 1 file changed, 3 insertions(+), 3 deletions(-)"
+  },
+  "open_questions": [
+    "uv 解析到 1.7.7（非 1.7.6），仍在修正版以上；只動 joserfc 的 version、sdist、wheel 三處，其他套件與 authlib 未變",
+    "PR 上 CI 的 osv-scanner 結果尚待 manager 開 PR 後確認"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "task_id": "comment-time-recrawl",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "依 D-033，對已入庫且 `commented_at` 落在未來的推文所屬文章（約 55 篇）觸發一次重爬，由爬蟲以 PR #211 的新規則覆寫",
+  "issue": 218,
+  "branch": "chore/comment-time-recrawl",
+  "worktree": ".worktrees/comment-time-recrawl",
+  "pr": 220,
+  "qa": {
+    "result": "pass",
+    "sha": "b590aaad7cceaa809105ecef2905854c2e259247",
+    "by": "qa",
+    "carried_from": "14c8dbdb1798cc914b244110f5c51a815abea0f6"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "b590aaad7cceaa809105ecef2905854c2e259247",
+    "by": "architect",
+    "carried_from": "14c8dbdb1798cc914b244110f5c51a815abea0f6"
+  },
+  "merged": true,
+  "amend_sha": "14c8dbdb1798cc914b244110f5c51a815abea0f6"
+}

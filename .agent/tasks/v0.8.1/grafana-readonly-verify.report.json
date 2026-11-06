@@ -1,0 +1,14 @@
+{
+ "task_id": "grafana-readonly-verify",
+ "status": "done",
+ "files_changed": ["tests/integration/dashboard/test_grafana_readonly.py"],
+ "verification": {"command": "docker compose --env-file .env -f .worktrees/grafana-readonly-verify/compose.yaml run --rm test pytest tests/integration/dashboard tests/integration/acceptance/dashboard -q; make check (commit hook 全過，先前 make check 1709 passed)", "exit_code": 0, "tail": "234 passed in 16.14s (含新檔 54 個測試與既有 dashboard 整合與驗收測試); 已 down -v"},
+ "open_questions": [
+  "實測結論：grafana.xml 不需要收緊，沒有修改。readonly=1 擋掉 INSERT/CREATE/DROP/ALTER/TRUNCATE/OPTIMIZE/SYSTEM；SET readonly=0 與 SETTINGS readonly=0 被拒；max_execution_time 超過 60 被約束拒絕。",
+  "7.25 威脅表可更新：system 資料庫『部分可讀但被 allow_databases 過濾』。可讀：system.tables、system.columns、system.databases 只回 radar 的列；另可讀 system.settings（1817 列，預設值，無憑證）、system.functions、system.table_engines、system.one、numbers()/numbers_mt()/generateSeries()/values()/view()/null() 等純計算 table function（無外部存取，風險低）。SHOW TABLES FROM system 回空。",
+  "7.25 威脅表可更新：system.users、roles、grants、quotas、settings_profiles、processes、query_log、text_log、trace_log、part_log、named_collections、clusters、macros、disks、metrics、parts、merges、mutations、replicas、build_options、numbers、zeros 與 information_schema 全部 ACCESS_DENIED（497）。",
+  "7.25 威脅表可更新：url()、remote()、remoteSecure()、s3()、hdfs()、mysql()、postgresql()、mongodb()、jdbc()、odbc()、azureBlobStorage()、iceberg()、deltaLake()、hudi()、file() 皆因缺 READ 權限回 ACCESS_DENIED；executable() 被 readonly 擋。file() 另受 user_files 路徑限制。",
+  "allow_databases 對 system 的效果：不是完全擋住，而是讓列舉類 system 表只看到 radar；真正的防護是 grafana 帳號未被授予各 READ/SELECT 權限（SHOW GRANTS 可見）。ClickHouse 版本 26.8 實測；升版時以此測試回歸。",
+  "未涵蓋：*Cluster 類 table function（測試環境無叢集，回 CLUSTER_DOESNT_EXIST，不屬權限拒絕）。"
+ ]
+}

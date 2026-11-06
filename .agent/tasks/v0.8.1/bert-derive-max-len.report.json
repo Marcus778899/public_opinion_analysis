@@ -1,0 +1,11 @@
+{
+  "task_id": "bert-derive-max-len",
+  "status": "done",
+  "files_changed": ["src/radar/ml/training/derive_model.py", "tests/unit/ml/training/test_derive_model.py"],
+  "verification": {
+    "command": "uv run pytest tests/unit/ml/training/test_derive_model.py -p no:xdist --cov=radar.ml.training.derive_model --cov-report=term-missing; make check",
+    "exit_code": 0,
+    "tail": "derive_model.py 61 stmts, 1 miss, 98%, Missing 81（__main__ 守衛）; 15 passed; make check: 1409 passed"
+  },
+  "open_questions": ["無資料庫、端點、設定變動，檢查清單其餘項目不適用。", "用 --cov=src/... 路徑在 xdist 下顯示 No data，改用模組名並 -p no:xdist 量測。"]
+}

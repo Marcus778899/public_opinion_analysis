@@ -1,0 +1,30 @@
+{
+  "task_id": "crawl-backfill-retry",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "修正補抓途中遇到暫時性錯誤（內頁 429、5xx、逾時）時續抓鏈斷掉的問題（review G1），並補上 7.28 A 的文件缺口",
+  "issue": 227,
+  "branch": "fix/crawl-backfill-retry",
+  "worktree": ".worktrees/crawl-backfill-retry",
+  "pr": 230,
+  "qa": {
+    "result": "pass",
+    "sha": "0060a9ca058abe273ac7164bfd074c39e4346d8c",
+    "by": "qa",
+    "carried_from": "2974ab7cf1a47d8fc4260c9b6b0dc9311be53dd3"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "0060a9ca058abe273ac7164bfd074c39e4346d8c",
+    "by": "architect",
+    "carried_from": "2974ab7cf1a47d8fc4260c9b6b0dc9311be53dd3"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "8e4d86101ce639da35173203b49763d64aa324a9",
+    "sha": "0060a9ca058abe273ac7164bfd074c39e4346d8c",
+    "carried_from": "2974ab7cf1a47d8fc4260c9b6b0dc9311be53dd3"
+  },
+  "amend_sha": "867fab83c40d281605cd05f903a82632ffecf875"
+}

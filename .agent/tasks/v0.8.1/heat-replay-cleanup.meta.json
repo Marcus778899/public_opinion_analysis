@@ -1,0 +1,15 @@
+{
+  "task_id": "heat-replay-cleanup",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "清掉開發環境 Kafka 遺留的 `heat-replay-*` consumer group 與 Quix 內部 topic（D-038），確認沒有殘留的回放 heat 程序。不改程式",
+  "issue": 284,
+  "branch": "chore/heat-replay-cleanup",
+  "worktree": ".worktrees/heat-replay-cleanup",
+  "pr": null,
+  "qa": null,
+  "review": null,
+  "merged": false,
+  "cancelled": true
+}

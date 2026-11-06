@@ -1,0 +1,26 @@
+{
+  "task_id": "bert-batch-tokens-default",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "`INFERENCE_MAX_BATCH_TOKENS` 預設由 4096 改為 2048（程式、`.env.example`、開發規格 7.27 一起改）",
+  "issue": 205,
+  "branch": "fix/bert-batch-tokens-default",
+  "worktree": ".worktrees/bert-batch-tokens-default",
+  "pr": 206,
+  "qa": {
+    "result": "pass",
+    "sha": "9ed2b930cf60f621d547a190a451b8be73b54ced",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "9ed2b930cf60f621d547a190a451b8be73b54ced",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "9d8c36b7cb2eab7529abb448d4fbc22528f64ea8",
+    "sha": "bb07baf94b2c23a6ed2441d4cfd929fdd10954c1"
+  }
+}

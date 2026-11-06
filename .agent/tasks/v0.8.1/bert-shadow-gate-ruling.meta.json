@@ -1,0 +1,22 @@
+{
+  "task_id": "bert-shadow-gate-ruling",
+  "kind": "docs",
+  "owner": "architect",
+  "lane": "full",
+  "title": "依 ckip fp32 重跑 evaluate 的結果，判定是否通過 7.27 順序 3 的進 shadow 門檻，並把「每批 < 30 s」是指 p50 還是最大值寫清楚，決定下一步走順序 6（啟動 shadow）或 4（截到 256）",
+  "issue": 199,
+  "branch": "docs/bert-shadow-gate-ruling",
+  "worktree": ".worktrees/bert-shadow-gate-ruling",
+  "pr": 200,
+  "qa": {
+    "result": "pass",
+    "sha": "ebbb16bff5947d3651e99a35beff074b7aa0a362",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "ebbb16bff5947d3651e99a35beff074b7aa0a362",
+    "by": "甲方"
+  },
+  "merged": true
+}

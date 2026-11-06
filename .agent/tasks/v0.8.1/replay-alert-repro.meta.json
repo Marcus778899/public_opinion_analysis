@@ -1,0 +1,28 @@
+{
+  "task_id": "replay-alert-repro",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "照開發規格 7.20 做完回放後，`replay.alerts` 真的會出現警示；回放工具的 `--help` 與錯誤提示照其他 CLI 的標準（UAT v0.8.1 F-1、F-2）",
+  "issue": 261,
+  "branch": "fix/replay-alert-repro",
+  "worktree": ".worktrees/replay-alert-repro",
+  "pr": 265,
+  "qa": {
+    "result": "pass",
+    "sha": "acc1ee69b674fe70c66701cd6b10548a918ec06d",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "acc1ee69b674fe70c66701cd6b10548a918ec06d",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "72d4f1e75821a57a0c915c44cd83c5e7bc9a40c2",
+    "sha": "c5ee3727066d70731a8f1e36e32107a72ad54726"
+  },
+  "qa_fails": 1,
+  "amend_sha": "3b3a3295a9cec6bf93d1dce9a74ff93871e514b4"
+}

@@ -1,0 +1,7 @@
+{
+ "task_id": "bert-batch-tokens-default",
+ "status": "done",
+ "files_changed": ["src/radar/common/settings.py","src/radar/ml/training/classifier.py",".env.example","docs/development-spec.md"],
+ "verification": {"command": "uv run pytest tests/unit/acceptance/bert-batch-tokens-default tests/unit/acceptance/bert-onnx-length-batching tests/unit/ml; make check", "exit_code": 0, "tail": "360 passed; make check: 1414 passed"},
+ "open_questions": ["驗收測試與 bert-onnx-length-batching 的 2048 測試已由 qa 改好，未動測試檔；無現有單元測試依賴 4096，故 test_classifier.py 未改"]
+}

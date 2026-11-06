@@ -1,0 +1,26 @@
+{
+  "task_id": "scheduler-statement-timeout",
+  "status": "done",
+  "files_changed": [
+    "src/radar/collector/scheduler.py",
+    "src/radar/collector/recrawl.py",
+    "src/radar/common/db/session.py",
+    "src/radar/common/settings.py",
+    "tests/unit/collector/test_recrawl.py",
+    "tests/unit/common/test_session.py",
+    "tests/unit/common/test_settings.py",
+    ".env.example",
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "uv run pytest tests/unit/acceptance/scheduler-statement-timeout tests/unit/collector tests/unit/common; make check",
+    "exit_code": 0,
+    "tail": "427 passed (targeted); make check: 1668 passed in 82.98s; pre-commit passed"
+  },
+  "open_questions": [
+    "is_query_timeout() 放在 recrawl.py（scheduler.py 匯入），避免循環匯入；session.py 依派工單只加參數。",
+    "AdvisoryLock 與 Scheduler 共用同一個 engine，statement_timeout 也套用到 advisory lock 連線，其查詢都是非阻塞，無影響。",
+    "未跑 docker 整合測試（本單只有單元層變更，無 PG 實連）；真實 PG 的 QueryCanceled 包裝形式依驗收測試假設為 OperationalError.orig。",
+    "tests/unit/collector/test_scheduler.py 未修改（驗收測試已涵蓋逾時行為）。"
+  ]
+}

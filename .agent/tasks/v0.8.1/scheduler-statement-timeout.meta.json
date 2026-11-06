@@ -1,0 +1,30 @@
+{
+  "task_id": "scheduler-statement-timeout",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "Scheduler 查 PG 時加 statement_timeout，一個查詢卡住不會讓那個看板的派工一直停住（#226）",
+  "issue": 235,
+  "branch": "fix/scheduler-statement-timeout",
+  "worktree": ".worktrees/scheduler-statement-timeout",
+  "pr": 239,
+  "qa": {
+    "result": "pass",
+    "sha": "4ccfad14ffefcb9803b57412fd6cb7283a9684d0",
+    "by": "qa",
+    "carried_from": "bfcae2f24a4056e4b62a55c4b4df6604c81f0223"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "4ccfad14ffefcb9803b57412fd6cb7283a9684d0",
+    "by": "architect",
+    "carried_from": "bfcae2f24a4056e4b62a55c4b4df6604c81f0223"
+  },
+  "merged": true,
+  "amend_sha": "85b93044c1e604c9d699aa669c477d4230c99fc7",
+  "acceptance_lock": {
+    "patch": "8e954269766ffc1dca90ec1996921c32b11a66ec",
+    "sha": "4ccfad14ffefcb9803b57412fd6cb7283a9684d0",
+    "carried_from": "bfcae2f24a4056e4b62a55c4b4df6604c81f0223"
+  }
+}

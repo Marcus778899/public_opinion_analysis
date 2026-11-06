@@ -1,0 +1,34 @@
+{
+  "task_id": "kafka-port-bind-local",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "Kafka 三個對外 port（9092、9094、9096）改綁 127.0.0.1，只給本機的已知服務與工具連（D-039）",
+  "issue": 283,
+  "branch": "fix/kafka-port-bind-local",
+  "worktree": ".worktrees/kafka-port-bind-local",
+  "pr": 286,
+  "qa": {
+    "result": "pass",
+    "sha": "a1e7af9b713c347ab2703d3a60096ee9a848b370",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "a1e7af9b713c347ab2703d3a60096ee9a848b370",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "7e2a76fb8561595fcee49c2247ed21d0f6400e70",
+    "sha": "a1e7af9b713c347ab2703d3a60096ee9a848b370"
+  },
+  "node_at": 1793763825.040778,
+  "rulings": 1,
+  "ruling": {
+    "result": "test_wrong",
+    "sha": "6d00d5c42b93171b0bce9da7242594bb7a960a86",
+    "after_fails": 0
+  },
+  "amend_sha": "6d00d5c42b93171b0bce9da7242594bb7a960a86"
+}

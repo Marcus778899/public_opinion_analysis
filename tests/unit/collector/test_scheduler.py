@@ -226,8 +226,22 @@ class FakeEngine:
 
 def test_latest_post_since_subtracts_ten_minutes():
     latest = datetime(2026, 10, 29, 6, 0, tzinfo=UTC)
+    engine = FakeEngine(latest)
 
-    assert latest_post_since(FakeEngine(latest), "Stock") == latest - timedelta(minutes=10)
+    assert latest_post_since(engine, "Stock") == latest - timedelta(minutes=10)
+
+
+def test_latest_post_since_future_filename_is_clamped_to_now_with_warning(monkeypatch):
+    from radar.collector import scheduler as mod
+
+    records: list[str] = []
+    monkeypatch.setattr(mod.log, "warning", lambda msg, *a: records.append(msg))
+    now = datetime(2026, 10, 29, 6, 0, tzinfo=UTC)
+
+    result = latest_post_since(FakeEngine(datetime(2099, 1, 1, tzinfo=UTC)), "Stock", now=now)
+
+    assert result == now - timedelta(minutes=10)
+    assert records
 
 
 def test_latest_post_since_without_posts_is_none():
@@ -255,3 +269,24 @@ def test_list_task_sender_puts_since_into_task():
 
     task = CrawlTask.model_validate_json(fake.produced[0]["value"])
     assert task.since == latest - timedelta(minutes=10)
+
+
+def test_logged_fatal_calls_on_fatal_and_ordinary_error_is_swallowed():
+    from confluent_kafka import KafkaError
+
+    from radar.collector.scheduler import _logged
+    from radar.common.kafka.producer import ProducerFatalError
+
+    seen: list[ProducerFatalError] = []
+    error = ProducerFatalError(KafkaError(KafkaError._FATAL, "x", fatal=True))
+
+    def fatal_job(board: str) -> None:
+        raise error
+
+    def broken_job(board: str) -> None:
+        raise RuntimeError("boom")
+
+    _logged(fatal_job, seen.append)("b")
+    _logged(broken_job, seen.append)("b")
+
+    assert seen == [error]

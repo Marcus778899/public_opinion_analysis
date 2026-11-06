@@ -84,6 +84,35 @@ class ConnectorWatch:
         return ConnectorDecision(restart=True, transition=transition, restarts=self.restarts)
 
 
+class MissingTransition(StrEnum):
+    MISSING = "missing"
+    ALERT = "alert"
+    RECOVERED = "recovered"
+
+
+class MissingWatch:
+    """connector 查詢 404（REST 活著但 connector 不見）持續太久才告警；只在狀態改變時回報。"""
+
+    def __init__(self, alert_s: float) -> None:
+        self._alert_s = alert_s
+        self.missing_since: float | None = None
+        self.alerting = False
+
+    def observe(self, found: bool, now: float) -> MissingTransition | None:
+        if found:
+            was_alerting = self.alerting
+            self.missing_since = None
+            self.alerting = False
+            return MissingTransition.RECOVERED if was_alerting else None
+        if self.missing_since is None:
+            self.missing_since = now
+            return MissingTransition.MISSING
+        if not self.alerting and now - self.missing_since > self._alert_s:
+            self.alerting = True
+            return MissingTransition.ALERT
+        return None
+
+
 @dataclass(frozen=True)
 class SlotInfo:
     active: bool
@@ -152,18 +181,44 @@ def read_slot(conn: Connection, slot_name: str) -> SlotInfo | None:
     return SlotInfo(active=bool(row[0]), lag_bytes=int(row[1]))
 
 
+def _log_missing(name: str, missing_watch: MissingWatch | None, now: float) -> None:
+    if missing_watch is None:
+        log.warning("connector %s not found", name)
+        return
+    transition = missing_watch.observe(False, now)
+    if transition is MissingTransition.MISSING:
+        log.warning("connector %s not found", name)
+    elif transition is MissingTransition.ALERT:
+        log.error(
+            "connector %s still not found; check 3 brokers healthy and no under-replicated "
+            "partitions, then restart connect (config lives in connect_configs, "
+            "do not re-register first)",
+            name,
+        )
+
+
 def check_connector(
-    client: httpx2.Client, name: str, watch: ConnectorWatch, now: float
+    client: httpx2.Client,
+    name: str,
+    watch: ConnectorWatch,
+    now: float,
+    *,
+    missing_watch: MissingWatch | None = None,
 ) -> ConnectorDecision | None:
-    """查狀態、依決定重啟並記 log；Connect 連不上或 connector 不存在時記 WARNING 回 None。"""
+    """查狀態、依決定重啟並記 log；Connect 連不上或 connector 不存在時記 log 回 None。"""
     try:
         status = get_status(client, name)
     except ConnectorNotFoundError:
-        log.warning("connector %s not found", name)
+        _log_missing(name, missing_watch, now)
         return None
     except (ConnectError, httpx2.HTTPError, KeyError, ValueError) as e:
         log.warning("kafka connect status unavailable: %r", e)
         return None
+
+    if missing_watch is not None and (
+        missing_watch.observe(True, now) is MissingTransition.RECOVERED
+    ):
+        log.info("connector %s found again", name)
 
     decision = watch.observe(status, now)
     if decision.transition is ConnectorTransition.FAILED:
@@ -268,10 +323,15 @@ def check_freshness(
 
 
 def is_cdc_healthy(
-    connector: ConnectorWatch, slot: SlotWatch, freshness: FreshnessWatch | None = None
+    connector: ConnectorWatch,
+    slot: SlotWatch,
+    freshness: FreshnessWatch | None = None,
+    missing: MissingWatch | None = None,
 ) -> bool:
     # NOTE: Connect 連不上不算異常；停太久時 slot 會 inactive，由 slot 警示涵蓋（開發規格 7.16）
     if freshness is not None and freshness.stalled:
+        return False
+    if missing is not None and missing.alerting:
         return False
     return connector.failed_since is None and not slot.raised
 
@@ -307,9 +367,12 @@ def run_once(
     clickhouse: ClickHouseClient | None = None,
     freshness_watch: FreshnessWatch | None = None,
     wall_now: datetime | None = None,
+    missing_watch: MissingWatch | None = None,
 ) -> None:
     """一輪檢查：connector → slot → 資料新鮮度 → heartbeat；heartbeat 為 None 時不送。"""
-    check_connector(connect, settings.connector_name, connector_watch, now)
+    check_connector(
+        connect, settings.connector_name, connector_watch, now, missing_watch=missing_watch
+    )
     check_slot(
         engine,
         settings.slot_name,
@@ -320,7 +383,7 @@ def run_once(
     if clickhouse is not None and freshness_watch is not None:
         check_freshness(clickhouse, freshness_watch, wall_now or datetime.now(UTC))
     if heartbeat is not None and settings.heartbeat_url:
-        healthy = is_cdc_healthy(connector_watch, slot_watch, freshness_watch)
+        healthy = is_cdc_healthy(connector_watch, slot_watch, freshness_watch, missing_watch)
         send_heartbeat(heartbeat, settings.heartbeat_url, healthy)
 
 
@@ -341,6 +404,7 @@ def main() -> None:
     connector_watch = ConnectorWatch(
         settings.restart_backoff_initial_s, settings.restart_backoff_max_s
     )
+    missing_watch = MissingWatch(settings.connector_missing_alert_s)
     slot_watch = SlotWatch(settings.slot_inactive_alert_s, settings.slot_lag_alert_bytes)
     clickhouse = ClickHouseClient(ClickHouseSettings(), timeout_s=timeout_s)
     freshness_watch = FreshnessWatch(settings.stale_alert_s, datetime.now(UTC))
@@ -357,6 +421,7 @@ def main() -> None:
                 time.monotonic(),
                 clickhouse=clickhouse,
                 freshness_watch=freshness_watch,
+                missing_watch=missing_watch,
             )
         except Exception:
             # 不讓單輪的意外錯誤停掉 watchdog；這一輪不送 heartbeat，持續發生時外部服務會通知
