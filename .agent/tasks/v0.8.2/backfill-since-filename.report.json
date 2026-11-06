@@ -1,0 +1,19 @@
+{
+  "task_id": "backfill-since-filename",
+  "status": "done",
+  "files_changed": [
+    "src/radar/collector/scheduler.py",
+    "tests/unit/collector/test_scheduler.py",
+    "tests/integration/collector/test_scheduler_since_db.py"
+  ],
+  "verification": {
+    "command": "make check (1981 passed); docker compose ... run --rm test pytest tests/integration/acceptance/backfill-since-filename tests/integration/acceptance/crawl-backfill-depth tests/integration/collector -q -p no:xdist",
+    "exit_code": 0,
+    "tail": "33 passed in 5.06s"
+  },
+  "open_questions": [
+    "SQL 用 to_timestamp(max(split_part(post_id,'.',3)::bigint)) 回傳 datetime，而非 bigint epoch：tests/unit/acceptance/scheduler-statement-timeout 的 fake engine 回傳 datetime，維持其通過。行為與 7.30 E 相同。",
+    "latest_post_since 新增選填參數 now（供測試注入時間），呼叫端不受影響。",
+    "未跑覆蓋率門檻指令 ae ci coverage-gate；新增分支（未來時間、查詢）皆有單元與整合測試。"
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "task_id": "cli-wording-sha256",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "import_model 錯誤訊息改成中文一行帶下一步、`--sha256` 在 CLI 必填、derive_model `--help` 補參數說明、回放殘留警告改中文（#263、#270、#271 文案）",
+  "issue": 295,
+  "branch": "fix/cli-wording-sha256",
+  "worktree": ".worktrees/cli-wording-sha256",
+  "pr": 297,
+  "qa": {
+    "result": "pass",
+    "sha": "1ec3f82fab5f157fac8ee77176bca4bcb232a9f5",
+    "by": "qa",
+    "carried_from": "4b06d92ed62833f5bdbf86f3a052251138a917fd"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "1ec3f82fab5f157fac8ee77176bca4bcb232a9f5",
+    "by": "architect",
+    "carried_from": "4b06d92ed62833f5bdbf86f3a052251138a917fd"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "ac262bac946548e3c391e9758c338a172154a594",
+    "sha": "1ec3f82fab5f157fac8ee77176bca4bcb232a9f5",
+    "carried_from": "4b06d92ed62833f5bdbf86f3a052251138a917fd"
+  },
+  "node_at": 1793779498.22605,
+  "qa_fails": 1,
+  "amend_sha": "5a6025947c35a1cca5e676be805b9c342c2bdaa3",
+  "rulings": 1,
+  "ruling": {
+    "result": "test_wrong",
+    "sha": "5e088ac1ecf3f75fe47f9ee06f535179892c2c03",
+    "after_fails": 1
+  }
+}

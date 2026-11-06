@@ -1,0 +1,22 @@
+{
+  "task_id": "stability-design",
+  "kind": "docs",
+  "owner": "architect",
+  "lane": "full",
+  "title": "v0.8.2 穩定性小版（D-042）的設計、契約與實作派工順序",
+  "issue": 291,
+  "branch": "docs/stability-design",
+  "worktree": ".worktrees/stability-design",
+  "pr": 292,
+  "qa": {
+    "result": "pass",
+    "sha": "12ce2410fbd936773c5c197957887dd10892d816",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "12ce2410fbd936773c5c197957887dd10892d816",
+    "by": "甲方"
+  },
+  "merged": true
+}

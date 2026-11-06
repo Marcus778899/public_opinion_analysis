@@ -2,21 +2,12 @@
 
 <!-- 只放目前這一階段；只有 manager 透過 ae board 修改；階段完成時整份封存到 .agent/tasks/<tag>.md -->
 
-> 上一階段：`.agent/tasks/v0.8.1.md`（派工單在 `.agent/tasks/v0.8.1/`）
+> 上一階段：`.agent/tasks/v0.8.2.md`（派工單在 `.agent/tasks/v0.8.2/`）
 
 ## 目標與範圍
 
-- 本輪：v0.8.2 穩定性小版（D-042）：#281 producer fatal 後結束程式交給 restart；#282 Connect 內部 topic 改 2 份副本（D-041）與 connect 健康檢查；#289 推論 2 CPU、2g、INFERENCE_THREADS=2；#262 init 遇 task FAILED 先重啟；#268 未來時間不讓補抓失效；小項 #276 #263 #270 #277 #269、#271 剩下兩項；#309 make up 補 connect 限制說明（UAT F-2）
-- 不做：#264 #259 #251 #68 #69 #57 #178 #181 #310；階段 9 上雲；多天驗收（D-031）
-- 驗收條件：
-  - 模擬 producer 進入 fatal 狀態，服務記 CRITICAL 並結束，被 docker 自動重啟後恢復送訊息
-  - Connect 內部 topic 都是 2 份副本；停掉任一台 broker，connect 照樣啟動且 connector 還在；connect 健康檢查會發現 connector 不存在
-  - 推論容器有 CPU 與記憶體上限，在上限內補完積壓、沒有因記憶體不足被砍
-  - 重建 postgres 後跑一次 init 就成功，不用重跑
-  - PTT 標頭是未來時間時，補抓不會停掉（有測試）
-  - 小項 #276 #263 #270 #277 #269 與 #271 剩下兩項完成，CI 綠燈
-  - make up 的說明寫清楚沒有 init 時 connect 會 unhealthy，以及該用哪個指令（#309）
-  - v0.8.2 甲方驗收清單 PASS（docs/uat/v0.8.2.md，只列 agent 驗不到的項目）
+- 本輪：（尚未設定）
+- 不做：（尚未設定）
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
@@ -61,17 +52,6 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
-| stability-design | architect | done | 0 | PR #292 |
-| producer-fatal-exit | backend | done | 0 | PR #298 |
-| connect-resilience | backend | done | 0 | PR #296 |
-| cli-wording-sha256 | backend | done | 1 | PR #297 |
-| backfill-since-filename | backend | done | 0 | PR #302 |
-| ci-token-order | backend | done | 0 | PR #301 |
-| inference-resource-limit | backend | done | 0 | PR #304 |
-| heat-alert-dup-investigate | backend | done | 0 | 調查完成（作廢 PR），.agent/reports/heat-alert-dup-investigate.json |
-| connect-rf-reassign | backend | done | 0 | 操作完成（作廢 PR），.agent/reports/connect-rf-reassign.json |
-| stability-dev-verify | backend | done | 0 | 開發環境驗證完成（作廢 PR），.agent/reports/stability-dev-verify.json |
-| make-up-connect-hint | backend | done | 0 | PR #313 |
 
 ## 卡住／待甲方決定
 

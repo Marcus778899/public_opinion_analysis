@@ -1,0 +1,22 @@
+{
+  "task_id": "stability-design",
+  "status": "done",
+  "files_changed": [
+    "docs/development-spec.md",
+    "docs/realtime-sentiment-radar-design.md",
+    "docs/domain/README.md",
+    "docs/domain/glossary.md"
+  ],
+  "verification": {
+    "command": "make check（worktree .worktrees/stability-design，commit 12ce241）",
+    "exit_code": 0,
+    "tail": "tests/unit/tools/test_recrawl_posts.py ...... [100%]\n1890 passed in 89.15s"
+  },
+  "open_questions": [
+    "設計在開發規格 7.30（A～F、威脅與對策、派工順序 9 張、自行決定、需調查 3 項、待決定：無）；2.2、7.9、7.16、7.18、7.25、7.27、7.28 A 與設計文件 4.2、4.4、6.4、8.2、10.3 同步",
+    "唯讀查開發環境（未修改）：connect_configs/offsets/statuses 皆 RF=1；#282 的 connect_status 不存在是名稱查錯（實為 connect_statuses）；Connect 4.3.1 有 GET /health",
+    "README 由 manager 更新：第 78 行 --sha256 改必填；第 17 行「PG 剛重建時 init 可能失敗、等 20 秒再跑」在 connect-resilience 合併後可刪；#269 README 已涵蓋，可在本 PR 後關閉",
+    "驗收『模擬 fatal → 重啟後恢復』：真實 fatal 無法可靠重現；以子行程測試（CRITICAL＋非 0）與 stability-dev-verify 的 scheduler 自行結束後被 docker 重啟演練合起來驗證，請 manager 確認這樣算數",
+    "connect healthcheck 改變 e2e-up 等待條件；make e2e 需 .env，發版前請甲方跑一次"
+  ]
+}

@@ -1,0 +1,3 @@
+{"task_id":"inference-resource-limit","status":"done","files_changed":["infra/docker-compose.yaml"],
+"verification":{"command":"make check; uv run pytest tests/unit/acceptance/inference-resource-limit -q","exit_code":0,"tail":"6 passed (acceptance); make check: 1986 passed, pre-commit hooks Passed"},
+"open_questions":["docker compose config --quiet 未跑（sandbox 不能讀 .env／docker 限制），改由驗收測試解析 YAML 驗證；請 manager 或 CI 補跑"]}

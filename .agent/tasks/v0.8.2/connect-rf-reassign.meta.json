@@ -1,0 +1,15 @@
+{
+  "task_id": "connect-rf-reassign",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "開發環境既有的 Connect 內部 topic（`connect_configs`、`connect_offsets`、`connect_statuses`）以 partition reassignment 改成 2 份副本、`min.insync.replicas=1`（#282、D-041）；只操作，不改程式，PR 作廢",
+  "issue": 306,
+  "branch": "chore/connect-rf-reassign",
+  "worktree": ".worktrees/connect-rf-reassign",
+  "pr": null,
+  "qa": null,
+  "review": null,
+  "merged": false,
+  "cancelled": true
+}

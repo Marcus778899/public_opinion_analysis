@@ -1,0 +1,37 @@
+{
+  "task_id": "producer-fatal-exit",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "JsonProducer 進入 fatal 狀態後丟 `ProducerFatalError`，各服務記 CRITICAL 並以非 0 結束，交給 docker restart 恢復（#281）",
+  "issue": 293,
+  "branch": "fix/producer-fatal-exit",
+  "worktree": ".worktrees/producer-fatal-exit",
+  "pr": 298,
+  "qa": {
+    "result": "pass",
+    "sha": "8237cdd5691f1d389fbade75c88b114346038723",
+    "by": "qa",
+    "carried_from": "c06e86bc2b4311d4d7ea9ec0a772230b0abc56b1"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "8237cdd5691f1d389fbade75c88b114346038723",
+    "by": "architect",
+    "carried_from": "c06e86bc2b4311d4d7ea9ec0a772230b0abc56b1"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "651c093149533fd9392253b8a58edd413cb68be4",
+    "sha": "8237cdd5691f1d389fbade75c88b114346038723",
+    "carried_from": "c06e86bc2b4311d4d7ea9ec0a772230b0abc56b1"
+  },
+  "node_at": 1793776318.9119518,
+  "rulings": 1,
+  "ruling": {
+    "result": "test_wrong",
+    "sha": "69b25846b31d3f62c8c41c9490ff80aae34fd7b0",
+    "after_fails": 0
+  },
+  "amend_sha": "69b25846b31d3f62c8c41c9490ff80aae34fd7b0"
+}

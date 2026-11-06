@@ -1,0 +1,17 @@
+{
+  "task_id": "stability-dev-verify",
+  "status": "done",
+  "files_changed": [],
+  "verification": {
+    "command": "docker compose -f infra/docker-compose.yaml --env-file .env --profile app --profile inference ps -a",
+    "exit_code": 0,
+    "tail": "radar_connect Up 2 hours (healthy); radar_kafka_1/2/3 Up (healthy); radar_postgres Up (healthy); radar_inference Up 2 minutes (no restart); radar_scheduler Up; radar_init Exited (0). Details: (1) Broker drills (deployed with `--profile app up -d --build --wait`, connect healthcheck active): stop kafka_1 -> restart connect -> /health 200 within ~36s (08:37:13), /connectors/radar-cdc/status connector+task RUNNING, ps connect healthy -> start kafka_1 -> under-replicated empty. kafka_2: /health 200 within ~28s, RUNNING, healthy, under-replicated empty after start. kafka_3: /health 200 within ~20s ({\"status\":\"healthy\",\"message\":\"Worker has completed startup and is ready to handle requests.\"}), RUNNING, healthy, under-replicated empty after start. (Right after each start the list was non-empty because of catch-up, cleared on re-check.) (2) postgres: `--profile app up -d --force-recreate --no-deps postgres` (volume untouched) healthy in ~10s; `... up -d --force-recreate --no-deps init` -> `Exited (0)` on first run; log: all 4 secrets set, alembic ok, 13 topics up to date, clickhouse up to date, connector radar-cdc updated, connector radar-cdc running. (3) scheduler: no `kill` binary in image, so used `exec scheduler python -c \"import os,signal;os.kill(1,signal.SIGTERM)\"` (same SIGTERM to PID 1): log 'scheduler stopping', container Up 3 seconds afterwards (docker restart), advisory lock acquired; crawl.tasks end offsets sum 932669 (before) -> 932674 -> 932756 after restart (82 tasks dispatched). (4) Inference: stopped 08:33:38Z, started 10:31Z (~2h); lag before start 541/518/561 (=1620); cgroup after start+~3min: memory.events oom_kill 0 (oom 0, max 0), memory.peak 1540313088 (~1.43 GiB) < memory.max 2147483648 (2g); group inference lag 0/0/0; container not restarted."
+  },
+  "open_questions": [
+    "radar_bot 與 radar_heat 不屬於 --profile app，沒被 --build 重建，仍跑舊 image（sha256:b9fc758e...），不影響本次驗收；如要一致需另外重建。",
+    "scheduler 映像沒有 kill 指令，派工單的 `kill -TERM 1` 改用 python os.kill(1, SIGTERM) 等效替代。",
+    "postgres 重建後 scheduler 曾因連線中斷自行重啟一次（Up 17 秒），已自動恢復。",
+    "`--profile inference up inference` 會連帶重跑 init 及相依服務（secret-check、apicurio-db-init），皆 Exited (0)，無影響。",
+    "memory.peak 1.43 GiB 含 page cache，與設計文件預期（約 1.46 GB）相符；補完積壓只測了 1620 筆，約 3 分鐘內 lag 歸零。"
+  ]
+}

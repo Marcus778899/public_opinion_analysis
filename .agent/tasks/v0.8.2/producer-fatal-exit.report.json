@@ -1,0 +1,20 @@
+{
+  "task_id": "producer-fatal-exit",
+  "status": "done",
+  "files_changed": [
+    "src/radar/common/kafka/producer.py",
+    "src/radar/collector/scheduler.py",
+    "src/radar/api/main.py",
+    "tests/unit/common/kafka/test_producer.py",
+    "tests/unit/collector/test_scheduler.py",
+    "tests/unit/api/test_main.py"
+  ],
+  "verification": {
+    "command": "make check; uv run pytest tests/unit/acceptance/producer-fatal-exit -v",
+    "exit_code": 0,
+    "tail": "make check: 1928 passed in 88.54s; acceptance producer-fatal-exit: 35 passed"
+  },
+  "open_questions": [
+    "覆蓋率門檻（ae ci coverage-gate）未另外跑。"
+  ]
+}

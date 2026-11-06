@@ -1,0 +1,25 @@
+{
+  "task_id": "connect-resilience",
+  "status": "done",
+  "files_changed": [
+    ".env.example",
+    "infra/docker-compose.yaml",
+    "src/radar/cdc/watchdog.py",
+    "src/radar/common/kafka/connect.py",
+    "src/radar/common/settings.py",
+    "tests/unit/cdc/test_watchdog.py",
+    "tests/unit/common/kafka/test_connect.py",
+    "tests/unit/common/test_settings.py",
+    "tools/register_connector.py"
+  ],
+  "verification": {
+    "command": "cd .worktrees/connect-resilience && PYTHONPATH=$PWD/src uv run pytest tests/unit/acceptance/connect-resilience tests/unit/acceptance/infra-secret-guard tests/unit/acceptance/init-exit-code（先前 tests/unit 全跑 1942 passed）",
+    "exit_code": 0,
+    "tail": "89 passed in 16.93s；補回 min.isr 後 commit，pre-commit Passed"
+  },
+  "open_questions": [
+    "已依 architect review 補回三個 CONNECT_*_STORAGE_MIN_INSYNC_REPLICAS: '1'（KIP-605：DistributedConfig.topicSettings 套用前綴設定），7.30 需調查 1 視為已由原始碼確認，不需補已知限制。",
+    "worktree 的 editable install 指向其他 worktree，跑測試需 PYTHONPATH=<worktree>/src。",
+    "整合測試與 compose healthcheck／init 實機流程沒跑，由 stability-dev-verify 演練。"
+  ]
+}

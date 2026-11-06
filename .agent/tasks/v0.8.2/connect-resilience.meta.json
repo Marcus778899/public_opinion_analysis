@@ -1,0 +1,28 @@
+{
+  "task_id": "connect-resilience",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "Connect 內部 topic 新環境設 2 份副本、健康檢查確認 connector 存在、cdc-watchdog 持續 404 告警（#282）；init 遇 task FAILED 先重啟（#262）",
+  "issue": 294,
+  "branch": "fix/connect-resilience",
+  "worktree": ".worktrees/connect-resilience",
+  "pr": 296,
+  "qa": {
+    "result": "pass",
+    "sha": "f47048127100d9361501f3bb44dfb781933be81a",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "f47048127100d9361501f3bb44dfb781933be81a",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "f8679ae3f3efcf1c9cc3d0a169e4b8a76ea5b8df",
+    "sha": "5ba320cb6275f738cd712266efdc63c8030bbdd4"
+  },
+  "node_at": 1793776455.985682,
+  "amend_sha": "a00da90983a15e413dd90fcafd4113f6babb9a3e"
+}
