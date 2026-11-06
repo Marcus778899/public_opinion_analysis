@@ -61,11 +61,11 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
-| bbs-spike-design | architect | todo | 0 |  |
+| bbs-spike-design | architect | done | 0 | PR #318 |
 
 ## 卡住／待甲方決定
 
-- v0.8.2 甲方驗收清單（docs/uat/v0.8.2.md）：make e2e 已 PASS（13 passed）；待甲方驗 Grafana、Telegram、模型重匯後寫 甲方驗收：PASS
+- （無）
 
 ## 注意事項（踩過的坑）
 
