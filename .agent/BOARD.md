@@ -73,7 +73,7 @@
 
 ## 卡住／待甲方決定
 
-- v0.8.2 甲方驗收清單（docs/uat/v0.8.2.md）：make e2e 已 PASS（13 passed）；待甲方驗 Grafana、Telegram、模型重匯後寫 甲方驗收：PASS。GitHub 事故中 ae docs commit 推不上去，布告欄、README、uat、資安報告尚未提交
+- v0.8.2 甲方驗收清單（docs/uat/v0.8.2.md）：make e2e 已 PASS（13 passed）；待甲方驗 Grafana、Telegram、模型重匯後寫 甲方驗收：PASS
 
 ## 注意事項（踩過的坑）
 
