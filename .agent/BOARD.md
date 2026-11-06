@@ -66,13 +66,14 @@
 | cli-wording-sha256 | backend | done | 1 | PR #297 |
 | backfill-since-filename | backend | done | 0 | PR #302 |
 | ci-token-order | backend | done | 0 | PR #301 |
-| inference-resource-limit | backend | review | 0 |  |
-| heat-alert-dup-investigate | backend | in-progress | 0 |  |
+| inference-resource-limit | backend | done | 0 | PR #304 |
+| heat-alert-dup-investigate | backend | done | 0 | 調查完成（作廢 PR），.agent/reports/heat-alert-dup-investigate.json |
 | connect-rf-reassign | backend | done | 0 | 操作完成（作廢 PR），.agent/reports/connect-rf-reassign.json |
+| stability-dev-verify | backend | done | 0 | 開發環境驗證完成（作廢 PR），.agent/reports/stability-dev-verify.json |
 
 ## 卡住／待甲方決定
 
-- v0.8.1 甲方驗收清單（docs/uat/v0.8.1.md）待甲方勾選並寫 甲方驗收：PASS（含 #82 我的訂閱 2 秒內實測；S22 已 PASS）；資安重審 PASS
+- v0.8.2 甲方驗收清單（docs/uat/v0.8.2.md）：make e2e 已 PASS（13 passed）；待甲方驗 Grafana、Telegram、模型重匯後寫 甲方驗收：PASS。GitHub 事故中 ae docs commit 推不上去，布告欄、README、uat、資安報告尚未提交
 
 ## 注意事項（踩過的坑）
 
