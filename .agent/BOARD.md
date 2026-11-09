@@ -77,12 +77,12 @@
 | gitleaks-test-sentinel | architect | done | 0 | PR #323 |
 | bbs-spike-report | backend | done | 1 | PR #326 |
 | bbs-retest-design | architect | done | 0 | PR #331 |
-| bbs-retest-tool | backend | todo | 0 |  |
-| gitleaks-hash-key-fixture | architect | todo | 0 |  |
+| bbs-retest-tool | backend | done | 0 | PR #335 |
+| gitleaks-hash-key-fixture | architect | done | 0 | PR #334 |
 
 ## 卡住／待甲方決定
 
-- （無）
+- 等甲方晚間 20:00～21:45（台北）手動跑 retest（7.31 G-1）
 
 ## 注意事項（踩過的坑）
 
