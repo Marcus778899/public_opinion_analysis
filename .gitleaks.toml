@@ -25,3 +25,13 @@ condition = "AND"
 paths = ['''^tests/''']
 regexTarget = "secret"
 regexes = ['''(?i)^s[e3]ntinel[-_]''']
+
+# 驗收測試用「看得出是假的」16 位 hex 雜湊鍵（測短帳號夾在雜湊鍵裡不算洩漏）；測試已鎖定且掃歷史
+# 只放行 tests/ 底下、值為 10～22 位小寫 hex、以 0123 開頭且接著出現 456789 的 generic-api-key
+[[allowlists]]
+description = "tests/ 底下的順序假雜湊鍵：小寫 hex，0123 開頭、含 456789（gitleaks-hash-key-fixture）"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^tests/''']
+regexTarget = "secret"
+regexes = ['''^0123[0-9a-f]{0,6}456789[0-9a-f]{0,6}$''']
