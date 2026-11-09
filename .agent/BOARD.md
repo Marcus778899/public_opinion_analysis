@@ -78,6 +78,7 @@
 | bbs-spike-report | backend | done | 1 | PR #326 |
 | bbs-retest-design | architect | done | 0 | PR #331 |
 | bbs-retest-tool | backend | todo | 0 |  |
+| gitleaks-hash-key-fixture | architect | todo | 0 |  |
 
 ## 卡住／待甲方決定
 
