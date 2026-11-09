@@ -22,6 +22,9 @@ dependencies = [
 ]
 
 [dependency-groups]
+bbs-spike = [
+    "pyptt==2.3.16",
+]
 dev = [
     "onnx>=1.23.2",
     "pytest>=9.1.1",
