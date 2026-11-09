@@ -249,7 +249,30 @@ def open_session(
         # NOTE: 原例外與其區域變數可能含帳密，只留類別名稱
         raise BbsLoginError(f"login failed: {type(exc).__name__}") from None
     install_send_throttle(api, now, sleep)
+    try:
+        check_screens(recent_screens(api, require_rdq=True))
+    except StopExperiment as stop:
+        # NOTE: PyPtt 對「登入太頻繁」只按鍵繼續，登入仍成功；這裡自己比對畫面佇列
+        _safe_logout(api)
+        raise BbsLoginError(f"login failed: {stop.reason}") from None
     return api
+
+
+def recent_screens(api: Any, *, require_rdq: bool = False) -> list[str]:  # noqa: ANN401
+    """最近 10 個畫面（PyPtt 內部 _RDQ；get_screen_queue 只回 1 個）；只比對、不存檔。"""
+    core = api.connect_core
+    queue = getattr(core, "_RDQ", None)
+    if queue is not None:
+        return [sanitize_screen(str(x)) for x in queue.get(10)]
+    getter = None if require_rdq else getattr(core, "get_screen_queue", None)
+    return [sanitize_screen(str(x)) for x in getter()] if getter else []
+
+
+def _safe_logout(api: Any) -> None:  # noqa: ANN401
+    try:
+        api.logout()
+    except Exception as exc:
+        log.warning(f"logout failed: {type(exc).__name__}")
 
 
 # ---------- 立即停止 ----------
@@ -573,7 +596,7 @@ class BbsReader:
         sends0, t0 = throttle.count, self._now()
         post = self._api.get_post(ref.board, aid=ref.aid)
         at, seconds = self._utcnow(), self._now() - t0
-        screens = [sanitize_screen(s) for s in self._api.connect_core.get_screen_queue()]
+        screens = recent_screens(self._api)
         check_screens(screens)
         comments, skipped = comments_from_bbs(
             post.get(self._ptt.PostField.comments) or [], self._ptt, ref.created_at
@@ -730,11 +753,23 @@ def _load_pyptt() -> ModuleType:
     return PyPtt
 
 
-def _login(out: Path) -> tuple[Any, Any, Ledger, str, SecretStr]:
+def _parse_refs(urls: Sequence[str], ptt: Any) -> list[PostRef]:  # noqa: ANN401
+    """登入前先驗證全部 URL，打錯字才不會白用一次登入。"""
+    refs = []
+    for url in urls:
+        try:
+            refs.append(parse_post_url(url, ptt))
+        except SystemExit:
+            raise
+        except Exception as exc:
+            raise SystemExit(f"invalid url ({type(exc).__name__}): {url}") from None
+    return refs
+
+
+def _login(out: Path, ptt: Any) -> tuple[Any, Ledger, str, SecretStr]:  # noqa: ANN401
     username, password = load_credentials()
     ledger = Ledger(out / "ledger.jsonl")
     check_login_allowed(ledger.attempts(), datetime.now(UTC))
-    ptt = _load_pyptt()
     ledger.record(datetime.now(UTC), "attempt")
     try:
         api = open_session(ptt, username, password, time.monotonic, time.sleep)
@@ -742,7 +777,7 @@ def _login(out: Path) -> tuple[Any, Any, Ledger, str, SecretStr]:
         ledger.update_last(f"failed: {e}")
         raise
     ledger.update_last("ok")
-    return api, ptt, ledger, username, password
+    return api, ledger, username, password
 
 
 def _logout(api: Any) -> None:  # noqa: ANN401
@@ -768,14 +803,15 @@ def cmd_probe(args: argparse.Namespace) -> int:
         "at": datetime.now(UTC).isoformat(),
     }
     username, password = load_credentials()
+    ptt = _load_pyptt()
+    refs = _parse_refs(args.url, ptt)
     api = None
     try:
-        api, ptt, _, username, password = _login(out)
+        api, _, username, password = _login(out, ptt)
         p0["login_ok"] = True
         reader = BbsReader(api, ptt, time.monotonic, lambda: datetime.now(UTC))
         pacer = ReadPacer(time.monotonic, time.sleep)
-        for url in args.url:
-            ref = parse_post_url(url, ptt)
+        for ref in refs:
             pacer.wait()
             try:
                 res, post = reader.read(ref)
@@ -789,7 +825,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
                 continue
             pacer.mark_done()
             p0["boards_ok"][ref.board] = True
-            p0["aid_ok"] = p0["aid_ok"] and post.get(ptt.PostField.url) == url
+            p0["aid_ok"] = p0["aid_ok"] and post.get(ptt.PostField.url) == ref.url
             p0["seconds"].append(round(res.seconds, 1))
             p0["sends"].append(res.sends)
             p0["comments"].append(len(res.comments) + res.skipped)
@@ -832,6 +868,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         _say(f"refused: {e}")
         return 3
     username, password = load_credentials()
+    ptt = _load_pyptt()
+    refs = _parse_refs(args.url, ptt)
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = out / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -839,8 +877,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     api = poller = None
     stop_reason_text: str | None = None
     try:
-        api, ptt, _, username, password = _login(out)
-        refs = [parse_post_url(u, ptt) for u in args.url]
+        api, _, username, password = _login(out, ptt)
         offset = clock_offset_seconds(refs[0].url, lambda: datetime.now(UTC))
         store.write("meta.json", {"run_id": run_id, "posts": [r.post_id for r in refs]})
         store.write("clock.json", {"offset_seconds": offset})
@@ -873,7 +910,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         _say(f"STOP: {stop_reason_text}")
     elif poller is not None:
         _say(f"BBS done; web tail {args.tail_minutes} min")
-        time.sleep(args.tail_minutes * 60)
+        try:
+            time.sleep(args.tail_minutes * 60)
+        except KeyboardInterrupt:
+            log.warning("tail interrupted")
     if poller is not None:
         poller.stop_flag.set()
         poller.join(timeout=WEB_POLL_INTERVAL_SECONDS)
@@ -917,6 +957,7 @@ def cmd_summarize(args: argparse.Namespace) -> int:
     seconds = [r["seconds"] for r in reads if r["phase"] == "p2"]
     avg_read = sum(seconds) / len(seconds) if seconds else 0.0
     bbs = {e.key: e.t for e in (*p1, *p2)}
+    web = [e for e in web if e.key in bbs]  # 7.31 C：只比同一批推文
     cmp_ = pair_with_web(bbs, {e.key: e.t for e in web})
     offset = json.loads((run_dir / "clock.json").read_text(encoding="utf-8"))["offset_seconds"]
     forbidden = {"forbidden": True, "allowed": False, "unconfirmed": None}[args.rules]

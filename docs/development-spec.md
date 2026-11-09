@@ -1850,7 +1850,7 @@ uv run python tools/bbs_spike.py summarize --run-id <run_id> --hot-concurrent-p9
 
 時段：台股盤中或 20:00～23:00（Asia/Taipei），熱門文章較多。熱門文章由甲方依 C 的選取規則貼 URL（`--url`，3 個）。
 
-**前置（甲方，瀏覽器）**：先在 `term.ptt.cc` 手動登入小號一次，走完註冊單等提示。PyPtt 登入時會自動回答這些提示（含「以上資料是否正確」「您確定要填寫註冊單嗎」），不能讓程式替甲方填資料。同一次順便讀站規（待決定 3）、看進不進得去目標看板。手動登入不計入下方上限，但與程式登入至少隔 10 分鐘。
+**前置（甲方，瀏覽器）**：先在 `term.ptt.cc` 手動登入小號一次，走完註冊單等提示。PyPtt 登入時會自動回答這些提示（含「以上資料是否正確」「您確定要填寫註冊單嗎」），不能讓程式替甲方填資料。同一次順便讀站規（待決定 3）、看進不進得去目標看板。手動登入不計入下方上限，但與程式登入至少隔 10 分鐘。小號不要開兩階段驗證、先在瀏覽器設好聯絡信箱（PyPtt 遇到這些會丟 `TwoFactorAuthRequired`、`ResetYourContactEmail`，程式一律當無法辨識的錯誤而停止）。
 
 **P0 要回答的問題**（調查查不到的項目；結果寫進 `summary.json`）
 
@@ -1873,7 +1873,7 @@ uv run python tools/bbs_spike.py summarize --run-id <run_id> --hot-concurrent-p9
 | BBS 文章讀取 | 上一篇讀完到下一篇開始 ≥ 20 秒，加 0～5 秒隨機 |
 | BBS 畫面操作 | 每次 `send` 間隔 ≥ 1 秒。PyPtt 沒有內建節流，登入完成後把 `api.connect_core.send` 包一層做間隔與計數（登入前不包，包裝層才碰不到密碼） |
 | 網頁版 | 每篇每 60 秒 1 次（3 篇約 3 次／分鐘）；用 `PttClient`，不繞過快取（7.22） |
-| 立即停止 | 立刻登出、不重試，summary 記原因，由甲方判斷：PyPtt 的 `UseTooManyResources`、`LoginTooOften`、`UserHasPreviouslyBeenBanned`、`WrongIDorPassword`；畫面出現「登入太頻繁」「系統過載」（PyPtt 對前者只按鍵繼續，要自己查 `get_screen_queue()`，只比對、不存檔）；無法辨識的錯誤；連續 3 次讀取失敗 |
+| 立即停止 | 立刻登出、不重試，summary 記原因，由甲方判斷：PyPtt 的 `UseTooManyResources`、`LoginTooOften`、`UserHasPreviouslyBeenBanned`、`WrongIDorPassword`；畫面出現「登入太頻繁」「系統過載」（PyPtt 對前者只按鍵繼續，要自己比對最近 10 個畫面：登入成功後與每次讀文章後查 PyPtt 的 `connect_core._RDQ.get(10)`（`get_screen_queue()` 只回最後 1 個畫面，會漏掉登入階段與同一次 `send` 中間的畫面），命中就登出、ledger 記原因；只比對、不存檔，取不到 `_RDQ` 時退回 `get_screen_queue()`）；無法辨識的錯誤；連續 3 次讀取失敗 |
 
 #### C. 量測方法
 
@@ -1949,7 +1949,7 @@ uv run python tools/bbs_spike.py summarize --run-id <run_id> --hot-concurrent-p9
 
 | 資產 | 威脅 | 對策 |
 |---|---|---|
-| 小號帳密 | 寫進 log、Slack、結果檔、例外的變數內容 | PyPtt 預設會記帳號 ID，一律 `log_level=SILENT`（它在連線失敗時仍會 `print` 例外，此時還沒送帳密）；只從 `PTT_BBS_USERNAME`、`PTT_BBS_PASSWORD` 讀，不收 CLI 參數（`ps` 看得到）；密碼包在 `pydantic.SecretStr`，只在呼叫登入時取值；登入階段的例外改丟 `BbsLoginError(例外類別名稱) from None`（`log.catch` 的 loguru 會印變數值與原例外）；不存登入前後的畫面；結束前掃輸出目錄有沒有這兩個值，有就刪檔、非 0 結束，只印變數名稱 |
+| 小號帳密 | 寫進 log、Slack、結果檔、例外的變數內容 | PyPtt 預設會記帳號 ID，一律 `log_level=SILENT`（它在連線失敗時仍會 `print` 例外，此時還沒送帳密）；只從 `PTT_BBS_USERNAME`、`PTT_BBS_PASSWORD` 讀，不收 CLI 參數（`ps` 看得到）；密碼包在 `pydantic.SecretStr`，只在呼叫登入時取值；登入階段的例外改丟 `BbsLoginError(例外類別名稱) from None`（原例外的訊息與變數可能含帳密，不能串在 `__cause__`；`log.catch` 用 loggerhelper，traceback 不印變數值，仍不依賴這點）；不存登入前後的畫面；結束前掃輸出目錄有沒有這兩個值，有就刪檔、非 0 結束，只印變數名稱 |
 | 小號本身 | 站方因頻率或行為停權（PTT 有防機器人機制，第三方說法；PyPtt 原始碼也處理「登入太頻繁」「資源過度」畫面） | B 的上限與立即停止；用專用小號，不用甲方主帳號 |
 | 小號帳密 | 第三方套件拿到密碼（PyPtt 2.3.16 是查證當天才發布） | `==` 釘版本、`uv.lock` 雜湊；只放 `bbs-spike` group；`bbs-spike-tool` review 時核對鎖定版本的登入與送出流程 |
 | 爬蟲的 IP | BBS 行為讓站方封同一個 IP，連帶影響網頁版爬蟲（有封 IP 的第三方說法，範圍查不到） | B 的上限；甲方可選用手機網路跑實驗，與爬蟲的 IP 分開，報告記用哪個；影響評估寫進報告 |

@@ -258,3 +258,153 @@ def test_ledger_update_last_changes_result_without_adding_attempt(tmp_path: Path
     lines = [json.loads(ln) for ln in (tmp_path / "l.jsonl").read_text().splitlines()]
     assert [r["result"] for r in lines] == ["attempt", "ok"]
     assert len(ledger.attempts()) == 2
+
+
+# ---------- architect review：登入畫面、URL 先驗證、web 列同一批 ----------
+
+SECRET_ID = "sentinel_acct_01"
+SECRET_PW = "sentinel-pw-0042"
+GOOD_URL = "https://www.ptt.cc/bbs/Stock/M.1700000000.A.123.html"
+
+
+def _fake_pyptt(screens: list[str] | None, aid_error: bool = False) -> SimpleNamespace:
+    state = SimpleNamespace(logouts=0, logins=0)
+
+    class Api:
+        def __init__(self, **_: object) -> None:
+            queue = SimpleNamespace(get=lambda n: (screens or [])[-n:])
+            self.connect_core = SimpleNamespace(
+                send=lambda *_a, **_k: None,
+                get_screen_queue=lambda: [],
+                **({"_RDQ": queue} if screens is not None else {}),
+            )
+
+        def login(self, *_a: object, **_k: object) -> None:
+            state.logins += 1
+
+        def logout(self) -> None:
+            state.logouts += 1
+
+        def get_post(self, *_a: object, **_k: object) -> dict:
+            raise RuntimeError("stop here")
+
+    def aid(_url: str) -> tuple[str, str]:
+        if aid_error:
+            raise ValueError("bad")
+        return "Stock", "1Zzzzzzz"
+
+    return SimpleNamespace(
+        API=Api,
+        LogLevel=SimpleNamespace(SILENT=0),
+        PostField=SimpleNamespace(url="url", comments="comments"),
+        CommentField=SimpleNamespace(time="time", ip="ip"),
+        lib_util=SimpleNamespace(get_aid_from_url=aid),
+        state=state,
+    )
+
+
+def _probe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ptt: SimpleNamespace, url: str) -> int:
+    monkeypatch.setitem(__import__("sys").modules, "PyPtt", ptt)
+    monkeypatch.setenv("PTT_BBS_USERNAME", SECRET_ID)
+    monkeypatch.setenv("PTT_BBS_PASSWORD", SECRET_PW)
+    monkeypatch.setattr(tool.time, "sleep", lambda _s: None)
+    args = tool.parse_args(["--out", str(tmp_path / "out"), "probe", "--url", url])
+    return tool.cmd_probe(args)
+
+
+def test_probe_login_screen_with_too_often_keyword_logs_out_and_stops(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ptt = _fake_pyptt(["主選單", "您登入太頻繁，請稍後"])
+    code = _probe(monkeypatch, tmp_path, ptt, GOOD_URL)
+    assert code != 0
+    assert ptt.state.logouts == 1
+    ledger = (tmp_path / "out" / "ledger.jsonl").read_text()
+    assert "screen_keyword" in ledger and "failed" in ledger
+    assert not (tmp_path / "out" / "p0.json").read_text().count('"passed": true')
+
+
+def test_probe_clean_login_screens_continue_to_reading(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ptt = _fake_pyptt(["主選單"])
+    _probe(monkeypatch, tmp_path, ptt, GOOD_URL)
+    assert '"ok"' in (tmp_path / "out" / "ledger.jsonl").read_text()
+
+
+def test_probe_without_screen_queue_skips_login_screen_check(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ptt = _fake_pyptt(None)
+    _probe(monkeypatch, tmp_path, ptt, GOOD_URL)
+    assert ptt.state.logins == 1
+
+
+@pytest.mark.parametrize("bad", ["https://evil.example/bbs/Stock/M.1.A.AAA.html", "nonsense"])
+def test_probe_invalid_url_exits_before_login_and_ledger(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, bad: str
+) -> None:
+    ptt = _fake_pyptt(["ok"])
+    with pytest.raises(SystemExit):
+        _probe(monkeypatch, tmp_path, ptt, bad)
+    assert ptt.state.logins == 0
+    assert not (tmp_path / "out" / "ledger.jsonl").exists()
+
+
+def test_probe_aid_conversion_error_exits_before_login(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ptt = _fake_pyptt(["ok"], aid_error=True)
+    with pytest.raises(SystemExit):
+        _probe(monkeypatch, tmp_path, ptt, GOOD_URL)
+    assert ptt.state.logins == 0
+    assert not (tmp_path / "out" / "ledger.jsonl").exists()
+
+
+def test_run_invalid_url_exits_before_login(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ptt = _fake_pyptt(["ok"])
+    monkeypatch.setitem(__import__("sys").modules, "PyPtt", ptt)
+    monkeypatch.setenv("PTT_BBS_USERNAME", SECRET_ID)
+    monkeypatch.setenv("PTT_BBS_PASSWORD", SECRET_PW)
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "p0.json").write_text(json.dumps({"p0": {"passed": True}}))
+    args = tool.parse_args(["--out", str(out), "run", "--url", GOOD_URL, GOOD_URL, "bad"])
+    with pytest.raises(SystemExit):
+        tool.cmd_run(args)
+    assert ptt.state.logins == 0 and not (out / "ledger.jsonl").exists()
+
+
+def test_recent_screens_prefers_rdq_ten_screens_over_single_queue() -> None:
+    rdq = SimpleNamespace(get=lambda n: [f"s{i}" for i in range(n)])
+    core = SimpleNamespace(_RDQ=rdq, get_screen_queue=lambda: ["only"])
+    assert len(tool.recent_screens(SimpleNamespace(connect_core=core))) == 10
+
+
+def test_summarize_web_row_keeps_only_keys_seen_on_bbs(tmp_path: Path) -> None:
+    run = tmp_path / "r2"
+    run.mkdir()
+    (tmp_path / "p0.json").write_text(json.dumps({"p0": {"passed": True}}))
+    (run / "clock.json").write_text(json.dumps({"offset_seconds": 0}))
+
+    def rec(phase: str, key: str) -> dict:
+        return {
+            "phase": phase,
+            "key": key,
+            "u": 1,
+            "l": 0,
+            "e": -29,
+            "t": NOW.isoformat(),
+            "post": "P",
+        }
+
+    rows = [rec("p2", "a"), rec("web", "a"), rec("web", "only-web-1"), rec("web", "only-web-2")]
+    (run / "events.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
+    args = tool.parse_args(
+        ["--out", str(tmp_path), "summarize", "--run-id", "r2", "--hot-concurrent-p90", "1"]
+    )
+    tool.cmd_summarize(args)
+    summary = json.loads((run / "summary.json").read_text())
+    assert summary["web"]["samples"] == 1
