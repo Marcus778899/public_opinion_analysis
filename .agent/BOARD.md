@@ -56,16 +56,20 @@
 | 2026-11-06 | D-043 | BBS spike 用 PyPtt ==2.3.16，只放 bbs-spike group |
 | 2026-11-06 | D-044 | 不實測同時登入數，報告以 1 條連線計算 |
 | 2026-11-06 | D-045 | 跑實驗前甲方先讀站規與目標看板板規；明文禁止就不做並改範圍 |
+| 2026-11-09 | D-046 | PTT_BBS_USERNAME／PASSWORD 改必填（取消註解），讓 check-env 檢查 |
+| 2026-11-09 | D-047 | BBS spike 照跑；報告另評估混合方案（BBS 只顧前 N 篇，其餘網頁版） |
 
 ## 任務狀態
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
 | bbs-spike-design | architect | done | 0 | PR #318 |
+| bbs-spike-tool | backend | blocked | 0 |  |
+| bbs-hot-articles-stat | backend | done | 0 | 統計完成（作廢 PR），.agent/reports/bbs-hot-articles-stat.json |
 
 ## 卡住／待甲方決定
 
-- 等甲方在自己的終端機跑 ae check-env（.env.example 加了 PTT_BBS_* 選填變數），之後才能開 bbs-spike-tool、bbs-hot-articles-stat
+- bbs-spike-tool：ae pr open 被 gitleaks 擋（驗收測試哨兵值），等 gitleaks-test-sentinel 合併後 sync
 
 ## 注意事項（踩過的坑）
 
