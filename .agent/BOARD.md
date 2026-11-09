@@ -65,7 +65,7 @@
 
 ## 卡住／待甲方決定
 
-- （無）
+- 等甲方在自己的終端機跑 ae check-env（.env.example 加了 PTT_BBS_* 選填變數），之後才能開 bbs-spike-tool、bbs-hot-articles-stat
 
 ## 注意事項（踩過的坑）
 
