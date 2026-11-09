@@ -207,8 +207,13 @@ def test_cmd_run_refuses_without_p0(tmp_path: Path) -> None:
     assert tool.cmd_run(args) == 3
 
 
+YOUNG = f"Stock.M.{int(NOW.timestamp()) - 600}.A.ABC"
+YOUNG2 = f"Stock.M.{int(NOW.timestamp()) - 700}.A.ABD"
+RUN_ID = "20261110T131000Z"  # run_id 即開始時間，等於 NOW
+
+
 def test_cmd_summarize_writes_summary_without_ids(tmp_path: Path) -> None:
-    run = tmp_path / "r1"
+    run = tmp_path / RUN_ID
     run.mkdir()
     (tmp_path / "p0.json").write_text(json.dumps({"p0": {"passed": True}}))
     (run / "clock.json").write_text(json.dumps({"offset_seconds": 1.0}))
@@ -220,7 +225,7 @@ def test_cmd_summarize_writes_summary_without_ids(tmp_path: Path) -> None:
             "l": 10,
             "e": 40,
             "t": (NOW + timedelta(seconds=i)).isoformat(),
-            "post": f"P{i % 2}",
+            "post": (YOUNG, YOUNG2)[i % 2],
         }
         for i in range(120)
     ] + [
@@ -231,7 +236,7 @@ def test_cmd_summarize_writes_summary_without_ids(tmp_path: Path) -> None:
             "l": 340,
             "e": 370,
             "t": (NOW + timedelta(seconds=i + 300)).isoformat(),
-            "post": "P0",
+            "post": YOUNG,
         }
         for i in range(120)
     ]
@@ -240,7 +245,7 @@ def test_cmd_summarize_writes_summary_without_ids(tmp_path: Path) -> None:
         json.dumps({"phase": "p2", "ok": True, "seconds": 7.5, "sends": 8, "screens": 3}) + "\n"
     )
     args = tool.parse_args(
-        ["--out", str(tmp_path), "summarize", "--run-id", "r1", "--hot-concurrent-p90", "3"]
+        ["--out", str(tmp_path), "summarize", "--run-id", RUN_ID, "--hot-concurrent-p90", "3"]
     )
     assert tool.cmd_summarize(args) == 0
     summary = json.loads((run / "summary.json").read_text())
@@ -384,7 +389,7 @@ def test_recent_screens_prefers_rdq_ten_screens_over_single_queue() -> None:
 
 
 def test_summarize_web_row_keeps_only_keys_seen_on_bbs(tmp_path: Path) -> None:
-    run = tmp_path / "r2"
+    run = tmp_path / RUN_ID
     run.mkdir()
     (tmp_path / "p0.json").write_text(json.dumps({"p0": {"passed": True}}))
     (run / "clock.json").write_text(json.dumps({"offset_seconds": 0}))
@@ -397,14 +402,124 @@ def test_summarize_web_row_keeps_only_keys_seen_on_bbs(tmp_path: Path) -> None:
             "l": 0,
             "e": -29,
             "t": NOW.isoformat(),
-            "post": "P",
+            "post": YOUNG,
         }
 
-    rows = [rec("p2", "a"), rec("web", "a"), rec("web", "only-web-1"), rec("web", "only-web-2")]
+    hot = [rec("p2", f"b{i}") for i in range(9)]  # 合格要 10 則；web 列只留 BBS 看過的鍵
+    rows = [
+        rec("p2", "a"),
+        *hot,
+        rec("web", "a"),
+        rec("web", "only-web-1"),
+        rec("web", "only-web-2"),
+    ]
     (run / "events.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
     args = tool.parse_args(
-        ["--out", str(tmp_path), "summarize", "--run-id", "r2", "--hot-concurrent-p90", "1"]
+        ["--out", str(tmp_path), "summarize", "--run-id", RUN_ID, "--hot-concurrent-p90", "1"]
     )
     tool.cmd_summarize(args)
     summary = json.loads((run / "summary.json").read_text())
     assert summary["web"]["samples"] == 1
+
+
+# ---------- bbs-retest-tool：補實驗的小函式（流程見 acceptance/bbs-retest-tool）----------
+
+
+def test_ledger_record_adds_conn_only_when_given(tmp_path: Path) -> None:
+    ledger = tool.Ledger(tmp_path / "l.jsonl")
+    ledger.record(NOW, "attempt")
+    ledger.record(NOW + timedelta(minutes=11), "attempt", "B")
+    rows = [json.loads(ln) for ln in (tmp_path / "l.jsonl").read_text().splitlines()]
+    assert "conn" not in rows[0] and rows[1]["conn"] == "B"
+
+
+def test_secret_starting_with_symbol_is_found_even_when_glued_to_letters(tmp_path: Path) -> None:
+    leaked = tmp_path / "events.jsonl"
+    leaked.write_text("xx!pwd9 yy", encoding="utf-8")  # 以符號開頭的值，前面不檢查邊界
+    assert tool.scan_and_purge(tmp_path, ["!pwd9"]) == [leaked]
+
+
+def test_empty_secret_is_never_a_leak(tmp_path: Path) -> None:
+    (tmp_path / "a.json").write_text("anything", encoding="utf-8")
+    assert tool.scan_and_purge(tmp_path, [""]) == []
+
+
+def test_check_multi_login_raises_only_for_the_multi_login_keywords() -> None:
+    tool.check_multi_login(["普通畫面", "系統過載"])
+    with pytest.raises(tool.StopExperiment):
+        tool.check_multi_login(["注意: 您有其他連線已登入此帳號。"])
+
+
+def _minutes(count: int, step: int) -> list[datetime]:
+    return [NOW + timedelta(seconds=step * i) for i in range(count)]
+
+
+def test_is_hot_needs_ten_comments_within_ten_minutes() -> None:
+    assert tool.is_hot(_minutes(10, 60))  # 0～9 分鐘
+    assert not tool.is_hot(_minutes(10, 67))  # 10 則跨 603 秒
+    assert not tool.is_hot(_minutes(9, 1))
+    assert not tool.is_hot([])
+
+
+def test_run_started_at_parses_run_id_and_rejects_other_formats() -> None:
+    assert tool.run_started_at(RUN_ID) == NOW
+    assert tool.run_started_at("r1") is None
+
+
+def test_qualify_posts_reports_age_unknown_for_bad_run_id_or_post_id() -> None:
+    qualified, excluded = tool.qualify_posts([YOUNG, "bad"], None, [], [])
+    assert qualified == set()
+    assert {x["reason"] for x in excluded} == {"post_age_unknown"}
+    _, excluded = tool.qualify_posts(["nodot"], NOW, [], [])
+    assert excluded[0]["reason"] == "post_age_unknown"
+
+
+@pytest.mark.parametrize(
+    ("hour", "minute", "second", "ok"),
+    [(19, 59, 59, False), (20, 0, 0, True), (21, 44, 59, True), (21, 45, 0, False)],
+)
+def test_check_start_window_edges_in_taipei_time(
+    hour: int, minute: int, second: int, ok: bool
+) -> None:
+    utc = datetime(2026, 11, 10, hour, minute, second, tzinfo=UTC) - timedelta(hours=8)
+    if ok:
+        tool.check_start_window(utc)
+    else:
+        with pytest.raises(tool.RetestRefused):
+            tool.check_start_window(utc)
+
+
+def test_web_score_is_pushes_minus_boos_and_ignores_arrows() -> None:
+    html = FIXTURE.read_text(encoding="utf-8")  # fixture：推、噓、→ 各 1
+    assert tool.web_score(html, URL, NOW) == 0
+
+
+def test_decide_retest_requires_four_polled_posts_and_one_proven_connection() -> None:
+    base = {
+        "e_p50": 60.0,
+        "samples": 100,
+        "posts": 3,
+        "polled_posts": 4,
+        "connections_proven": 1,
+        "forbidden": None,
+        "stop_triggered": False,
+    }
+    assert tool.decide_retest(**base).recommend
+    for override in ({"polled_posts": 3}, {"connections_proven": 0}, {"posts": 2}, {"e_p50": None}):
+        assert not tool.decide_retest(**{**base, **override}).recommend
+    assert not tool.decide_retest(**{**base, "forbidden": True}).recommend
+    assert not tool.decide_retest(**{**base, "stop_triggered": True}).recommend
+
+
+@pytest.mark.parametrize("value", ["0", "4", "x"])
+def test_connections_option_rejects_values_outside_one_to_three(value: str) -> None:
+    urls = [f"https://www.ptt.cc/bbs/Stock/M.1.A.00{i}.html" for i in range(4)]
+    with pytest.raises(SystemExit):
+        tool.parse_args(["retest", "--url", *urls, "--connections", value])
+
+
+def test_out_option_before_subcommand_wins_over_subcommand_default() -> None:
+    args = tool.parse_args(
+        ["--out", "X", "summarize-retest", "--run-id", "r", "--hot-concurrent-p90", "3"]
+    )
+    assert args.out == "X"
