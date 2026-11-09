@@ -1825,6 +1825,21 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 
 甲方在自己的終端機手動執行；agent、測試、CI 都不連真實 PTT。程式 `tools/bbs_spike.py`（子命令 `probe`、`run`、`summarize`），環境 `uv run --group bbs-spike --env-file .env python tools/bbs_spike.py …`。全程**唯讀**：不推文、不發文、不寄信。
 
+**甲方執行指令**（`--out` 為全域選項，要放在子命令前，預設 `data/spike/bbs`，放 `ledger.jsonl`、`p0.json` 與每次執行的 `<run_id>/`；帳密只讀 `PTT_BBS_USERNAME`、`PTT_BBS_PASSWORD`，程式不收帳密參數）：
+
+```bash
+# P0 探測：--url 每個目標看板貼一篇文章 URL（至少 1 個）
+uv run --group bbs-spike --env-file .env python tools/bbs_spike.py probe --url <URL> [<URL>...]
+# P1＋P2＋網頁版尾段：--url 恰 3 篇熱門文章（第 1 篇做 P1）；時間可調短，預設 10／30／20 分鐘
+uv run --group bbs-spike --env-file .env python tools/bbs_spike.py run --url <URL1> <URL2> <URL3> \
+  [--p1-minutes 10] [--p2-minutes 30] [--tail-minutes 20]
+# 算 summary.json（不連線）：--rules 為站規狀態 forbidden／allowed／unconfirmed（預設 unconfirmed）
+uv run python tools/bbs_spike.py summarize --run-id <run_id> --hot-concurrent-p90 <n> \
+  [--rules unconfirmed] [--connections-proven 1]
+```
+
+`--hot-concurrent-p90` 取自 `bbs-hot-articles-stat`；`--connections-proven` 為已證實的同時登入數（預設 1，D-044）。P0 沒過時 `run` 拒絕執行。
+
 | 階段 | 做什麼 | 長度 | 登入 |
 |---|---|---|---|
 | P0 探測 | 登入，每個目標看板各讀一篇，回答下方 P0 表；登出。**P0 沒過不跑 P1、P2** | ≤ 5 分鐘 | 1 次 |

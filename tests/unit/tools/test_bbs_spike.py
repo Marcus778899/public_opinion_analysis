@@ -248,3 +248,13 @@ def test_cmd_summarize_writes_summary_without_ids(tmp_path: Path) -> None:
     assert summary["capacity"]["n_max"] == 4
     assert summary["web_pairing"]["diff_p50"] == 300
     assert summary["clock_offset_flag"] is False
+
+
+def test_ledger_update_last_changes_result_without_adding_attempt(tmp_path: Path) -> None:
+    ledger = tool.Ledger(tmp_path / "l.jsonl")
+    ledger.record(NOW, "attempt")
+    ledger.record(NOW + timedelta(minutes=11), "attempt")
+    ledger.update_last("ok")
+    lines = [json.loads(ln) for ln in (tmp_path / "l.jsonl").read_text().splitlines()]
+    assert [r["result"] for r in lines] == ["attempt", "ok"]
+    assert len(ledger.attempts()) == 2

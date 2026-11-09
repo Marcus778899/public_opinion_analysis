@@ -152,6 +152,14 @@ class Ledger:
         with self._path.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"at": at.isoformat(), "result": result}) + "\n")
 
+    def update_last(self, result: str) -> None:
+        """登入結束後把最後一筆的結果改成 ok／失敗原因；不新增一筆，次數才不會多算。"""
+        lines = self._path.read_text(encoding="utf-8").splitlines()
+        last = json.loads(lines[-1])
+        last["result"] = result
+        lines[-1] = json.dumps(last)
+        self._path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
     def attempts(self) -> list[datetime]:
         if not self._path.exists():
             return []
@@ -728,7 +736,12 @@ def _login(out: Path) -> tuple[Any, Any, Ledger, str, SecretStr]:
     check_login_allowed(ledger.attempts(), datetime.now(UTC))
     ptt = _load_pyptt()
     ledger.record(datetime.now(UTC), "attempt")
-    api = open_session(ptt, username, password, time.monotonic, time.sleep)
+    try:
+        api = open_session(ptt, username, password, time.monotonic, time.sleep)
+    except BbsLoginError as e:
+        ledger.update_last(f"failed: {e}")
+        raise
+    ledger.update_last("ok")
     return api, ptt, ledger, username, password
 
 
