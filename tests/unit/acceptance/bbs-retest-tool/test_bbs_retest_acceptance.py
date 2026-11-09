@@ -294,7 +294,7 @@ def _install(monkeypatch: pytest.MonkeyPatch, world: World) -> None:
 
 def _write_p0(tmp_path: Path, boards: dict[str, bool] | None = None, passed: bool = True) -> Path:
     first = tmp_path / "first"
-    first.mkdir(exist_ok=True)
+    first.mkdir(parents=True, exist_ok=True)
     p0 = first / "p0.json"
     boards = boards or {"Gossiping": True, "Stock": True, "Tech_Job": True}
     p0.write_text(json.dumps({"p0": {"passed": passed, "boards_ok": boards}}), encoding="utf-8")
