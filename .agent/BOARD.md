@@ -76,11 +76,13 @@
 | bbs-hot-articles-stat | backend | done | 0 | 統計完成（作廢 PR），.agent/reports/bbs-hot-articles-stat.json |
 | gitleaks-test-sentinel | architect | done | 0 | PR #323 |
 | bbs-spike-report | backend | done | 1 | PR #326 |
-| bbs-retest-design | architect | todo | 0 |  |
+| bbs-retest-design | architect | done | 0 | PR #331 |
+| bbs-retest-tool | backend | todo | 0 |  |
+| gitleaks-hash-key-fixture | architect | todo | 0 |  |
 
 ## 卡住／待甲方決定
 
-- bbs-retest-design（PR #331）待甲方核可
+- （無）
 
 ## 注意事項（踩過的坑）
 
