@@ -15,3 +15,13 @@ description = "Git／Hugging Face revision：變數名最後一段是 rev/revisi
 targetRules = ["generic-api-key"]
 regexTarget = "match"
 regexes = ['''(?i:(?:^|[^a-z0-9])(?:rev|revision|commit|sha))\s*[:=]+\s*(?:"[0-9a-f]{40}"|'[0-9a-f]{40}'|[0-9a-f]{40}(?:[^0-9a-zA-Z]|$))''']
+
+# 驗收測試用哨兵假密碼驗「密碼不外洩」；測試已鎖定且 gitleaks 掃歷史，改測試無效
+# 只放行 tests/ 底下、值以 sentinel（含 s3ntinel 寫法）加 - 或 _ 開頭的 generic-api-key
+[[allowlists]]
+description = "tests/ 底下的測試哨兵假密碼：值以 sentinel/s3ntinel 加 -/_ 開頭（gitleaks-test-sentinel）"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^tests/''']
+regexTarget = "secret"
+regexes = ['''(?i)^s[e3]ntinel[-_]''']
