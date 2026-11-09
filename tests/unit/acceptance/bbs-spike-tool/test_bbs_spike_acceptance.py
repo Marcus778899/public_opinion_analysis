@@ -644,3 +644,107 @@ def test_tool_has_no_hardcoded_credentials_or_cli_password_option() -> None:
     assert "PTT_BBS_USERNAME" in src and "PTT_BBS_PASSWORD" in src
     assert "--password" not in src and "--username" not in src
     assert not re.search(r"^\s*print\(", src, re.M), "log 一律用 radar.common.log"
+
+
+# ---------- 回歸：ledger 結果欄位、7.31 B 甲方執行指令 ----------
+
+
+class _LoginError(Exception):
+    pass
+
+
+def _fake_pyptt_module(login_error: Exception | None) -> SimpleNamespace:
+    class Api:
+        def __init__(self, **_: object) -> None:
+            self.connect_core = SimpleNamespace(
+                send=lambda *_a, **_k: None, get_screen_queue=lambda: []
+            )
+
+        def login(self, *_a: object, **_k: object) -> None:
+            if login_error is not None:
+                raise login_error
+
+        def logout(self) -> None:
+            return None
+
+        def get_post(self, *_a: object, **_k: object) -> dict:
+            raise RuntimeError("stop here")
+
+    return SimpleNamespace(
+        API=Api,
+        LogLevel=SimpleNamespace(SILENT=0),
+        PostField=SimpleNamespace(url="url", comments="comments"),
+        CommentField=SimpleNamespace(time="time", ip="ip"),
+        lib_util=SimpleNamespace(get_aid_from_url=lambda url: ("Stock", "1Zzzzzzz")),
+    )
+
+
+def _run_probe(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, login_error: Exception | None
+) -> list[dict]:
+    monkeypatch.setitem(sys.modules, "PyPtt", _fake_pyptt_module(login_error))
+    monkeypatch.setenv("PTT_BBS_USERNAME", SECRET_ID)
+    monkeypatch.setenv("PTT_BBS_PASSWORD", SECRET_PW)
+    monkeypatch.setattr(tool.time, "sleep", lambda _s: None)
+    out = tmp_path / "out"
+    url = "https://www.ptt.cc/bbs/Stock/M.1700000000.A.123.html"
+    monkeypatch.setattr(sys, "argv", ["bbs_spike.py", "--out", str(out), "probe", "--url", url])
+    with pytest.raises(SystemExit):
+        tool.main()
+    lines = (out / "ledger.jsonl").read_text(encoding="utf-8").splitlines()
+    return [json.loads(ln) for ln in lines if ln.strip()]
+
+
+def test_probe_login_failure_updates_ledger_result_from_attempt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    records = _run_probe(monkeypatch, tmp_path, _LoginError(f"{SECRET_ID} {SECRET_PW}"))
+    assert records[-1]["result"] != "attempt"
+    assert "fail" in records[-1]["result"].lower()
+    assert SECRET_PW not in json.dumps(records) and SECRET_ID not in json.dumps(records)
+
+
+def test_probe_login_success_updates_ledger_result_to_ok(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    records = _run_probe(monkeypatch, tmp_path, None)
+    assert records[-1]["result"] != "attempt"
+    assert "ok" in records[-1]["result"].lower()
+
+
+def test_probe_one_login_counts_as_one_attempt_in_ledger(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _run_probe(monkeypatch, tmp_path, None)
+    assert len(tool.Ledger(tmp_path / "out" / "ledger.jsonl").attempts()) == 1
+
+
+def _spec_section_b() -> str:
+    text = (ROOT / "docs" / "development-spec.md").read_text(encoding="utf-8")
+    start = text.index("### 7.31 ")
+    b = text.index("#### B.", start)
+    c = text.index("#### C.", b)
+    return text[b:c]
+
+
+@pytest.mark.parametrize(
+    ("sub", "options"),
+    [
+        ("probe", ["--url"]),
+        ("run", ["--url", "--tail-minutes"]),
+        ("summarize", ["--run-id", "--hot-concurrent-p90", "--rules", "--connections-proven"]),
+    ],
+)
+def test_spec_731_b_has_runnable_command_per_subcommand(sub: str, options: list[str]) -> None:
+    section = _spec_section_b()
+    lines = [ln for ln in section.splitlines() if "bbs_spike.py" in ln and f" {sub}" in ln]
+    assert lines, f"7.31 B 缺 {sub} 的完整指令"
+    assert any("uv run" in ln for ln in lines)
+    for opt in options:
+        assert opt in section, f"7.31 B 沒說明 {opt}"
+    assert "--out" in section
+
+
+def test_spec_731_b_commands_hold_no_credential_values() -> None:
+    section = _spec_section_b()
+    assert "--password" not in section and "--username" not in section
