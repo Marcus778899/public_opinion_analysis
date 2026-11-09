@@ -64,12 +64,13 @@
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
 | bbs-spike-design | architect | done | 0 | PR #318 |
-| bbs-spike-tool | backend | blocked | 0 |  |
+| bbs-spike-tool | backend | done | 1 | PR #324 |
 | bbs-hot-articles-stat | backend | done | 0 | 統計完成（作廢 PR），.agent/reports/bbs-hot-articles-stat.json |
+| gitleaks-test-sentinel | architect | done | 0 | PR #323 |
 
 ## 卡住／待甲方決定
 
-- bbs-spike-tool：ae pr open 被 gitleaks 擋（驗收測試哨兵值），等 gitleaks-test-sentinel 合併後 sync
+- 甲方：填 .env 的 PTT_BBS_*、跑 ae check-env；讀站規與板規（D-045）後手動跑實驗（7.31 B），之後開 bbs-spike-report
 
 ## 注意事項（踩過的坑）
 
