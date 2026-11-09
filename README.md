@@ -101,6 +101,7 @@
 | 穩定性與自我恢復 | v0.8.2 | Kafka producer 進入 fatal 時服務結束、由 docker 重啟；Connect 內部 topic 2 份副本，停任一台 broker 照樣運作，健康檢查會發現 connector 不見（D-041）；init 遇 connector task 失敗先重啟；推論上限 2 CPU、2g |
 | Telegram bot | v0.6.0 | 按鈕操作訂閱、現在熱門、看板概況、通知設定；警示含推／噓／箭頭、爭議度與情緒；v0.7.0 起沒設允許清單就拒絕啟動（D-010） |
 | Dashboard | v0.7.0 | Grafana 6 個面板：各看板推文量、情緒分布與趨勢、爭議度最高的文章、近 24 小時警示、熱門文章排行（D-014） |
+| PTT BBS spike | v0.9.0 | 一次性延遲實驗工具 `tools/bbs_spike.py`（甲方手動跑，指令見開發規格 7.31 B）；結論與建議見 [docs/reports/bbs-spike.md](docs/reports/bbs-spike.md)，導入與否由甲方決定 |
 | BERT 與 shadow 比較 | v0.8.0 | Colab fine-tune 中文 BERT、匯入 ONNX 模型包、shadow 並行推論、ClickHouse 比較兩版（見上方「BERT 與 shadow 比較」）；2026-11-04 起正式推論改用 `bert-ckip-202610280849`（D-040） |
 
 ## 架構
@@ -137,6 +138,7 @@
 | v0.8.0 | 2026-10-28 | 階段 8：BERT fine-tune notebook（已在 Colab 實跑 macbert、ckip）、ONNX 模型包匯入、shadow 並行推論、兩版比較；ONNX 推論依長度分小批（選填 `INFERENCE_MAX_BATCH_TOKENS`）；authlib 漏洞升級；gitleaks 誤判根治（D-018、D-026）。模型進 shadow 與切換由 #178 追蹤（D-027） |
 | v0.8.1 | 2026-11-04 | backlog 修正：停機後依時間補抓與停擺警告（#180）；Kafka 升 4.1.2（D-034）；推文年份推斷、未來時間推文重爬（D-033）；密碼範例值擋啟動、PG 只綁本機（#119、D-035）；bot 斷線重試、推送照允許清單、訂閱切換先回應；scheduler 查詢逾時；模型匯入 `--sha256` 與錯誤提示；回放不推 Telegram；gitleaks 放行收緊、CI 工具驗 checksum；joserfc 漏洞升級（#274）；CI 改用 agent-engineering v3 的 `ae ci`、移除 v1 流程副本（D-036）；Kafka 對外 port 只綁 127.0.0.1（D-039）；清掉回放殘留的 consumer group 與內部 topic（D-038） |
 | v0.8.2 | 2026-11-04 | 穩定性小版（D-042）：producer fatal 後結束交給 restart（#281）；Connect 內部 topic 2 份副本、`/health` 與 connector 存在的健康檢查、watchdog 發現 connector 不見會告警（#282、D-041）；推論 2 CPU、2g、`INFERENCE_THREADS=2`（#289）；init 遇 task FAILED 先重啟（#262）；補抓終點改用檔名時間，標頭未來時間不會讓補抓停掉（#268）；模型匯入 `--sha256` 必填、錯誤訊息中文一行（#263、#270）；CI 先 checkout 工具再跑 PR 程式（#277） |
+| v0.9.0 | 2026-11-09 | PTT BBS 即時資料來源 spike（#57）：站規與板規調查、PyPtt 延遲實驗（BBS p50 約 45 秒、網頁版約 4.8 分鐘）、熱門篇數統計；報告建議不導入（1 條連線最多顧約 4 篇，同時熱門 p90 33 篇；延遲樣本部分證實；D-043～D-047）；`PTT_BBS_*` 改必填（D-046）；gitleaks 放行測試哨兵值 |
 
 ## 授權
 

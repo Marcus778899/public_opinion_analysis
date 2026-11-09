@@ -71,7 +71,7 @@
 
 ## 卡住／待甲方決定
 
-- （無）
+- 甲方：讀 docs/reports/bbs-spike.md，勾 docs/uat/v0.9.0.md 甲方驗收清單並寫「甲方驗收：PASS」，之後 ae release open v0.9.0
 
 ## 注意事項（踩過的坑）
 
