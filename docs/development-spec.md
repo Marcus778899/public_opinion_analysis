@@ -1808,7 +1808,7 @@ RSS 5～6 GB 的來源（BERT-base、每批 100 × 512 token）：
 
 ### 7.31 PTT BBS spike（規劃，2026-11-06，#57，v0.9.0）
 
-**目的**：回答「要不要把熱門文章的推文來源從網頁版（約 10 分鐘，7.22）改成 BBS」。這版不導入，也不動 `src/radar/`；導入與否由甲方看報告決定。外部事實見 `docs/research/bbs-spike.md`（2026-11-06 查證，以下「調查」指這份），處置見「調查結果與處置」。**甲方決定待決定項之前不派 `bbs-spike-tool`**。
+**目的**：回答「要不要把熱門文章的推文來源從網頁版（約 10 分鐘，7.22）改成 BBS」。這版不導入，也不動 `src/radar/`；導入與否由甲方看報告決定。外部事實見 `docs/research/bbs-spike.md`（2026-11-06 查證，以下「調查」指這份），處置見「調查結果與處置」。補實驗（D-048、D-049）見 G。**甲方決定待決定項之前不派 `bbs-spike-tool`**。
 
 #### A. 要回答的問題
 
@@ -1957,7 +1957,7 @@ uv run python tools/bbs_spike.py summarize --run-id <run_id> --hot-concurrent-p9
 
 | 資產 | 威脅 | 對策 |
 |---|---|---|
-| 小號帳密 | 寫進 log、Slack、結果檔、例外的變數內容 | PyPtt 預設會記帳號 ID，一律 `log_level=SILENT`（它在連線失敗時仍會 `print` 例外，此時還沒送帳密）；只從 `PTT_BBS_USERNAME`、`PTT_BBS_PASSWORD` 讀，不收 CLI 參數（`ps` 看得到）；密碼包在 `pydantic.SecretStr`，只在呼叫登入時取值；登入階段的例外改丟 `BbsLoginError(例外類別名稱) from None`（原例外的訊息與變數可能含帳密，不能串在 `__cause__`；`log.catch` 用 loggerhelper，traceback 不印變數值，仍不依賴這點）；不存登入前後的畫面；結束前掃輸出目錄有沒有這兩個值，有就刪檔、非 0 結束，只印變數名稱 |
+| 小號帳密 | 寫進 log、Slack、結果檔、例外的變數內容 | PyPtt 會以 INFO 記帳號 ID，一律 `log_level=SILENT`。SILENT 只在登入時有效：之後每次 `get_post` 經 `_api_get_board_info.get_board_info` 呼叫 `log.init(log.INFO)` 把全域 logger 換回 INFO，終端機（PyPtt 自己的 stderr handler）會印固定字串與看板名稱；帳號只在登入時印，那時仍是 SILENT，所以不會印出，也不進 `log/` 與 Slack（資安 v0.9.0 O-1）。補實驗起改成替 `PyPtt` logger 換上 `NullHandler`（G-4）；只從 `PTT_BBS_USERNAME`、`PTT_BBS_PASSWORD` 讀，不收 CLI 參數（`ps` 看得到）；密碼包在 `pydantic.SecretStr`，只在呼叫登入時取值；登入階段的例外改丟 `BbsLoginError(例外類別名稱) from None`（原例外的訊息與變數可能含帳密，不能串在 `__cause__`；`log.catch` 用 loggerhelper，traceback 不印變數值，仍不依賴這點）；不存登入前後的畫面；結束前掃輸出目錄有沒有這兩個值，有就刪檔、非 0 結束，只印變數名稱 |
 | 小號本身 | 站方因頻率或行為停權（PTT 有防機器人機制，第三方說法；PyPtt 原始碼也處理「登入太頻繁」「資源過度」畫面） | B 的上限與立即停止；用專用小號，不用甲方主帳號 |
 | 小號帳密 | 第三方套件拿到密碼（PyPtt 2.3.16 是查證當天才發布） | `==` 釘版本、`uv.lock` 雜湊；只放 `bbs-spike` group；`bbs-spike-tool` review 時核對鎖定版本的登入與送出流程 |
 | 爬蟲的 IP | BBS 行為讓站方封同一個 IP，連帶影響網頁版爬蟲（有封 IP 的第三方說法，範圍查不到） | B 的上限；甲方可選用手機網路跑實驗，與爬蟲的 IP 分開，報告記用哪個；影響評估寫進報告 |
@@ -2033,6 +2033,127 @@ uv run python tools/bbs_spike.py summarize --run-id <run_id> --hot-concurrent-p9
 | 查不到（目前；甲方讀了也沒有相關條文或看不懂時同此） | 不知道，**不等於允許**。風險存在但大小不明，用小號與保守上限承擔 | 不需要新的範圍決定：派工單已定「站規不明時選最保守的做法」，照 B 的上限做實驗 | 成立，報告寫「站規未確認」，建議導入時附「導入前甲方確認」 |
 | 查到明文禁止 | 已知違規，停權是預期結果，不是風險；上限再保守也沒用 | **不跑 P0**，報告直接建議不導入。布告欄驗收條件要量延遲，要甲方同時改範圍。甲方若仍要做，是另一個決定（④），要明確接受小號與 IP 被封的後果 | 不成立 |
 | 查到明文允許或訂了數字 | 有依據 | 上限取條文與 B 的較嚴者；修訂本節 | 依條文 |
+
+#### G. 補實驗（規劃，2026-11-09，D-048、D-049）
+
+**目的**：第一次實驗（`docs/reports/bbs-spike.md`）留下兩個沒答到的問題：混合方案（D-047）「1 條連線輪流讀 4 篇」的實測延遲、同帳號能同時開幾條連線。甲方要的是「最熱的前幾篇 1 分鐘內」，不再追求全部熱門文章（布告欄「不做」）。A～F 的定義沿用，以下只寫不同處；與 B 的上限衝突時，補實驗以本節為準。
+
+**G-1 甲方執行指令**（`--out` 前後都可放；所有子命令都加 `--group bbs-spike`，避免切換時重裝套件，UAT F-3）
+
+```bash
+# R2＋M＋網頁版尾段：--url 恰 4 篇；P0 沿用第一次的結果，不重跑
+uv run --group bbs-spike --env-file .env python tools/bbs_spike.py retest --url <URL1> <URL2> <URL3> <URL4> \
+  [--connections 3] [--p0 data/spike/bbs/p0.json]
+# 算 summary.json（不連線）
+uv run --group bbs-spike python tools/bbs_spike.py summarize-retest --run-id <run_id> --hot-concurrent-p90 33 [--rules unconfirmed]
+```
+
+**G-2 步驟**（全程唯讀；一次 `retest` 用完 3 次登入額度）
+
+| 階段 | 做什麼 | 長度 | 登入 |
+|---|---|---|---|
+| 檢查（登入前，不計登入） | 時段 Asia/Taipei 20:00 ≤ 開始 < 21:45；4 個 URL 不重複、看板都在 `--p0` 的 `boards_ok` 為 true（Gossiping、Stock、Tech_Job）；發文 ≤ 60 分鐘（檔名時間）；網頁版各抓 1 次，推 − 噓 ≥ 30；`--out` 不可是 `--p0` 所在目錄。任一不過就拒絕（exit 3），不寫 ledger | 秒級 | 0 |
+| R2 混合 | 連線 A 輪流讀 4 篇，間隔同 B；網頁版同時對照 | 至少 40 分鐘；之後新推文樣本達 100 則且來自 3 篇就結束，最長 60 分鐘 | A：1 次 |
+| M 連線數 | A 繼續輪讀（事件記 `m`，不進判定）。A 登入 ≥ 10 分鐘後開 B；B 每 ≥ 60 秒讀 1 篇保持連線；B 登入 10 分鐘後開 C。最後一條登入後 A、B、C 各成功讀 1 次即證實，立刻登出全部 | 約 12 分鐘 | B、C 各 1 次 |
+| 網頁版尾段 | 同 B | 20 分鐘 | 無 |
+
+- `--connections`：測到幾條（1～3，預設 3）；實際上限取 min(`--connections`, ledger 剩餘次數)
+- 不重跑：R2 中觸發立即停止就整個結束；樣本不足依待決定 G-b
+- 所有連線在同一個執行緒依序操作（讀取不重疊，同時只有 1 個請求在跑）；每條連線各自 `open_session`、各自 send 節流
+
+**G-3 上限與立即停止**（與 B 不同的項目；其餘照 B）
+
+| 項目 | 上限 |
+|---|---|
+| ledger | 新位置 `data/spike/bbs-retest/ledger.jsonl`（`retest` 的預設 `--out`），整個補實驗 3 次（每條連線算 1 次，含失敗），任兩次登入隔 ≥ 10 分鐘；每筆多記 `conn`（A／B／C）。第一次的 `data/spike/bbs/` 只讀 `p0.json`，不寫 |
+| 同時連線 | 最多 3 條；每條都 `kick_other_session=False` |
+| B、C 讀取 | 每條每 ≥ 60 秒 1 篇（A 照 B 的 20 秒＋0～5 秒） |
+| 網頁版 | 每篇每 60 秒 1 次（4 篇約 4 次／分鐘） |
+| 立即停止（R2） | 同 B；登出 A、不進 M |
+| 立即停止（M，D-049） | B 或 C 登入失敗（任何例外，含被站方無文字斷線）；任一連線讀取丟出白名單外的例外（含被踢、斷線）；任一連線畫面命中 B 的關鍵字；**已開著的連線**（開 B 時的 A，開 C 時的 A、B）畫面命中多重登入關鍵字（G-3a）。全部登出、不重試，`connections.json` 記原因，已證實數 = 停止前最後一次證實的條數（R2 成功即至少 1） |
+
+**G-3a 多重登入的畫面與不踢線**（需調查結果 `docs/research/bbs-multi-login.md`；PyPtt 部分由 architect 讀本機 2.3.16 核對）
+
+| 項目 | 事實 | 設計 |
+|---|---|---|
+| 站方提示 | pttbbs 在已有連線時顯示「注意: 您有其它連線已登入此帳號。」與「您想刪除其他重複登入的連線嗎？[Y/n]」，預設 Y＝踢掉舊連線；沒有數字上限常數。選 n 而站方不允許時無文字、直接斷線 | B、C 的登入一定回答 n；被拒＝登入失敗，照 G-3 停止，k 取前一個數字 |
+| PyPtt 有沒有處理 | 有（調查說沒找到，與原始碼不符）：`_api_loginout.py:61-62` 依 `api.config.kick_other_session` 回 `n`＋Enter，`:98` 的 `TargetUnit('您想刪除其他重複登入的連線嗎', response=…)` 排在泛用的「任意鍵」之前 | 沿用；`open_session` 照舊明確傳 `kick_other_session=False`。`bbs-retest-tool` 開工先對照已鎖定的 2.3.16 再確認這兩處，對不上就回報、不跑 M |
+| 新連線自己的登入畫面 | 上面兩段文字本來就會出現在 B、C 登入時的畫面佇列 | 新常數 `_MULTI_LOGIN_KEYWORDS`（「重複登入」「其它連線已登入」「其他連線已登入」）：B、C 登入後的畫面檢查跳過這組（其餘 B 的關鍵字照查）；已開著的連線每次讀取後都查這組，命中就停 |
+| 舊連線被踢 | 站方對舊連線送 SIGHUP 斷線，不送文字 | 開 B、C 後，下一輪先讓 A（與 B）各讀 1 次，失敗（`ConnectionClosed` 等）記 `kicked_or_closed` 並停止；不靠關鍵字 |
+| 登入失敗的連線 | 停在提示畫面時再送任何按鍵都可能被當成 Y | 登入失敗的連線不呼叫 `logout`、不再 `send`，只關閉 socket（現行 `open_session` 失敗時本來就不登出，測試鎖住） |
+| 殘餘風險 | PyPtt 的目標清單中「登入太頻繁」（回空白鍵）排在多重登入提示之前；兩段文字出現在同一個畫面時，空白鍵是否等於 Y 查不到 | 接受：B、C 與前一次登入都隔 ≥ 10 分鐘，不預期出現「登入太頻繁」；就算出現，A 被踢會在下一次讀取被抓到並全部停止。報告寫明 |
+
+**G-4 工具修正**（`bbs-retest-tool`；不改既有函式的簽名，第一次實驗的驗收測試照常通過）
+
+| # | 來源 | 修正 |
+|---|---|---|
+| 1 | 資安 O-2 | `_find_leaks` 不掃 `ledger.jsonl`（內容只有時間、固定字詞與 `conn`，由測試鎖住）；比對改成值前後不是英數字（帳號太短時才不會命中 16 位雜湊鍵而刪掉 `events.jsonl`） |
+| 2 | UAT F-1 | 判定只用合格文章：發文 ≤ 60 分鐘（run 開始時，`run_id` 即開始時間）且事後「任一 10 分鐘內新推文 ≥ 10」（BBS 與網頁版的推文鍵聯集，依標示的分鐘計）。不合格的列在 `excluded`（`post_id` 與原因）。`summarize` 也套用，第一次的 summary 重算後與報告的「部分證實」一致 |
+| 3 | #327 | `capacity` 的 `avg_read_seconds`、`avg_sends`、`avg_screens` 都只用判定階段（P2／R2）的讀取；全程平均另放 `capacity_all` |
+| 4 | 資安 O-1 | 建立 `API()` 後替 `logging.getLogger("PyPtt")` 只留 `NullHandler`、`propagate=False`，終端機不再有 PyPtt 的輸出；開工先對照 2.3.16 的 `log.py` 確認 `log.init` 不會重新掛 console handler |
+| 5 | #328 F-2、F-4 | 每個選項的 `help` 寫單位、預設值、數值來源；`--out` 子命令前後都接受 |
+| 6 | 新功能 | `retest`、`summarize-retest`（G-1、G-2、G-5）；R2 的延長只看樣本數，合格與否由 `summarize-retest` 判 |
+
+**G-5 量測與判定**（C 的 `U/L/E`、時鐘檢查、網頁版配對照舊；「混合」= BBS 只顧最熱 4 篇）
+
+| # | 門檻 | 成立條件 |
+|---|---|---|
+| R1 延遲 | R2 合格文章的 p50(`E`) ≤ 60 秒 | 樣本下限：合格文章的新推文 ≥ 100 則且來自 ≥ 3 篇；輪讀篇數確實是 4。不足為「未證實」 |
+| R2 連線 | 混合方案用的連線數 ≤ 已證實數 | 1 條即可，R2 跑完就成立；已證實數 k 決定可顧篇數 4 × k（k > 1 時為推算：只證實能同時連線，沒量多條同時輪讀的延遲） |
+| R3 站規與停止 | 同門檻 3 | R2 觸發立即停止就不成立；只在 M 觸發時此項仍成立，但 k 取停止前的數字，報告寫明 |
+
+- 三項都成立：建議導入混合方案，前 4 × k 篇走 BBS，其餘留網頁版；否則建議不導入。決定歸甲方
+- `summary.json` 另報：`N_max`（R2 平均讀取秒數）、全量需要的連線數 ⌈同時熱門篇數 p90 ÷ `N_max`⌉（只供參考，不是門檻）、4 × k 占 p90 的比例、`connections`（測了幾條、證實幾條、停止原因）
+- 報告：`bbs-retest-report` 把 `docs/reports/bbs-spike.md` 第一行改成最終建議、加「補實驗」一節（總長 ≤ 200 行）；本節補結論
+
+**G-6 威脅與對策（補充；其餘見上方威脅表）**
+
+| 資產 | 威脅 | 對策 |
+|---|---|---|
+| 小號本身 | 多條連線被視為異常、停權 | 最多 3 條、每條隔 ≥ 10 分鐘開、B／C 每 60 秒讀 1 次；不踢線；出現警告或被踢即全部登出（D-049） |
+| 第一次實驗的資料 | 新實驗覆寫或掃描刪除 | 新的 `--out`；`--out` 等於 `--p0` 所在目錄就拒絕；ledger 不進掃描 |
+| 小號帳密 | 經共用 `.env` 進所有 app 容器（#329、資安 L-1） | `bbs-env-isolation`：compose 的 `x-app-env` 把 `PTT_BBS_USERNAME`、`PTT_BBS_PASSWORD` 覆寫成空字串（`environment` 優先於 `env_file`；`init` 與每個 app 服務都 merge 這個 anchor，worker 逐一確認）。補實驗跑完是否改回選填見待決定 G-a |
+
+**G-7 派工順序**
+
+| 順序 | task_id | 負責 | 通道 | 相依／平行 | 負責檔案 | 驗收測試 |
+|---|---|---|---|---|---|---|
+| 1 | `bbs-retest-design`（本單） | architect | docs | — | `docs/development-spec.md` | 無 |
+| 2 | `bbs-retest-tool` | backend | full | 1 合併、待決定 G-b 決定後 | `tools/bbs_spike.py`、`tests/unit/tools/test_bbs_spike.py` | `tests/unit/acceptance/bbs-retest-tool/`（G-2 登入前檢查各項拒絕且不寫 ledger；ledger 位置、`conn`、3 次與 10 分鐘跨連線計算；R2 的 40／60 分鐘與提前結束；M 的開線時間、B／C 讀取間隔、證實條件、各種停止與 k；G-3a 的多重登入關鍵字只查已開著的連線、開線後舊連線讀取失敗即停、登入失敗的連線不登出不送鍵；G-4 每一項；G-5 判定與 summary 欄位不含使用者 ID 與推文） |
+| 3 | `bbs-env-isolation` | backend | full（compose 是受保護路徑） | 與 2 平行 | `infra/docker-compose.yaml`、`tests/unit/infra/test_compose_bbs_env.py` | `tests/unit/acceptance/bbs-env-isolation/`（靜態解析 compose：每個帶 `env_file: ../.env` 的服務，`PTT_BBS_*` 都被覆寫成空字串） |
+| 4 | （甲方手動） | 甲方 | — | 2 合併後 | 晚間跑 G-1；`data/spike/bbs-retest/` 留在主目錄 | 無 |
+| 5 | `bbs-retest-report` | backend | docs | 4 之後 | `docs/reports/bbs-spike.md`、`docs/development-spec.md`（本節補結論） | 無；manager 對照 G-5 與布告欄驗收條件 |
+
+- 受影響的既有驗收測試：`tests/unit/acceptance/bbs-spike-tool/` 用到 `decide`、`scan_and_purge`、`finish_output_check`、`build_summary`、子命令 help、7.31 B／C 標題；G-4 不改簽名、測試裡的秘密值前後都不是英數字，預期不矛盾，不列入 2 的範圍。worker 撞到就回報
+- 2、3 不共用檔案、沒有 DB 與 port，驗收測試都在 `make check`；沒有整合單
+
+**G-8 自行決定**
+
+| 項目 | 理由 |
+|---|---|
+| P0 不重跑，沿用第一次的 `p0.json`，看板限 P0 通過的 3 個 | 套件版本沒變；省下的登入給連線數實測；新看板要 P0 就得多用一次登入 |
+| 不跑 P1 | 第一次 P1 已證實 BBS 本身即時（p50(`U`) 50.5 秒） |
+| 連線數實測接在 R2 之後、與 A 重疊 | 3 次登入要證實 3 條，A 必須是其中一條；先做 R2，M 出事也不影響延遲資料 |
+| 開始時間 < 21:45、R2 最長 60 分鐘 | BBS 部分最晚約 23:00 結束，落在甲方指定的時段內 |
+| 發文時間與推噓數在登入前由程式檢查 | 第一次的第 1 篇就是違反選取規則才只算部分證實；登入前擋下不浪費額度 |
+| 推 − 噓 ≥ 30 用網頁版內頁計算 | 列表的推文數就是推 − 噓；內頁可由程式算，快取延遲只會讓檢查偏嚴 |
+| 多重登入關鍵字只查已開著的連線 | 新連線登入時這兩段文字是正常流程，查了就永遠測不到第 2 條；舊連線出現才代表異常 |
+| 單一執行緒依序操作多個 PyPtt `API` | 已讀 2.3.16：每個 `API` 有自己的 `connect_core` 與 event loop，`_api_util.one_thread` 只要求同一執行緒；讀取不重疊，負載不會因多條連線疊加 |
+| M 階段觸發停止時 R3 仍成立、k 降級 | 單條連線在 R2 已正常完成；多連線的警告只代表多開不行 |
+| ledger 不掃、雜湊鍵用邊界比對 | ledger 刪了就等於拿掉登入上限（O-2）；ledger 內容由程式固定，測試鎖住 |
+
+**G-9 需調查**
+
+| # | 問題 | 用途 | 擋不擋 |
+|---|---|---|---|
+| 1 | pttbbs 原始碼中同帳號多重登入的上限與超過時的畫面文字 | 已完成（`docs/research/bbs-multi-login.md`），處置見 G-3a。文字是 GitHub 頁面轉述、上限數字查不到；實機畫面以補實驗的結果為準 | 不擋 |
+
+**G-10 待決定（manager 開 D-編號）**
+
+| # | 問題 | 分級 | 選項 | 建議與理由 |
+|---|---|---|---|---|
+| G-a | 補實驗報告合併後，`PTT_BBS_*` 要不要改回選填（推翻 D-046） | ④ | A. 改回註解，甲方清空 `.env` 的值並改小號密碼；B. 維持必填 | **A**。實驗結束後帳密沒有用途；`bbs-env-isolation` 只擋容器，`.env` 仍有明文。導入時再另議 |
+| G-b | R2 樣本不足（R2 跑滿 60 分鐘仍未達 100 則或 3 篇）時，要不要照樣開 B、C | ① | A. 不開，登出 A，留 2 次登入給一次重跑（重跑最多證實 2 條）；B. 照樣開，用完 3 次，延遲記「未證實」 | **A**。延遲是混合方案成立的前提；延遲未證實時，連線數再多也無法建議導入 |
 
 ## 8. 風險清單
 
