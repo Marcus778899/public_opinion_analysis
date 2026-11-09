@@ -2070,7 +2070,18 @@ uv run --group bbs-spike python tools/bbs_spike.py summarize-retest --run-id <ru
 | B、C 讀取 | 每條每 ≥ 60 秒 1 篇（A 照 B 的 20 秒＋0～5 秒） |
 | 網頁版 | 每篇每 60 秒 1 次（4 篇約 4 次／分鐘） |
 | 立即停止（R2） | 同 B；登出 A、不進 M |
-| 立即停止（M，D-049） | B 或 C 登入失敗（任何例外）；任一連線讀取丟出白名單外的例外（含被踢、斷線）；任一連線畫面命中 B 的關鍵字。全部登出、不重試，`connections.json` 記原因，已證實數 = 停止前最後一次證實的條數（R2 成功即至少 1） |
+| 立即停止（M，D-049） | B 或 C 登入失敗（任何例外，含被站方無文字斷線）；任一連線讀取丟出白名單外的例外（含被踢、斷線）；任一連線畫面命中 B 的關鍵字；**已開著的連線**（開 B 時的 A，開 C 時的 A、B）畫面命中多重登入關鍵字（G-3a）。全部登出、不重試，`connections.json` 記原因，已證實數 = 停止前最後一次證實的條數（R2 成功即至少 1） |
+
+**G-3a 多重登入的畫面與不踢線**（需調查結果 `docs/research/bbs-multi-login.md`；PyPtt 部分由 architect 讀本機 2.3.16 核對）
+
+| 項目 | 事實 | 設計 |
+|---|---|---|
+| 站方提示 | pttbbs 在已有連線時顯示「注意: 您有其它連線已登入此帳號。」與「您想刪除其他重複登入的連線嗎？[Y/n]」，預設 Y＝踢掉舊連線；沒有數字上限常數。選 n 而站方不允許時無文字、直接斷線 | B、C 的登入一定回答 n；被拒＝登入失敗，照 G-3 停止，k 取前一個數字 |
+| PyPtt 有沒有處理 | 有（調查說沒找到，與原始碼不符）：`_api_loginout.py:61-62` 依 `api.config.kick_other_session` 回 `n`＋Enter，`:98` 的 `TargetUnit('您想刪除其他重複登入的連線嗎', response=…)` 排在泛用的「任意鍵」之前 | 沿用；`open_session` 照舊明確傳 `kick_other_session=False`。`bbs-retest-tool` 開工先對照已鎖定的 2.3.16 再確認這兩處，對不上就回報、不跑 M |
+| 新連線自己的登入畫面 | 上面兩段文字本來就會出現在 B、C 登入時的畫面佇列 | 新常數 `_MULTI_LOGIN_KEYWORDS`（「重複登入」「其它連線已登入」「其他連線已登入」）：B、C 登入後的畫面檢查跳過這組（其餘 B 的關鍵字照查）；已開著的連線每次讀取後都查這組，命中就停 |
+| 舊連線被踢 | 站方對舊連線送 SIGHUP 斷線，不送文字 | 開 B、C 後，下一輪先讓 A（與 B）各讀 1 次，失敗（`ConnectionClosed` 等）記 `kicked_or_closed` 並停止；不靠關鍵字 |
+| 登入失敗的連線 | 停在提示畫面時再送任何按鍵都可能被當成 Y | 登入失敗的連線不呼叫 `logout`、不再 `send`，只關閉 socket（現行 `open_session` 失敗時本來就不登出，測試鎖住） |
+| 殘餘風險 | PyPtt 的目標清單中「登入太頻繁」（回空白鍵）排在多重登入提示之前；兩段文字出現在同一個畫面時，空白鍵是否等於 Y 查不到 | 接受：B、C 與前一次登入都隔 ≥ 10 分鐘，不預期出現「登入太頻繁」；就算出現，A 被踢會在下一次讀取被抓到並全部停止。報告寫明 |
 
 **G-4 工具修正**（`bbs-retest-tool`；不改既有函式的簽名，第一次實驗的驗收測試照常通過）
 
@@ -2108,7 +2119,7 @@ uv run --group bbs-spike python tools/bbs_spike.py summarize-retest --run-id <ru
 | 順序 | task_id | 負責 | 通道 | 相依／平行 | 負責檔案 | 驗收測試 |
 |---|---|---|---|---|---|---|
 | 1 | `bbs-retest-design`（本單） | architect | docs | — | `docs/development-spec.md` | 無 |
-| 2 | `bbs-retest-tool` | backend | full | 1 合併、待決定 G-b 決定後 | `tools/bbs_spike.py`、`tests/unit/tools/test_bbs_spike.py` | `tests/unit/acceptance/bbs-retest-tool/`（G-2 登入前檢查各項拒絕且不寫 ledger；ledger 位置、`conn`、3 次與 10 分鐘跨連線計算；R2 的 40／60 分鐘與提前結束；M 的開線時間、B／C 讀取間隔、證實條件、各種停止與 k；G-4 每一項；G-5 判定與 summary 欄位不含使用者 ID 與推文） |
+| 2 | `bbs-retest-tool` | backend | full | 1 合併、待決定 G-b 決定後 | `tools/bbs_spike.py`、`tests/unit/tools/test_bbs_spike.py` | `tests/unit/acceptance/bbs-retest-tool/`（G-2 登入前檢查各項拒絕且不寫 ledger；ledger 位置、`conn`、3 次與 10 分鐘跨連線計算；R2 的 40／60 分鐘與提前結束；M 的開線時間、B／C 讀取間隔、證實條件、各種停止與 k；G-3a 的多重登入關鍵字只查已開著的連線、開線後舊連線讀取失敗即停、登入失敗的連線不登出不送鍵；G-4 每一項；G-5 判定與 summary 欄位不含使用者 ID 與推文） |
 | 3 | `bbs-env-isolation` | backend | full（compose 是受保護路徑） | 與 2 平行 | `infra/docker-compose.yaml`、`tests/unit/infra/test_compose_bbs_env.py` | `tests/unit/acceptance/bbs-env-isolation/`（靜態解析 compose：每個帶 `env_file: ../.env` 的服務，`PTT_BBS_*` 都被覆寫成空字串） |
 | 4 | （甲方手動） | 甲方 | — | 2 合併後 | 晚間跑 G-1；`data/spike/bbs-retest/` 留在主目錄 | 無 |
 | 5 | `bbs-retest-report` | backend | docs | 4 之後 | `docs/reports/bbs-spike.md`、`docs/development-spec.md`（本節補結論） | 無；manager 對照 G-5 與布告欄驗收條件 |
@@ -2126,6 +2137,7 @@ uv run --group bbs-spike python tools/bbs_spike.py summarize-retest --run-id <ru
 | 開始時間 < 21:45、R2 最長 60 分鐘 | BBS 部分最晚約 23:00 結束，落在甲方指定的時段內 |
 | 發文時間與推噓數在登入前由程式檢查 | 第一次的第 1 篇就是違反選取規則才只算部分證實；登入前擋下不浪費額度 |
 | 推 − 噓 ≥ 30 用網頁版內頁計算 | 列表的推文數就是推 − 噓；內頁可由程式算，快取延遲只會讓檢查偏嚴 |
+| 多重登入關鍵字只查已開著的連線 | 新連線登入時這兩段文字是正常流程，查了就永遠測不到第 2 條；舊連線出現才代表異常 |
 | 單一執行緒依序操作多個 PyPtt `API` | 已讀 2.3.16：每個 `API` 有自己的 `connect_core` 與 event loop，`_api_util.one_thread` 只要求同一執行緒；讀取不重疊，負載不會因多條連線疊加 |
 | M 階段觸發停止時 R3 仍成立、k 降級 | 單條連線在 R2 已正常完成；多連線的警告只代表多開不行 |
 | ledger 不掃、雜湊鍵用邊界比對 | ledger 刪了就等於拿掉登入上限（O-2）；ledger 內容由程式固定，測試鎖住 |
@@ -2134,7 +2146,7 @@ uv run --group bbs-spike python tools/bbs_spike.py summarize-retest --run-id <ru
 
 | # | 問題 | 用途 | 擋不擋 |
 |---|---|---|---|
-| 1 | pttbbs 原始碼中同帳號多重登入的上限與超過時的畫面文字 | 加進 M 的立即停止關鍵字；目前靠「B／C 登入失敗即停」兜底 | 不擋 2；查到時 worker 補常數 |
+| 1 | pttbbs 原始碼中同帳號多重登入的上限與超過時的畫面文字 | 已完成（`docs/research/bbs-multi-login.md`），處置見 G-3a。文字是 GitHub 頁面轉述、上限數字查不到；實機畫面以補實驗的結果為準 | 不擋 |
 
 **G-10 待決定（manager 開 D-編號）**
 
