@@ -64,11 +64,11 @@
 |---|---|---|---|---|
 | bbs-spike-design | architect | done | 0 | PR #318 |
 | bbs-spike-tool | backend | todo | 0 |  |
-| bbs-hot-articles-stat | backend | todo | 0 |  |
+| bbs-hot-articles-stat | backend | done | 0 | 統計完成（作廢 PR），.agent/reports/bbs-hot-articles-stat.json |
 
 ## 卡住／待甲方決定
 
-- （無）
+- 待甲方決定 D-047（熱門篇數遠超 1 條連線，實驗怎麼跑）
 
 ## 注意事項（踩過的坑）
 
