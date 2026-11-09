@@ -67,6 +67,7 @@
 | bbs-spike-tool | backend | done | 1 | PR #324 |
 | bbs-hot-articles-stat | backend | done | 0 | 統計完成（作廢 PR），.agent/reports/bbs-hot-articles-stat.json |
 | gitleaks-test-sentinel | architect | done | 0 | PR #323 |
+| bbs-spike-report | backend | done | 1 | PR #326 |
 
 ## 卡住／待甲方決定
 
