@@ -79,10 +79,12 @@
 | bbs-retest-design | architect | done | 0 | PR #331 |
 | bbs-retest-tool | backend | done | 0 | PR #335 |
 | gitleaks-hash-key-fixture | architect | done | 0 | PR #334 |
+| bbs-retest-report | backend | done | 0 | PR #337 |
+| bbs-env-optional | backend | done | 0 | PR #339 |
 
 ## 卡住／待甲方決定
 
-- （無）
+- 待甲方決定 D-052（BBS 混合方案導入與否）
 
 ## 注意事項（踩過的坑）
 
