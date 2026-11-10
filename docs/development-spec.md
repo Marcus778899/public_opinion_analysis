@@ -2119,7 +2119,7 @@ uv run --group bbs-spike python tools/bbs_spike.py summarize-retest --run-id <ru
 |---|---|---|
 | 小號本身 | 多條連線被視為異常、停權 | 最多 3 條、每條隔 ≥ 10 分鐘開、B／C 每 60 秒讀 1 次；不踢線；出現警告或被踢即全部登出（D-049） |
 | 第一次實驗的資料 | 新實驗覆寫或掃描刪除 | 新的 `--out`；`--out` 等於 `--p0` 所在目錄就拒絕；ledger 不進掃描 |
-| 小號帳密 | 經共用 `.env` 進所有 app 容器（#329、資安 L-1） | `bbs-env-isolation`：compose 的 `x-app-env` 把 `PTT_BBS_USERNAME`、`PTT_BBS_PASSWORD` 覆寫成空字串（`environment` 優先於 `env_file`；`init` 與每個 app 服務都 merge 這個 anchor，worker 逐一確認）。補實驗跑完是否改回選填見待決定 G-a |
+| 小號帳密 | 經共用 `.env` 進所有 app 容器（#329、資安 L-1） | `bbs-env-isolation`：compose 的 `x-app-env` 把 `PTT_BBS_USERNAME`、`PTT_BBS_PASSWORD` 覆寫成空字串（`environment` 優先於 `env_file`；`init` 與每個 app 服務都 merge 這個 anchor，worker 逐一確認）。補實驗跑完已依 D-050 改回選填（`.env.example` 兩個變數為註解）；`bbs-env-isolation` 不做（D-050，留 backlog） |
 
 **G-7 派工順序**
 
