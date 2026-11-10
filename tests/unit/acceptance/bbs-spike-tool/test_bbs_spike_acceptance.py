@@ -630,12 +630,13 @@ def test_pyptt_pinned_only_in_bbs_spike_group() -> None:
     assert not any("pyptt" in d.lower() for d in data["project"].get("dependencies", []))
 
 
-def test_env_example_ptt_bbs_vars_are_uncommented_with_empty_values() -> None:
+def test_env_example_ptt_bbs_vars_are_commented_without_values() -> None:
+    # D-050 取代 D-046：兩個變數改回選填（註解、沒有值）
     lines = (ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
-    assert "PTT_BBS_USERNAME=" in lines
-    assert "PTT_BBS_PASSWORD=" in lines
-    assert not any(re.match(r"\s*#\s*PTT_BBS_(USERNAME|PASSWORD)=", ln) for ln in lines)
-    idx = lines.index("PTT_BBS_USERNAME=")
+    assert "# PTT_BBS_USERNAME=" in lines
+    assert "# PTT_BBS_PASSWORD=" in lines
+    assert not any(re.match(r"\s*PTT_BBS_(USERNAME|PASSWORD)=", ln) for ln in lines)
+    idx = lines.index("# PTT_BBS_USERNAME=")
     assert lines[idx - 1].lstrip().startswith("#"), "要保留說明註解"
 
 
