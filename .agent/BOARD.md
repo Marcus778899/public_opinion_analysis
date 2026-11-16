@@ -85,7 +85,7 @@
 
 ## 卡住／待甲方決定
 
-- （無）
+- 發版 PR #342 被 gitleaks 誤判擋（docs/security/v0.9.0.md:89 假雜湊鍵）；修正單 gitleaks-security-report-fixture 開單時 sandbox 擋 git worktree add，待甲方在終端機開單
 
 ## 注意事項（踩過的坑）
 
