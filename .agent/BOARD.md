@@ -82,7 +82,7 @@
 | gitleaks-hash-key-fixture | architect | done | 0 | PR #334 |
 | bbs-retest-report | backend | done | 0 | PR #337 |
 | bbs-env-optional | backend | done | 0 | PR #339 |
-| gitleaks-security-report-fixture | architect | todo | 0 |  |
+| gitleaks-security-report-fixture | architect | done | 0 | 作廢，規則併入 PR #346 |
 | otel-api-upgrade | backend | done | 1 | PR #346 |
 
 ## 卡住／待甲方決定
