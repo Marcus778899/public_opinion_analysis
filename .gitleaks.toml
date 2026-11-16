@@ -10,6 +10,12 @@ useDefault = true
 description = "tasks/ 封存派工單、qa／review 紀錄（D-018）"
 paths = ['''^tasks/''']
 
+# 封存搬到 .agent/tasks/ 後的同一類路徑（D-018 延伸）：子目錄 <tag>/ 與版本布告欄 v*.md
+# 進行中的派工單 .agent/tasks/<id>.md 不排除：正在用的單要照常掃，誤判在封存前就該處理
+[[allowlists]]
+description = ".agent/tasks/ 封存：<tag>/ 子目錄與 v*.md 布告欄（D-018）"
+paths = ['''^\.agent/tasks/[^/]+/''', '''^\.agent/tasks/v[0-9][^/]*\.md$''']
+
 [[allowlists]]
 description = "Git／Hugging Face revision：變數名最後一段是 rev/revision/commit/sha（整段比對）且值為 40 位小寫 hex（D-026）"
 targetRules = ["generic-api-key"]
