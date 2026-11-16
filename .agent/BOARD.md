@@ -65,7 +65,7 @@
 
 ## 卡住／待甲方決定
 
-- （無）
+- develop CI 紅：v0.9.0 封存 commit ed18b69 被 gitleaks 擋（8 筆封存檔裡的假值；D-018 只排除舊 tasks/）；修正單 gitleaks-archive-path 待甲方決定時機
 
 ## 注意事項（踩過的坑）
 
