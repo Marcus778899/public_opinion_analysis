@@ -6,8 +6,10 @@
 
 ## 目標與範圍
 
-- 本輪：（尚未設定）
-- 不做：（尚未設定）
+- 本輪：v0.10.0 階段 9 上雲（範圍盤問中）；先修 develop CI：gitleaks 不掃 .agent/tasks/ 封存（D-018 延伸）
+- 不做：階段 9 上雲的實作（盤問完重下範圍才開單）；backlog 小項
+- 驗收條件：
+  - gitleaks 不掃 .agent/tasks/ 封存（D-018 延伸），develop CI 的 Security job 轉綠；其他規則不放寬，同格式真密鑰在其他路徑仍會被抓到
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
@@ -65,7 +67,7 @@
 
 ## 卡住／待甲方決定
 
-- develop CI 紅：v0.9.0 封存 commit ed18b69 被 gitleaks 擋（8 筆封存檔裡的假值；D-018 只排除舊 tasks/）；修正單 gitleaks-archive-path 待甲方決定時機
+- develop CI 紅：v0.9.0 封存 commit ed18b69 被 gitleaks 擋（.agent/tasks/ 不在 D-018 排除）；修正單 gitleaks-archive-path 進行中，其他單照做到 merge 前
 
 ## 注意事項（踩過的坑）
 
