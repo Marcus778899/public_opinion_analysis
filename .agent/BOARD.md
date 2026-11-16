@@ -83,11 +83,11 @@
 | bbs-retest-report | backend | done | 0 | PR #337 |
 | bbs-env-optional | backend | done | 0 | PR #339 |
 | gitleaks-security-report-fixture | architect | todo | 0 |  |
-| otel-api-upgrade | backend | qa-fail | 1 |  |
+| otel-api-upgrade | backend | done | 1 | PR #346 |
 
 ## 卡住／待甲方決定
 
-- CI 互卡：PR #344（gitleaks 修正）被 osv 擋、PR #346（otel 升級）被 gitleaks 擋，待甲方選處理方式
+- （無）
 
 ## 注意事項（踩過的坑）
 
