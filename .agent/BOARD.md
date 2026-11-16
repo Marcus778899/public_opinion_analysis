@@ -83,6 +83,7 @@
 | bbs-retest-report | backend | done | 0 | PR #337 |
 | bbs-env-optional | backend | done | 0 | PR #339 |
 | gitleaks-security-report-fixture | architect | todo | 0 |  |
+| otel-api-upgrade | backend | todo | 0 |  |
 
 ## 卡住／待甲方決定
 
