@@ -83,11 +83,11 @@
 | bbs-retest-report | backend | done | 0 | PR #337 |
 | bbs-env-optional | backend | done | 0 | PR #339 |
 | gitleaks-security-report-fixture | architect | todo | 0 |  |
-| otel-api-upgrade | backend | todo | 0 |  |
+| otel-api-upgrade | backend | qa-fail | 1 |  |
 
 ## 卡住／待甲方決定
 
-- 所有 PR 的 Security 被 osv 擋：opentelemetry-api 1.45.1 GHSA-mf5v-w3w3-f6cg（Medium，1.45.2 修）；修正單 otel-api-upgrade 待甲方在終端機開單（sandbox 擋 worktree）
+- CI 互卡：PR #344（gitleaks 修正）被 osv 擋、PR #346（otel 升級）被 gitleaks 擋，待甲方選處理方式
 
 ## 注意事項（踩過的坑）
 
