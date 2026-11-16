@@ -28,6 +28,8 @@
       "Bash(ae import apply)",
       "Bash(ae import remove:*)",
       "Bash(ae import write:*)",
+      "Bash(ae wt:*)",
+      "Bash(ae import eol)",
       "Bash(python3 .claude/skills/ui-ux-pro-max/scripts/search.py:*)"
     ],
     "ask": [
@@ -66,7 +68,10 @@
     "allowUnsandboxedCommands": false,
     "excludedCommands": [
       "docker compose *",
-      "ae import *"
+      "ae import *",
+      "ae task *",
+      "ae pr *",
+      "ae wt *"
     ],
     "filesystem": {
       "allowWrite": [
