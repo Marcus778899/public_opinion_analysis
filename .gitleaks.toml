@@ -35,3 +35,13 @@ condition = "AND"
 paths = ['''^tests/''']
 regexTarget = "secret"
 regexes = ['''^0123[0-9a-f]{0,6}456789[0-9a-f]{0,6}$''']
+
+# 資安報告逐條追認上一條時，會引用「同形狀也放行」的反例值（例 docs/security/v0.9.0.md）；報告已合併且掃歷史
+# 只放行 docs/security/ 底下的版本報告（v*.md）、值的形狀與上一條完全相同的 generic-api-key
+[[allowlists]]
+description = "docs/security/ 版本報告引用的順序假雜湊鍵：同上一條的值形狀（gitleaks-security-report-fixture）"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^docs/security/v[0-9][0-9.]*\.md$''']
+regexTarget = "secret"
+regexes = ['''^0123[0-9a-f]{0,6}456789[0-9a-f]{0,6}$''']
