@@ -140,6 +140,11 @@
 | v0.8.2 | 2026-11-04 | 穩定性小版（D-042）：producer fatal 後結束交給 restart（#281）；Connect 內部 topic 2 份副本、`/health` 與 connector 存在的健康檢查、watchdog 發現 connector 不見會告警（#282、D-041）；推論 2 CPU、2g、`INFERENCE_THREADS=2`（#289）；init 遇 task FAILED 先重啟（#262）；補抓終點改用檔名時間，標頭未來時間不會讓補抓停掉（#268）；模型匯入 `--sha256` 必填、錯誤訊息中文一行（#263、#270）；CI 先 checkout 工具再跑 PR 程式（#277） |
 | v0.9.0 | 2026-11-10 | PTT BBS 即時資料來源 spike（#57）：站規與板規調查、熱門篇數統計、兩次 PyPtt 延遲實驗；補實驗（D-048、D-049）1 條連線輪讀 4 篇 p50 約 53 秒（網頁版約 5.3 分鐘）、同帳號 3 條同時連線證實；報告最終建議導入混合方案（前 12 篇走 BBS、其餘網頁版，導入前確認站規；D-047、D-052）；實驗工具修 ledger 誤刪與門檻選取規則；`PTT_BBS_*` 實驗後改回選填（D-050）；gitleaks 放行測試哨兵值與假雜湊鍵 |
 
+## 下一步：v1.0.0
+
+功能面到 v0.9.0 已完整（爬取、CDC、情緒推論、熱度警示、Telegram、Grafana、BERT 模型）。
+v1.0.0 只剩階段 9 上雲：用 Terraform 建雲端環境並部署現有服務；上雲時一併驗證雲端出口能否連 PTT BBS（D-052），以及延後的多天驗收（D-031）。
+
 ## 授權
 
 [PolyForm Noncommercial License 1.0.0](LICENSE)：禁止商業用途。
