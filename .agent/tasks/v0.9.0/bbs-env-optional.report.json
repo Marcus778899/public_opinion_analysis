@@ -1,0 +1,1 @@
+{"task_id":"bbs-env-optional","status":"done","files_changed":[".env.example","docs/development-spec.md"],"verification":{"command":"make check; grep -nE \"^PTT_BBS_\" .env.example","exit_code":0,"tail":"2246 passed in 155.38s; grep 無結果"},"open_questions":["test_bbs_spike_acceptance.py 已由 qa 改寫（斷言註解形式），本單未修改它","未跑整合測試（本單只改 .env.example 與文件）"]}

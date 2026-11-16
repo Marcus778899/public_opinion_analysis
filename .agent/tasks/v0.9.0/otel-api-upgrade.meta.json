@@ -1,0 +1,29 @@
+{
+  "task_id": "otel-api-upgrade",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "CI Security（osv-scanner）擋下所有 PR：間接相依 `opentelemetry-api` 1.45.1 有漏洞 GHSA-mf5v-w3w3-f6cg（Medium，CVSS 5.3），升到已修版 1.45.2 以上",
+  "issue": 345,
+  "branch": "fix/otel-api-upgrade",
+  "worktree": ".worktrees/otel-api-upgrade",
+  "pr": 346,
+  "qa": {
+    "result": "pass",
+    "sha": "f37054f18da0568514e4e45cb6a6f34843980928",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "f37054f18da0568514e4e45cb6a6f34843980928",
+    "by": "architect"
+  },
+  "merged": true,
+  "lane_upgraded": [
+    "碰到受保護路徑 uv.lock",
+    "沒有附任何測試檔"
+  ],
+  "qa_fails": 1,
+  "amend_sha": "21fb8d34114ccc69ce1a9c8fe35782b7d394535e",
+  "node_at": 1794810969.614063
+}

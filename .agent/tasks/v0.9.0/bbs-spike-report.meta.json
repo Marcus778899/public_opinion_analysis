@@ -1,0 +1,25 @@
+{
+  "task_id": "bbs-spike-report",
+  "kind": "docs",
+  "owner": "backend",
+  "lane": "full",
+  "title": "依實驗結果寫 BBS spike 報告 `docs/reports/bbs-spike.md`（7.31 F 格式），並在開發規格 7.31 與「後續階段」13 補結論",
+  "issue": 325,
+  "branch": "docs/bbs-spike-report",
+  "worktree": ".worktrees/bbs-spike-report",
+  "pr": 326,
+  "qa": {
+    "result": "pass",
+    "sha": "9f22e9f721da88a9083f9f03e5978c36eb475ac6",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "9f22e9f721da88a9083f9f03e5978c36eb475ac6",
+    "by": "architect"
+  },
+  "merged": true,
+  "qa_fails": 1,
+  "amend_sha": "da7904582deef0af6b8edc5915e483c208e21cec",
+  "node_at": 1794201521.962694
+}

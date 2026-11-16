@@ -1,0 +1,27 @@
+{
+  "task_id": "bbs-spike-tool",
+  "status": "done",
+  "files_changed": [
+    "tools/bbs_spike.py",
+    "pyproject.toml",
+    "uv.lock",
+    "tests/unit/tools/test_bbs_spike.py",
+    "tests/fixtures/bbs/web_post.html",
+    ".env.example",
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "pre-commit run --all-files; uv run pytest tests/unit -n 4",
+    "exit_code": 0,
+    "tail": "全過；新增的 review 測試在舊程式 7 項失敗、新程式通過"
+  },
+  "open_questions": [
+    "review 3 項已修：(1) 登入後與每次讀取後比對 connect_core._RDQ.get(10)（取不到退回 get_screen_queue），命中登出並在 ledger 記 failed: login failed: screen_keyword:…；(2) probe／run 在登入前先驗證全部 URL 並轉 AID，失敗時 ledger 不新增；(3) summarize 的 web 列只留鍵在 BBS 事件內的推文。另做：尾段 Ctrl-C 不再跳過 poller 停止與秘密掃描；7.31 B／威脅表依 review 修文並加兩階段驗證提醒。未做的建議：capacity.avg_screens 仍受畫面佇列上限限制，報告應以 send 次數為準。",
+    "qa FAIL 已處理：(1) 7.31 B 補上 probe／run／summarize 的完整指令與參數說明（只動該段）；(2) ledger 登入結束後以 update_last 把最後一筆改成 ok 或 failed: <類別名稱>，不新增一筆，次數不會多算。",
+    "核對 PyPtt 2.3.16 發布檔與 docs/research/bbs-spike.md：get_post 以 aid 讀、send 在 connect_core、SILENT、kick_other_session 預設 False、get_screen_queue 皆一致；connect_core 重試 sleep(1) 行號為 210（調查寫 205），不影響上限。另發現 login 文件列出 TwoFactorAuthRequired、OnlySecureConnection、ResetYourContactEmail 等不在 7.31 立即停止清單的例外：程式依規則一律視為無法辨識的錯誤而停止（BbsLoginError），並不重試；建議甲方知道兩階段驗證帳號會直接失敗。",
+    "bbs-spike group 的 uv.lock 新增 pyptt 2.3.16、autostrenum、progressbar2、python-utils、websockets 17.4；甲方 review 時請核對這些傳遞相依。",
+    "未實測部分（agent 不能連 PTT）：get_post 回傳的 comments 時間字串實際格式（P0 問題 5，程式以 parse_comment_time 解析，解析不出的略過並計入 p0.time_unparsed）、get_screen_queue 回傳型別（假設為 list[str]）。若與假設不同，probe 會在 P0 暴露。",
+    "設計取捨：事件只存鍵的 SHA1 前 16 碼，不存使用者 ID 與內容；網頁版對照用背景執行緒每篇每 60 秒輪詢（PttClient），並在 run 開始時額外發 1 個請求取 Date 標頭算時鐘偏差；停止條件觸發後略過網頁版尾段並寫 stop.json。網頁版基準以輪詢開始時的快照為準，BBS 基準之前就存在的推文不計。",
+    "沒有異議的驗收測試；disputes 為空。"
+  ]
+}

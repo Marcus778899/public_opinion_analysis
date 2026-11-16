@@ -1,0 +1,18 @@
+{
+  "task_id": "bbs-spike-design",
+  "status": "done",
+  "files_changed": ["docs/development-spec.md", ".env.example"],
+  "verification": {
+    "command": "git diff --stat origin/develop...HEAD; make check",
+    "exit_code": 0,
+    "tail": ".env.example | 6 ++; docs/development-spec.md | 208 +++; 2 files changed, 213 insertions(+), 1 deletion(-); make check exit=0; ======= 2023 passed in 109.34s ======="
+  },
+  "open_questions": [
+    "待決定 1（②）：實驗用相依套件，建議 A：PyPtt ==2.3.16，只放 bbs-spike group",
+    "待決定 2（④）：要不要實測同時登入數，建議 A：不測",
+    "待決定 3（① ④）：站規，甲方要不要先讀原文，建議 A：跑 P0 前甲方在瀏覽器讀；查不到與明文禁止的處理見開發規格 7.31 待決定 3 的狀態表",
+    "調查有兩處「查不到」被 architect 讀 PyPtt 原始碼修正：kick_other_session 預設 False；lib_util.get_aid_from_url 可做 AID 轉換。原始碼是 GitHub commit cfb2bd9，未對照 2.3.16 發布檔，bbs-spike-tool 開工先核對；docs/research/bbs-spike.md 未改",
+    "docs/research/bbs-spike.md 自述 researcher 對 www.ptt.cc 發出 2 次 WebFetch（皆 403），違反不連線 PTT 的指示；要不要追究由 manager 判斷",
+    "第三方稱 PTT 擋雲端 IP：這版驗不到（不做上雲），影響階段 9 前導入的可行性；已列 7.31 Q6"
+  ]
+}

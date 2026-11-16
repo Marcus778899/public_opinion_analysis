@@ -1,0 +1,14 @@
+{
+  "task_id": "otel-api-upgrade",
+  "status": "done",
+  "files_changed": ["uv.lock", ".gitleaks.toml"],
+  "verification": {
+    "command": "uv run pytest tests/unit -q; pre-commit run --all-files; gitleaks git --redact --no-banner .",
+    "exit_code": 0,
+    "tail": "2246 passed; pre-commit Passed; gitleaks 554 commits no leaks found; commits 21fb8d3 (uv.lock) and f37054f (.gitleaks.toml, 10 lines identical to 8d12e3b), worktree clean"
+  },
+  "open_questions": [
+    "兩個 commit 皆由甲方在 sandbox 外代為提交，已確認內容正確、worktree 乾淨",
+    "本機沒有 osv-scanner，由 PR 的 CI 驗證"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "task_id": "bbs-retest-tool",
+  "status": "done",
+  "files_changed": [
+    "tools/bbs_spike.py",
+    "tests/unit/tools/test_bbs_spike.py"
+  ],
+  "verification": {
+    "command": "cd .worktrees/bbs-retest-tool && make check",
+    "exit_code": 0,
+    "tail": "2237 passed in 156.67s（含 qa 重新鎖定 a66bea2 後的 bbs-retest-tool 與 bbs-spike-tool 驗收測試）；實作 commit 3733ad2 不需再改"
+  },
+  "open_questions": [
+    "retest 的網頁版對照在主執行緒內依排程交錯執行（不開背景執行緒），第一次 BBS 讀取完才開始；規格只寫『同一執行緒依序操作』，網頁版是否同一執行緒未明寫，請確認可接受。",
+    "網頁版尾段固定 20 分鐘（常數 TAIL_SECONDS），retest 沒有 --tail-minutes 選項（G-1 沒列）。R2 因樣本不足結束（D-051）或 M 階段停止時仍跑尾段；只有 R2 立即停止（含 A 登入失敗）才跳過尾段並寫 stop.json。",
+    "connections.json 的 stop_reason：D-051 不開 B、C 時寫 r2_samples_insufficient（proven=1，不寫 stop.json）；M 階段停止寫如 kicked_or_closed:A、multi_login_warning:A、unrecognized_error:B、not_proven_in_time（B／C 登入後 600 秒內 A、B、C 未各讀成功一次）。R2 立即停止時 proven=0。",
+    "G-3a 已對照本機 .venv 的 PyPtt 2.3.16：_api_loginout.py:61 kick_other_login_response 與 :98 的『您想刪除其他重複登入的連線嗎』目標存在，且排在『任意鍵』之前；log.py 的 Logger.__init__ 在 logger 沒有 handler 時才掛 console handler，故建 API 後換成 NullHandler 即可（每次建 API 都重做一次）。",
+    "M 階段開 B／C 的間隔取 605 秒（600 加 5 秒餘裕，避免時間取整），B／C 每 60 秒讀 1 篇（無隨機）；每條連線讀取均由同一排程器依最早到期順序執行。",
+    "qualify_posts 的『10 分鐘內 ≥10 則』用嚴格小於 600 秒（標示分鐘為 60 秒倍數，連續 10 個分鐘跨 540 秒）；run_id 不是 %Y%m%dT%H%M%SZ 或 post_id 解析不出時，該文章列入 excluded（reason=post_age_unknown）。既有 summarize 單元測試因此改用合格的 run_id 與 post_id（我自己的測試檔）。",
+    "summarize 的 capacity 改為只用 p2 讀取、capacity_all 為全程；capacity 的鍵（avg_read_seconds、reads、avg_sends、avg_screens、n_max、hot_concurrent_p90、connections_needed）沿用，capacity_all 只有前四個。summarize-retest 另輸出 mixed.covered_posts（4×k）與 mixed.coverage_of_p90。",
+    "文件未動：規格與實作無出入需回寫；上述自行決定項若需寫進 7.31 G-8，請 architect 處理。",
+    "未做的整合：沒有連線真實 PTT；retest 的實機行為（RDQ 畫面、被踢的實際例外類別）只能在甲方執行時驗證。"
+  ]
+}

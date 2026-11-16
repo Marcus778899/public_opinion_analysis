@@ -2,22 +2,12 @@
 
 <!-- 只放目前這一階段；只有 manager 透過 ae board 修改；階段完成時整份封存到 .agent/tasks/<tag>.md -->
 
-> 上一階段：`.agent/tasks/v0.8.2.md`（派工單在 `.agent/tasks/v0.8.2/`）
+> 上一階段：`.agent/tasks/v0.9.0.md`（派工單在 `.agent/tasks/v0.9.0/`）
 
 ## 目標與範圍
 
-- 本輪：v0.9.0 PTT BBS 即時資料來源 spike（#57）＋補實驗（D-048）：實測 1 條連線輪流讀 4 篇的延遲與同帳號同時連線數，產出最終導入建議
-- 不做：導入 BBS collector、改動現有爬蟲與管線；階段 9 上雲；多天驗收（D-031）；所有熱門文章都 1 分鐘內（需多帳號）；#308 #310 #311 #314 #315 等 backlog 小項
-- 驗收條件：
-  - 調查報告涵蓋站規與停權風險、同帳號同時登入數與 3 個爬蟲的分工方式、相依套件比較、推文資料與現有 raw.posts 的對應
-  - 用甲方的專用小號做一次性、低頻率的手動實驗，量到熱門文章新推文從出現到被讀到的延遲 p50，並與網頁版比較；實驗不進測試流程，自動化測試仍不連真實 PTT
-  - 帳密只放 .env，文件、程式與 log 只有變數名稱，不出現帳密的值
-  - 報告依門檻（熱門文章新推文 p50 在 1 分鐘內）給出導入或不導入的明確建議；導入與否由甲方決定
-  - 補實驗在晚間 20:00～23:00 跑，4 篇都符合選取規則；P2 輪流讀 4 篇，樣本 ≥ 100 則且來自 ≥ 3 篇，量到 p50 並與網頁版比較
-  - 實測同帳號同時連線數（不踢線、出現警告即停，D-049），報告依結果重算需要的連線數
-  - 實驗工具先修好 ledger 誤刪（資安 O-2）與門檻判定排除不符選取規則的文章（UAT F-1）
-  - 報告更新為最終建議，導入與否由甲方決定
-  - v0.9.0 甲方驗收清單 PASS（docs/uat/v0.9.0.md，只列 agent 驗不到的項目）
+- 本輪：（尚未設定）
+- 不做：（尚未設定）
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
@@ -72,18 +62,6 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
-| bbs-spike-design | architect | done | 0 | PR #318 |
-| bbs-spike-tool | backend | done | 1 | PR #324 |
-| bbs-hot-articles-stat | backend | done | 0 | 統計完成（作廢 PR），.agent/reports/bbs-hot-articles-stat.json |
-| gitleaks-test-sentinel | architect | done | 0 | PR #323 |
-| bbs-spike-report | backend | done | 1 | PR #326 |
-| bbs-retest-design | architect | done | 0 | PR #331 |
-| bbs-retest-tool | backend | done | 0 | PR #335 |
-| gitleaks-hash-key-fixture | architect | done | 0 | PR #334 |
-| bbs-retest-report | backend | done | 0 | PR #337 |
-| bbs-env-optional | backend | done | 0 | PR #339 |
-| gitleaks-security-report-fixture | architect | done | 0 | 作廢，規則併入 PR #346 |
-| otel-api-upgrade | backend | done | 1 | PR #346 |
 
 ## 卡住／待甲方決定
 

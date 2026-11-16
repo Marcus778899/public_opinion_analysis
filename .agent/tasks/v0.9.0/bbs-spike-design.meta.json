@@ -1,0 +1,22 @@
+{
+  "task_id": "bbs-spike-design",
+  "kind": "docs",
+  "owner": "architect",
+  "lane": "full",
+  "title": "設計 v0.9.0 的 PTT BBS spike（#57）：要查的問題、一次性延遲實驗的做法與派工順序。要查：站規與停權風險；同帳號同時登入數與 3 個爬蟲的分工；實際延遲並與網頁版比較；相依套件（PyPtt 或自行解析終端機畫面）；推文樓層、分鐘級時間、刪文、箭頭與 `raw.posts` 的對應",
+  "issue": 317,
+  "branch": "docs/bbs-spike-design",
+  "worktree": ".worktrees/bbs-spike-design",
+  "pr": 318,
+  "qa": {
+    "result": "pass",
+    "sha": "116ced84f7eee6a24116fc593fffe263d5c2f258",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "116ced84f7eee6a24116fc593fffe263d5c2f258",
+    "by": "甲方"
+  },
+  "merged": true
+}

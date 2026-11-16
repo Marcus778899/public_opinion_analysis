@@ -1,0 +1,29 @@
+{
+  "task_id": "bbs-spike-tool",
+  "kind": "feat",
+  "owner": "backend",
+  "lane": "full",
+  "title": "寫一次性的 BBS 延遲實驗程式 `tools/bbs_spike.py`（子命令 `probe`、`run`、`summarize`），由甲方手動執行；含節流、上限、立即停止與帳密保護",
+  "issue": 319,
+  "branch": "feat/bbs-spike-tool",
+  "worktree": ".worktrees/bbs-spike-tool",
+  "pr": 324,
+  "qa": {
+    "result": "pass",
+    "sha": "a0ed5e5ff414c3539e288bf2f09188a789ed71a4",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "a0ed5e5ff414c3539e288bf2f09188a789ed71a4",
+    "by": "architect"
+  },
+  "merged": true,
+  "amend_sha": "bc77571df5a32c98261b993c8a6b9be6a52eff2c",
+  "node_at": 1794194024.277166,
+  "acceptance_lock": {
+    "patch": "88fb55c606bff18c9b4b69d4fb3253af8f9e49f9",
+    "sha": "224d30c3a0ee5af863e3b86d642c963b1e379969"
+  },
+  "qa_fails": 1
+}

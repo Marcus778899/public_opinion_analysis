@@ -1,0 +1,22 @@
+{
+  "task_id": "bbs-retest-report",
+  "kind": "docs",
+  "owner": "backend",
+  "lane": "full",
+  "title": "依補實驗結果把 `docs/reports/bbs-spike.md` 更新成最終建議（7.31 G-5），並在開發規格 7.31 G 與「後續階段」13 補結論",
+  "issue": 336,
+  "branch": "docs/bbs-retest-report",
+  "worktree": ".worktrees/bbs-retest-report",
+  "pr": 337,
+  "qa": {
+    "result": "pass",
+    "sha": "4fbc17a745f9efd6a86522598c8f91b4f8bef867",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "4fbc17a745f9efd6a86522598c8f91b4f8bef867",
+    "by": "architect"
+  },
+  "merged": true
+}

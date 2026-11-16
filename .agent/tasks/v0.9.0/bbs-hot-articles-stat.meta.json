@@ -1,0 +1,15 @@
+{
+  "task_id": "bbs-hot-articles-stat",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "只查詢：統計各看板「任一 10 分鐘內新推文 ≥ 10 則」的熱門文章同時篇數 p50／p90／最大值，給 BBS spike 算需要的連線數；不改 repo，PR 作廢",
+  "issue": 320,
+  "branch": "chore/bbs-hot-articles-stat",
+  "worktree": ".worktrees/bbs-hot-articles-stat",
+  "pr": null,
+  "qa": null,
+  "review": null,
+  "merged": false,
+  "cancelled": true
+}

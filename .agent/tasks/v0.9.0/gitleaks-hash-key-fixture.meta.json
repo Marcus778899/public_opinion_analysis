@@ -1,0 +1,18 @@
+{
+  "task_id": "gitleaks-hash-key-fixture",
+  "kind": "chore",
+  "owner": "architect",
+  "lane": "scan",
+  "title": "`bbs-retest-tool` 的推送前 gitleaks 檢查被測試資料擋下（generic-api-key），確認是誤判後在忽略設定加窄規則",
+  "issue": 333,
+  "branch": "chore/gitleaks-hash-key-fixture",
+  "worktree": ".worktrees/gitleaks-hash-key-fixture",
+  "pr": 334,
+  "qa": {
+    "result": "pass",
+    "sha": "eb2e33c4565dfca492b31b1c2c98733b240cd455",
+    "by": "qa"
+  },
+  "review": null,
+  "merged": true
+}

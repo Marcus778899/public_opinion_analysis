@@ -1,0 +1,19 @@
+{
+  "task_id": "bbs-hot-articles-stat",
+  "status": "done",
+  "files_changed": [],
+  "verification": {
+    "command": "docker compose -f infra/docker-compose.yaml --env-file .env exec clickhouse clickhouse-client --query \"<SQL 見 open_questions 第 1 項>\"",
+    "exit_code": 0,
+    "tail": "scope\thot_posts\tp50\tp90\tmx\tactive_min\tp50_active\tp90_active\tp50_eve\tp90_eve\nALL\t4599\t21\t33\t48\t7386\t22\t33\t20\t26\nStock\t369\t2\t7\t15\t5805\t3\t8\t2\t7\nGossiping\t2138\t10\t17\t33\t6889\t11\t17\t9\t13\nBoy-Girl\t2\t0\t0\t1\t20\t1\t1\t0\t0\nHatePolitics\t2090\t7\t13\t29\t6977\t8\t14\t8\t13"
+  },
+  "open_questions": [
+    "【SQL】(表為 radar.comments_latest，要加 radar. 前綴；只 SELECT，查詢未存進 repo) WITH pm AS (SELECT post_id, any(board) AS board, toUInt32(toUnixTimestamp(toStartOfMinute(commented_at))/60) AS m, count() AS c FROM radar.comments_latest FINAL WHERE is_deleted=0 AND commented_at>='2026-11-01 00:00:00' AND commented_at<'2026-11-06 11:00:00' GROUP BY post_id, m), w AS (SELECT post_id, board, m, sum(c) OVER (PARTITION BY post_id ORDER BY m RANGE BETWEEN 9 PRECEDING AND CURRENT ROW) AS s FROM pm), hot AS (SELECT DISTINCT post_id, board, toInt64(m)-toInt64(o) AS mm FROM w ARRAY JOIN range(10) AS o WHERE s>=10), hp AS (SELECT board, uniq(post_id) AS hot_posts FROM hot GROUP BY board), cnt AS (SELECT board, mm, count() AS n FROM hot GROUP BY board, mm), grid AS (SELECT toInt64(toUnixTimestamp(toDateTime('2026-11-01 00:00:00','UTC'))/60)+toInt64(number) AS mm FROM numbers(7860)), per_board AS (SELECT b.board AS board, g.mm AS mm, toUInt64(coalesce(c.n,0)) AS n FROM (SELECT board FROM hp) b CROSS JOIN grid g LEFT JOIN cnt c ON c.board=b.board AND c.mm=g.mm), tot AS (SELECT mm, sum(n) AS n FROM per_board GROUP BY mm) SELECT 'ALL' AS scope, (SELECT uniq(post_id) FROM hot) AS hot_posts, quantile(0.5)(n) p50, quantile(0.9)(n) p90, max(n) mx, countIf(n>0) AS active_min, quantileIf(0.5)(n,n>0) p50_active, quantileIf(0.9)(n,n>0) p90_active, quantileIf(0.5)(n, toHour(toDateTime(mm*60,'UTC')) BETWEEN 12 AND 14) p50_eve, quantileIf(0.9)(n, toHour(toDateTime(mm*60,'UTC')) BETWEEN 12 AND 14) p90_eve FROM tot UNION ALL SELECT pb.board, any(hp.hot_posts), (同樣的六個統計量) FROM per_board pb JOIN hp ON hp.board=pb.board GROUP BY pb.board",
+    "【期間】2026-11-01 00:00 UTC 到 2026-11-06 11:00 UTC（共 7860 分鐘，約 5.46 天）。comments_latest 的最後一筆推文時間是 11-06 10:xx UTC（11:00 只有 1 筆），之後爬蟲停機，所以截到 11-06 11:00。11-01 以前的資料不用（避開 7.29 缺口）。",
+    "【結果】統計單位是「同一分鐘內同時處於熱門狀態的文章篇數」，分母是期間內全部 7860 分鐘（p50/p90/mx 欄）。ALL（全部看板合計）：熱門文章總數 4599，p50=21、p90=33、最大值=48；其中有熱門文章的分鐘有 7386 分鐘，只算這些分鐘 p50=22、p90=33；台北 20:00～23:00（12:00～14:59 UTC）p50=20、p90=26。Gossiping：熱門 2138 篇，p50=10、p90=17、最大 33。HatePolitics：2090 篇，p50=7、p90=13、最大 29。Stock：369 篇，p50=2、p90=7、最大 15。Boy-Girl：2 篇，p50=0、p90=0、最大 1。四個看板的熱門篇數相加等於 4599，沒有文章重複算。各看板的 p50/p90 不能相加得到 ALL，ALL 是逐分鐘加總後再取分位數。",
+    "【容量換算提示】spec 7.31 C 的連線數 = ⌈同時熱門篇數 p90 / N_max⌉，p90 取 33（全部）；這裡的 p90 是平日全天，台北晚間時段反而較低（p90=26），因為 Stock 在盤中（台北 09:00～13:30，即 01:00～05:30 UTC）才熱，Gossiping／HatePolitics 全天都有。若要看盤中尖峰可再依小時切，本單未做。",
+    "【熱門的定義】某篇文章在某個 10 分鐘視窗內新推文 >= 10 則，該視窗覆蓋的那 10 分鐘就算「熱門」；同一篇可能分成多段。實作是以每個有推文的分鐘為視窗終點，往前算 10 分鐘（含當分鐘）的推文數，達 10 就把這 10 分鐘標成熱門，再逐分鐘數有多少篇文章同時被標到。這是事後回看的算法：視窗是往前看的，所以「熱門開始」的標記比實際被偵測到的時間早最多 9 分鐘，會略高估同時篇數，不會低估尖峰。",
+    "【取捨】1) commented_at 在 PTT 只到分鐘，視窗以分鐘為單位，10 分鐘視窗實際涵蓋 10 個分鐘格；同分鐘內的先後順序看不出來。2) 用 FINAL 並排除 is_deleted=1，被刪除的推文不算。3) 推文時間是 PTT 顯示時間（已轉 UTC），不是爬蟲抓到的時間，所以統計的是留言實際發生的時間，不受爬蟲延遲影響；但爬蟲只重爬一部分舊文章，推文太晚進來的文章可能漏算，會略低估。4) 只計有進 comments_latest 的看板（Gossiping、HatePolitics、Stock、Boy-Girl 四個有熱門文章），其他看板沒有達標文章。5) 期間不含 11-07 以後的停機期，尾端 11-06 11:00 UTC 之後無資料。6) 資料中有 2027-02、2027-05、2027-09 的未來時間推文共 10 筆（D-033 提到的 55 篇重爬之外的殘留），已被期間條件排除，不影響結果。",
+    "發現資料問題（非本單範圍）：comments_latest 有 3 個未來日期（2027-02-16 5 筆、2027-05-13 1 筆、2027-09-13 4 筆），可能是解析殘留，建議 manager 確認是否需要處理；本單沒動。"
+  ]
+}

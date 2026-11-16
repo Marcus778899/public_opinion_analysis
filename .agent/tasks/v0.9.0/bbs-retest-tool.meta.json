@@ -1,0 +1,35 @@
+{
+  "task_id": "bbs-retest-tool",
+  "kind": "feat",
+  "owner": "backend",
+  "lane": "full",
+  "title": "在 `tools/bbs_spike.py` 加補實驗子命令 `retest`、`summarize-retest`（延遲 R2 階段＋同帳號多連線 M 階段），並修 G-4 列的工具問題，讓甲方晚間手動跑補實驗",
+  "issue": 332,
+  "branch": "feat/bbs-retest-tool",
+  "worktree": ".worktrees/bbs-retest-tool",
+  "pr": 335,
+  "qa": {
+    "result": "pass",
+    "sha": "9aa9adfbecf573c40cc44cde0278b61560ca7d70",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "9aa9adfbecf573c40cc44cde0278b61560ca7d70",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "1da802e51e2b4fd77ea88d173cb9c4cc3b2751f5",
+    "sha": "9aa9adfbecf573c40cc44cde0278b61560ca7d70",
+    "carried_from": "a66bea2bcb404a3c49a3b017f49bde3d2587ad84"
+  },
+  "node_at": 1794216675.158143,
+  "rulings": 1,
+  "ruling": {
+    "result": "test_wrong",
+    "sha": "3733ad2bd3ee05b4050af8125a145e17c5965662",
+    "after_fails": 0
+  },
+  "amend_extra": true
+}

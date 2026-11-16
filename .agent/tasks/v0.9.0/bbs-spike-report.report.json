@@ -1,0 +1,19 @@
+{
+  "task_id": "bbs-spike-report",
+  "status": "done",
+  "files_changed": [
+    "docs/reports/bbs-spike.md",
+    "docs/development-spec.md"
+  ],
+  "verification": {
+    "command": "make check; grep -rniE \"PTT_BBS_(USERNAME|PASSWORD)=.\" docs",
+    "exit_code": 0,
+    "tail": "2127 passed in 108.00s; grep 無結果"
+  },
+  "open_questions": [
+    "review 第 2 輪必改 2 項已修（9f22e9f）：門檻 1 統一為「部分證實」（報告第 1 行、第 1 節表格與樣本偏差、N=3 附註，7.31 結論）；全文已搜「成立」「一半」「夠即時」，剩下的「成立」僅用於門檻 2、3 與混合方案表，與規格一致。",
+    "summary.json 口徑不一致 manager 已開 #327。",
+    "E 表未驗證：floor、ip 逐則比對、author/title/content/created_at、is_deleted。",
+    "導入前待處理：站規原文、雲端連線、分開對外 IP、PyPtt SILENT。"
+  ]
+}

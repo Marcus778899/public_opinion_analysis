@@ -1,0 +1,19 @@
+{
+  "task_id": "gitleaks-security-report-fixture",
+  "status": "done",
+  "files_changed": [
+    ".gitleaks.toml"
+  ],
+  "verification": {
+    "command": "gitleaks git --redact --no-banner --config .gitleaks.toml .（全歷史，修改前後）；gitleaks git --redact --no-banner .（同 CI，讀預設 .gitleaks.toml）；反例：$TMPDIR/glneg 暫存 repo 跑 gitleaks git --config <worktree>/.gitleaks.toml（已刪除，未進 repo）；pre-commit run --all-files；uv run pytest -q tests/unit/test_gitleaks_allowlist.py",
+    "exit_code": 0,
+    "tail": "修改前：548 commits scanned，leaks found: 1 — docs/security/v0.9.0.md:89 generic-api-key，Secret 0123d82b456789e6c307，Match password_value = \"0123d82b456789e6c307\"，commit d3162782。\n修改後：548 commits scanned ... INF no leaks found（--config 與不帶 --config 的 CI 寫法都 exit 0）。\n反例（同一份設定，9 個檔案只放行 docs/security/v0.9.0.md）仍抓到 8 筆：\ndocs/design/x.md 0123d82b456789e6c307（同值、別的 docs 子目錄）\ndocs/security/notes.md 0123d82b456789e6c307（同值、不是版本報告檔名）\nsrc/x.py 0123d82b456789e6c307（同值、程式碼路徑）\ndocs/security/v1.0.0.md 0123D82B456789E6C307（大寫）\ndocs/security/v1.1.0.md 9f3a0123c456789e7b2d（不是 0123 開頭）\ndocs/security/v1.2.0.md 0123abc456789def7k2Qz9Lm（超長、非 hex）\ndocs/security/v1.3.0.md 8c1f4e2a9b7d3065e1a4c8f2b9d7e3a1（隨機 32 位 hex api_key）\ndocs/security/v1.4.0.md aws-access-token AKIAZ7QH4XK2NB3RWP6M\nWRN leaks found: 8\npre-commit：全部 Passed；test_gitleaks_allowlist.py 26 passed。"
+  },
+  "open_questions": [
+    "commit 8d12e3b（甲方在 sandbox 外代為 commit，只有 .gitleaks.toml、+10 行，內容與本單改動一致；worktree 乾淨）",
+    "判定為誤判：值 0123d82b456789e6c307 是 security 在報告裡為說明 PR #334 規則「只靠值形狀、不限變數名」而自造的反例，0123…456789 的順序假 hex，不是真密鑰",
+    "派工單背景寫的值（0123abc456789def）與實際被抓的值（0123d82b456789e6c307）不同；兩者都符合同一形狀，新規則都涵蓋",
+    "新規則：targetRules=generic-api-key，condition=AND，paths ^docs/security/v[0-9][0-9.]*\\.md$（只限版本報告），regexTarget=secret，值形狀與 PR #334 那條完全相同；沒有排除整個路徑、沒有關規則、沒有用 .gitleaksignore；發版前請 security 追認",
+    "給 manager 的坑：資安報告追認放行規則時若引用「規則會放行的值」，報告本身就會被掃到；建議 security 範本提醒引用反例時用遮蔽寫法（例 0123…456789…）"
+  ]
+}

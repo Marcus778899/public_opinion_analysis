@@ -1,0 +1,27 @@
+{
+  "task_id": "bbs-env-optional",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "依 D-050 把 `.env.example` 的 `PTT_BBS_USERNAME`、`PTT_BBS_PASSWORD` 改回選填（寫成註解，照 D-009），讓 `ae check-env` 不再要求填值",
+  "issue": 338,
+  "branch": "chore/bbs-env-optional",
+  "worktree": ".worktrees/bbs-env-optional",
+  "pr": 339,
+  "qa": {
+    "result": "pass",
+    "sha": "a604ab190b01060e444a9b6a80c5d80323900b3b",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "a604ab190b01060e444a9b6a80c5d80323900b3b",
+    "by": "architect"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "0d3ca2b68a37f49ff846da936fb2147a6ea2a9ad",
+    "sha": "328b3e5fd8cabd12b933ad9fb6200c1a668639d5"
+  },
+  "node_at": 1794319615.9373949
+}

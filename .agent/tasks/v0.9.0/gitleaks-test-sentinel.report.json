@@ -1,0 +1,15 @@
+{
+  "task_id": "gitleaks-test-sentinel",
+  "status": "done",
+  "files_changed": [".gitleaks.toml"],
+  "verification": {
+    "command": "(1) gitleaks git --log-opts=\"origin/develop..feat/bbs-spike-tool\" --config .gitleaks.toml --redact；(2) 反例：在 $TMPDIR/gl-neg 建 tests/unit/a_ok.py（S3ntinel-pw-9f2c）、tests/unit/b_nosentinel.py（Qx7rTmb-pw-9f2c）、src/c_outside_tests.py（S3ntinel-pw-9f2c 在 tests/ 外）、tests/unit/d_sentinel_not_prefix.py（pw-9f2c-S3ntinel），gitleaks dir . --config <worktree>/.gitleaks.toml --redact -v；(3) gitleaks git --config .gitleaks.toml --redact（全歷史）；(4) make check",
+    "exit_code": 0,
+    "tail": "(0) 加規則前：Finding SECRET_PW = \"S3ntinel-pw-9f2c\" RuleID generic-api-key File tests/unit/acceptance/bbs-spike-tool/test_bbs_spike_acceptance.py Line 20 Commit 4a52f42；leaks found: 1\n(1) 2 commits scanned. no leaks found\n(2) 抓到 src/c_outside_tests.py、tests/unit/d_sentinel_not_prefix.py、tests/unit/b_nosentinel.py（皆 generic-api-key）；leaks found: 3（a_ok 被放行）；反例的 exit code 為 1，屬預期\n(3) scanned ~10.12 MB，no leaks found\n(4) 2023 passed in 112.64s；pre-commit hooks Passed/Skipped\ncommit 5471190"
+  },
+  "open_questions": [
+    "判定為誤判：SECRET_PW=\"S3ntinel-pw-9f2c\" 與同檔 SECRET_ID=\"sentinel_account_77\" 是驗收測試驗「密碼不外洩」用的哨兵值，不是真帳密",
+    "新規則（發版前 security 追認）：targetRules=generic-api-key、condition=AND、paths ^tests/、secret 符合 (?i)^s[e3]ntinel[-_]；未逐筆加 fingerprint、未排除整個路徑、未關規則",
+    "給後續 qa 的慣例：測試哨兵假密碼要放 tests/ 底下且以 sentinel-／s3ntinel- 開頭，才會被放行；其他寫法仍會被擋"
+  ]
+}

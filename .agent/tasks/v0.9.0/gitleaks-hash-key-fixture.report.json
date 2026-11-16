@@ -1,0 +1,14 @@
+{
+  "task_id": "gitleaks-hash-key-fixture",
+  "status": "done",
+  "files_changed": [".gitleaks.toml"],
+  "verification": {
+    "command": "gitleaks git --log-opts=\"develop..feat/bbs-retest-tool\" --config .gitleaks.toml；gitleaks git --config .gitleaks.toml（全歷史）；pre-commit run --all-files；反例：$TMPDIR/glk-neg 暫存 repo 跑 gitleaks git --config <worktree>/.gitleaks.toml -v（已刪除，未進 repo）",
+    "exit_code": 0,
+    "tail": "修改前：develop..feat/bbs-retest-tool 1 筆 generic-api-key，Secret 0123abc456789def，File tests/unit/acceptance/bbs-retest-tool/test_bbs_retest_acceptance.py:829，commit b8018db。\n修改後：3 commits scanned ... INF no leaks found；全歷史 scanned ~10.29 MB ... no leaks found；pre-commit 全部 Passed（gitleaks 之外的 hook：trailing whitespace、end of files、check yaml、ruff、ruff format、bandit）。\n反例（同一份設定）：tests/unit/test_pos.py 的 0123abc456789def 被放行；仍抓到 3 筆：\nSecret: 0123abc456789def  File: src/leak_path.py（同值但不在 tests/）\nSecret: 0123a9f3c2b7d1e4  File: tests/unit/test_neg_value2.py（0123 開頭但沒有 456789）\nSecret: 9f3c2a7b1d4e8f60  File: tests/unit/test_neg_value.py（隨機 16 位 hex）\nWRN leaks found: 3"
+  },
+  "open_questions": [
+    "判定為誤判：值是 0123…456789 的順序 hex 假資料，用途是測短帳號夾在雜湊鍵裡不算洩漏（G-4 O-2），不是真的密鑰",
+    "新規則（commit eb2e33c）：targetRules=generic-api-key，condition=AND，paths ^tests/，regexTarget=secret，值 ^0123[0-9a-f]{0,6}456789[0-9a-f]{0,6}$；沒有排除整個路徑、沒有關規則、沒有逐筆加 fingerprint；發版前請 security 追認"
+  ]
+}

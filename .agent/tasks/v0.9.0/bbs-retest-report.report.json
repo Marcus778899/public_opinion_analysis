@@ -1,0 +1,16 @@
+{
+  "task_id": "bbs-retest-report",
+  "status": "done",
+  "files_changed": ["docs/reports/bbs-spike.md", "docs/development-spec.md"],
+  "verification": {
+    "command": "cd .worktrees/bbs-retest-report && make check; wc -l docs/reports/bbs-spike.md; grep -rniE \"PTT_BBS_(USERNAME|PASSWORD)=.\" docs",
+    "exit_code": 0,
+    "tail": "2237 passed in 149.71s; bbs-spike.md 145 行；commit 4fbc17a"
+  },
+  "open_questions": [
+    "grep PTT_BBS_(USERNAME|PASSWORD)=. docs 有 1 筆命中 docs/uat/v0.9.0.md:15，是 uat 檔裡寫的 grep 指令文字本身（不是帳密值），非本單檔案，我沒改；驗證要求「沒有結果」字面上未達成，請 manager 確認可接受。",
+    "events.jsonl 只有推文事件，沒有網頁版失敗記錄，派工單要求的『網頁版失敗以 events.jsonl 為準』無法判斷，報告寫成『看不出來、未驗證』，IP 評估只沿用第一次並補登入次數。",
+    "R2 平均讀取 5.25 秒比第一次 7.1 秒短，原因未查，報告已註明；樣本 207 則有 102 則來自單一文章，報告已寫為限制。",
+    "報告新增『補實驗』一節放在第 1 節之前，並於第 1、4、7 節與矛盾句子加註引用補實驗；第 8 節實驗紀錄未新增補實驗的紀錄（已併在補實驗一節）。"
+  ]
+}

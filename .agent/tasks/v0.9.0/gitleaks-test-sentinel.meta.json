@@ -1,0 +1,18 @@
+{
+  "task_id": "gitleaks-test-sentinel",
+  "kind": "chore",
+  "owner": "architect",
+  "lane": "scan",
+  "title": "先確認 gitleaks 擋 `bbs-spike-tool` 是誤判，是的話在 `.gitleaks.toml` 加窄規則放行測試裡的哨兵假密碼",
+  "issue": 322,
+  "branch": "chore/gitleaks-test-sentinel",
+  "worktree": ".worktrees/gitleaks-test-sentinel",
+  "pr": 323,
+  "qa": {
+    "result": "pass",
+    "sha": "5471190a2689117dd0f8dc71b606131f5e24b5fb",
+    "by": "qa"
+  },
+  "review": null,
+  "merged": true
+}

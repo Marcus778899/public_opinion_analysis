@@ -1,0 +1,19 @@
+{
+  "task_id": "gitleaks-security-report-fixture",
+  "kind": "chore",
+  "owner": "architect",
+  "lane": "scan",
+  "title": "v0.9.0 發版 PR #342 的 CI Security（gitleaks）被資安報告裡引用的假雜湊鍵擋下（generic-api-key），確認是誤判後在忽略設定加窄規則",
+  "issue": 343,
+  "branch": "chore/gitleaks-security-report-fixture",
+  "worktree": ".worktrees/gitleaks-security-report-fixture",
+  "pr": 344,
+  "qa": {
+    "result": "pass",
+    "sha": "8d12e3b63b03e135051a4f80126b541078515b15",
+    "by": "qa"
+  },
+  "review": null,
+  "merged": false,
+  "cancelled": true
+}

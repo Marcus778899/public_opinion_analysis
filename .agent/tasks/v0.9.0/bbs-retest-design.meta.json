@@ -1,0 +1,24 @@
+{
+  "task_id": "bbs-retest-design",
+  "kind": "docs",
+  "owner": "architect",
+  "lane": "full",
+  "title": "設計 v0.9.0 的 BBS 補實驗（D-048）：混合方案 1 條連線輪流讀 4 篇的實測延遲、同帳號同時連線數實測（D-049），以及實驗工具要先修的項目與派工順序",
+  "issue": 330,
+  "branch": "docs/bbs-retest-design",
+  "worktree": ".worktrees/bbs-retest-design",
+  "pr": 331,
+  "qa": {
+    "result": "pass",
+    "sha": "1d916a4e5e353946cba00a2dc179ae94418db082",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "1d916a4e5e353946cba00a2dc179ae94418db082",
+    "by": "甲方"
+  },
+  "merged": true,
+  "amend_sha": "d7560d37f8ec6157d458eab19c7e2e8ecf058699",
+  "node_at": 1794208734.858799
+}

@@ -1,0 +1,19 @@
+{
+  "task_id": "bbs-retest-design",
+  "status": "done",
+  "files_changed": ["docs/development-spec.md"],
+  "verification": {
+    "command": "git diff --stat origin/develop...HEAD; make check",
+    "exit_code": 0,
+    "tail": "docs/development-spec.md | 125 +++-; 1 file changed, 123 insertions(+), 2 deletions(-); ruff Passed; ruff format Passed; ======= 2127 passed in 109.33s ======="
+  },
+  "open_questions": [
+    "D-050（原待決定 G-a，④，推翻 D-046）與 D-051（原 G-b，①）甲方尚未回覆；開發規格仍以 G-a、G-b 稱呼，bbs-retest-tool 要等 D-051",
+    "G-9-1 已處理（7.31 G-3a）：研究說 PyPtt 2.3.16 沒有處理多重登入提示，與原始碼不符。本機 .venv 的 _api_loginout.py:61-62 依 kick_other_session 回 n＋Enter，:98 的 TargetUnit('您想刪除其他重複登入的連線嗎') 排在「任意鍵」之前；researcher 的 grep 漏掉。docs/research/bbs-multi-login.md 未改，要不要更正由 manager 決定",
+    "多重登入的提示文字在新連線登入時本來就會出現，不能全域加進立即停止關鍵字；改成只查已開著的連線，再加上「開線後舊連線讀取失敗即停」與「登入失敗的連線不登出、不送鍵」",
+    "殘餘風險（已寫進 G-3a）：PyPtt 目標清單中「登入太頻繁」（回空白鍵）排在多重登入提示之前，兩者同畫面時空白鍵是否等於 Y 查不到；靠 10 分鐘間隔與舊連線被踢即停兜底",
+    "pttbbs 沒有數字上限常數；選 n 而站方不允許時無文字斷線，結果是「不踢線下可同時 k 條」",
+    "#329：bbs-env-isolation 屬加強防護、不需 D-編號；D-050 選 A 時 manager 的 D-編號寫法是不做、留 backlog，由 manager 決定",
+    "既有驗收測試 tests/unit/acceptance/bbs-spike-tool/ 預期不受影響（G-4 不改簽名、7.31 B／C 標題保留），沒有列入 bbs-retest-tool 的範圍"
+  ]
+}
