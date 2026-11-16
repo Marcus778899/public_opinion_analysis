@@ -86,7 +86,7 @@
 
 ## 卡住／待甲方決定
 
-- 發版 PR #342 被 gitleaks 誤判擋（docs/security/v0.9.0.md:89 假雜湊鍵）；修正單 gitleaks-security-report-fixture 開單時 sandbox 擋 git worktree add，待甲方在終端機開單
+- 所有 PR 的 Security 被 osv 擋：opentelemetry-api 1.45.1 GHSA-mf5v-w3w3-f6cg（Medium，1.45.2 修）；修正單 otel-api-upgrade 待甲方在終端機開單（sandbox 擋 worktree）
 
 ## 注意事項（踩過的坑）
 
