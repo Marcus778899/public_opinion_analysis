@@ -1,0 +1,15 @@
+{
+  "task_id": "heat-alert-dup-investigate",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "只調查：找出同一個 `alert_id` 在 `replay.alerts` 出現兩筆的原因，以及 Quix `on_consumer_error` 回呼丟例外時 `app.run()` 會不會中止（#271）；不改程式，PR 作廢",
+  "issue": 305,
+  "branch": "chore/heat-alert-dup-investigate",
+  "worktree": ".worktrees/heat-alert-dup-investigate",
+  "pr": null,
+  "qa": null,
+  "review": null,
+  "merged": false,
+  "cancelled": true
+}

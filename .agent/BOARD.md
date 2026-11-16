@@ -2,21 +2,22 @@
 
 <!-- 只放目前這一階段；只有 manager 透過 ae board 修改；階段完成時整份封存到 .agent/tasks/<tag>.md -->
 
-> 上一階段：`.agent/tasks/v0.8.1.md`（派工單在 `.agent/tasks/v0.8.1/`）
+> 上一階段：`.agent/tasks/v0.8.2.md`（派工單在 `.agent/tasks/v0.8.2/`）
 
 ## 目標與範圍
 
-- 本輪：v0.8.2 穩定性小版（D-042）：#281 producer fatal 後結束程式交給 restart；#282 Connect 內部 topic 改 2 份副本（D-041）與 connect 健康檢查；#289 推論 2 CPU、2g、INFERENCE_THREADS=2；#262 init 遇 task FAILED 先重啟；#268 未來時間不讓補抓失效；小項 #276 #263 #270 #277 #269、#271 剩下兩項；#309 make up 補 connect 限制說明（UAT F-2）
-- 不做：#264 #259 #251 #68 #69 #57 #178 #181 #310；階段 9 上雲；多天驗收（D-031）
+- 本輪：v0.9.0 PTT BBS 即時資料來源 spike（#57）＋補實驗（D-048）：實測 1 條連線輪流讀 4 篇的延遲與同帳號同時連線數，產出最終導入建議
+- 不做：導入 BBS collector、改動現有爬蟲與管線；階段 9 上雲；多天驗收（D-031）；所有熱門文章都 1 分鐘內（需多帳號）；#308 #310 #311 #314 #315 等 backlog 小項
 - 驗收條件：
-  - 模擬 producer 進入 fatal 狀態，服務記 CRITICAL 並結束，被 docker 自動重啟後恢復送訊息
-  - Connect 內部 topic 都是 2 份副本；停掉任一台 broker，connect 照樣啟動且 connector 還在；connect 健康檢查會發現 connector 不存在
-  - 推論容器有 CPU 與記憶體上限，在上限內補完積壓、沒有因記憶體不足被砍
-  - 重建 postgres 後跑一次 init 就成功，不用重跑
-  - PTT 標頭是未來時間時，補抓不會停掉（有測試）
-  - 小項 #276 #263 #270 #277 #269 與 #271 剩下兩項完成，CI 綠燈
-  - make up 的說明寫清楚沒有 init 時 connect 會 unhealthy，以及該用哪個指令（#309）
-  - v0.8.2 甲方驗收清單 PASS（docs/uat/v0.8.2.md，只列 agent 驗不到的項目）
+  - 調查報告涵蓋站規與停權風險、同帳號同時登入數與 3 個爬蟲的分工方式、相依套件比較、推文資料與現有 raw.posts 的對應
+  - 用甲方的專用小號做一次性、低頻率的手動實驗，量到熱門文章新推文從出現到被讀到的延遲 p50，並與網頁版比較；實驗不進測試流程，自動化測試仍不連真實 PTT
+  - 帳密只放 .env，文件、程式與 log 只有變數名稱，不出現帳密的值
+  - 報告依門檻（熱門文章新推文 p50 在 1 分鐘內）給出導入或不導入的明確建議；導入與否由甲方決定
+  - 補實驗在晚間 20:00～23:00 跑，4 篇都符合選取規則；P2 輪流讀 4 篇，樣本 ≥ 100 則且來自 ≥ 3 篇，量到 p50 並與網頁版比較
+  - 實測同帳號同時連線數（不踢線、出現警告即停，D-049），報告依結果重算需要的連線數
+  - 實驗工具先修好 ledger 誤刪（資安 O-2）與門檻判定排除不符選取規則的文章（UAT F-1）
+  - 報告更新為最終建議，導入與否由甲方決定
+  - v0.9.0 甲方驗收清單 PASS（docs/uat/v0.9.0.md，只列 agent 驗不到的項目）
 
 ## 已定案決策（細節見 docs/decisions.md；要改先問甲方）
 
@@ -56,26 +57,37 @@
 | 2026-11-04 | D-040 | 正式推論直接換 bert-ckip-202610280849，shadow 不開；#178 上雲後驗證 |
 | 2026-11-04 | D-041 | Connect 內部 topic 改 2 份副本（#282） |
 | 2026-11-04 | D-042 | v0.8.2 穩定性小版範圍（#281 #282 #289 #262 #268＋小項） |
+| 2026-11-06 | D-043 | BBS spike 用 PyPtt ==2.3.16，只放 bbs-spike group |
+| 2026-11-06 | D-044 | 不實測同時登入數，報告以 1 條連線計算 |
+| 2026-11-06 | D-045 | 跑實驗前甲方先讀站規與目標看板板規；明文禁止就不做並改範圍 |
+| 2026-11-09 | D-046 | PTT_BBS_USERNAME／PASSWORD 改必填（取消註解），讓 check-env 檢查 |
+| 2026-11-09 | D-047 | BBS spike 照跑；報告另評估混合方案（BBS 只顧前 N 篇，其餘網頁版） |
+| 2026-11-09 | D-048 | BBS spike 補做實驗（範圍另行盤問） |
+| 2026-11-09 | D-049 | 補實驗實測同帳號同時連線數（取代 D-044），不踢線、警告即停 |
+| 2026-11-09 | D-050 | 補實驗報告合併後 PTT_BBS_* 改回選填，甲方清空 .env 值並改小號密碼；bbs-env-isolation 留 backlog |
+| 2026-11-09 | D-051 | 延遲階段 60 分鐘樣本不足就不開 B、C，留登入重跑延遲 |
+| 2026-11-16 | D-052 | BBS 混合方案暫緩，階段 9 上雲時先驗雲端出口能否連 PTT BBS |
 
 ## 任務狀態
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
-| stability-design | architect | done | 0 | PR #292 |
-| producer-fatal-exit | backend | done | 0 | PR #298 |
-| connect-resilience | backend | done | 0 | PR #296 |
-| cli-wording-sha256 | backend | done | 1 | PR #297 |
-| backfill-since-filename | backend | done | 0 | PR #302 |
-| ci-token-order | backend | done | 0 | PR #301 |
-| inference-resource-limit | backend | done | 0 | PR #304 |
-| heat-alert-dup-investigate | backend | done | 0 | 調查完成（作廢 PR），.agent/reports/heat-alert-dup-investigate.json |
-| connect-rf-reassign | backend | done | 0 | 操作完成（作廢 PR），.agent/reports/connect-rf-reassign.json |
-| stability-dev-verify | backend | done | 0 | 開發環境驗證完成（作廢 PR），.agent/reports/stability-dev-verify.json |
-| make-up-connect-hint | backend | done | 0 | PR #313 |
+| bbs-spike-design | architect | done | 0 | PR #318 |
+| bbs-spike-tool | backend | done | 1 | PR #324 |
+| bbs-hot-articles-stat | backend | done | 0 | 統計完成（作廢 PR），.agent/reports/bbs-hot-articles-stat.json |
+| gitleaks-test-sentinel | architect | done | 0 | PR #323 |
+| bbs-spike-report | backend | done | 1 | PR #326 |
+| bbs-retest-design | architect | done | 0 | PR #331 |
+| bbs-retest-tool | backend | done | 0 | PR #335 |
+| gitleaks-hash-key-fixture | architect | done | 0 | PR #334 |
+| bbs-retest-report | backend | done | 0 | PR #337 |
+| bbs-env-optional | backend | done | 0 | PR #339 |
+| gitleaks-security-report-fixture | architect | done | 0 | 作廢，規則併入 PR #346 |
+| otel-api-upgrade | backend | done | 1 | PR #346 |
 
 ## 卡住／待甲方決定
 
-- v0.8.2 甲方驗收清單（docs/uat/v0.8.2.md）：make e2e 已 PASS（13 passed）；待甲方驗 Grafana、Telegram、模型重匯後寫 甲方驗收：PASS
+- （無）
 
 ## 注意事項（踩過的坑）
 

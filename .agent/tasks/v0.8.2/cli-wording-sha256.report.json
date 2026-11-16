@@ -1,0 +1,4 @@
+{"task_id":"cli-wording-sha256","status":"done",
+"files_changed":["src/radar/ml/training/import_model.py","src/radar/ml/training/derive_model.py","src/radar/streaming/replay.py","tests/unit/ml/training/test_import_model.py","tests/unit/ml/training/test_derive_model.py","tests/unit/streaming/test_replay.py"],
+"verification":{"command":"PYTHONPATH=$PWD/src uv run pytest tests/unit/ml/training tests/unit/acceptance -n auto（先前同一份程式 make check 1915 passed）","exit_code":0,"tail":"696 passed in 53.21s"},
+"open_questions":["review 非阻擋項（replay 警告補「步驟 1」、main 重算雜湊）未動，交 manager 決定","未跑 docker 整合測試（本單不碰 DB/Kafka）"]}

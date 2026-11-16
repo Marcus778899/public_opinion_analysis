@@ -1,0 +1,16 @@
+{
+  "task_id": "connect-rf-reassign",
+  "status": "done",
+  "files_changed": [],
+  "verification": {
+    "command": "docker compose -f infra/docker-compose.yaml --env-file .env exec kafka_1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --describe --topic <connect_configs|connect_offsets|connect_statuses>; --under-replicated-partitions; curl -s localhost:8083/connectors/radar-cdc/status",
+    "exit_code": 0,
+    "tail": "步驟 6：connect_configs RF=2 min.insync.replicas=1 Partition 0 Replicas 3,1 Isr 3,1；connect_offsets 25 個 partition、RF=2、min.insync.replicas=1，每個 Replicas 與 Isr 都是 2 個且相同（例：0 -> 2,3 / 2,3；1 -> 3,1 / 3,1；2 -> 1,2 / 1,2；24 -> 2,3 / 2,3）；connect_statuses 5 個 partition、RF=2、min.insync.replicas=1（0 -> 2,3；1 -> 3,1；2 -> 1,2；3 -> 1,2；4 -> 3,1，Isr 皆同 Replicas）。--under-replicated-partitions 無輸出。radar-cdc status：connector RUNNING，task 0 RUNNING。reassign --verify 31 個 partition 全部 completed，已清除 throttle。"
+  },
+  "open_questions": [
+    "備份位置 /tmp/claude-501/connect-rf-backup/（即 $TMPDIR）：offsets.json（無密碼，保留）、rollback-rf1.json（回復檔，內容與 --execute 印出的 Current partition replica assignment 相同，用 python 從該輸出重建，回復時需複製進容器再 --execute）。含密碼的 config.json 已刪除。",
+    "容器 kafka_1 的 /tmp 內另有 connect-rf2.json（計畫）與 connect-rf1-rollback.json（回復檔），重建容器會消失。",
+    "hook 禁止把 docker 輸出重導到主機檔，所以三個 topic 的 describe-before 備份沒有存到 $TMPDIR；變更前的輸出（RF=1、min.insync.replicas=2）只在容器 kafka_1 的 /tmp/desc.txt，回復用的 min.insync.replicas=2 與 RF=1 值已記在回復檔與本回報。",
+    "未做步驟 7 停 broker 演練（屬 stability-dev-verify）；未重啟 connect；未改 repo、未 commit。"
+  ]
+}

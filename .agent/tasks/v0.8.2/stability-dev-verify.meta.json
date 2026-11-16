@@ -1,0 +1,15 @@
+{
+  "task_id": "stability-dev-verify",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "在開發環境部署 develop 最新版，實測 v0.8.2 的驗收條件：停任一台 broker 時 connect 照樣啟動且 connector 還在、推論在資源上限內補完積壓、重建 postgres 後 init 一次成功、producer fatal／結束後被 docker 重啟並恢復送訊息；只操作，不改程式，PR 作廢",
+  "issue": 307,
+  "branch": "chore/stability-dev-verify",
+  "worktree": ".worktrees/stability-dev-verify",
+  "pr": null,
+  "qa": null,
+  "review": null,
+  "merged": false,
+  "cancelled": true
+}

@@ -1,0 +1,22 @@
+{
+  "task_id": "heat-alert-dup-investigate",
+  "status": "done",
+  "files_changed": [],
+  "verification": {
+    "command": "docker compose --env-file .env -f .worktrees/heat-alert-dup-investigate/compose.yaml run --rm test pytest tests/integration/streaming/test_dup_probe.py -q -s -p no:xdist -k 'both_live' (另有 -k 'single or two'、-k 'b_starts or dlq_publish'；探針測試與子程序腳本是暫放 worktree 的未追蹤檔，跑完已刪除，git status 乾淨；已 down -v)",
+    "exit_code": 0,
+    "tail": "[two live groups attempt=1] alerts=4: board 85 DUP, post 80 DUP, board 85 DUP, post 80 DUP (attempt 2、3 同) | [B late attempt=1] board 2026-11-04T08:34:00Z 76 與 71 同 alert_id 95cd4a08 DUP；attempt=2 94 與 90 同 alert_id 67f35cfb DUP | [dlq raising] RESULT: app.run RAISED ProducerFatalError ... after 0.7 s; 3 passed, 3 passed, 2 passed"
+  },
+  "open_questions": [
+    "【需調查 2 結論：已重現，根因是同一個 topic 上同時有兩個 heat consumer group，不是 state 回退，也不是 heat 邏輯錯】兩個 group 各有自己的 state 與 changelog，對同一筆事件各自結算同一分鐘，產生同一個 alert_id（uuid5 只含 unit_type、unit_key、window_end，與 group 無關），各寫一筆到同一個 output topic。",
+    "重現步驟（整合測試環境，真的 Kafka、exactly-once、3 partition 輸入 topic 對應 replay.cdc.comments、1 partition 輸出）：①建輸入／輸出 topic；②兩個子程序各跑 build_app（HEAT_CONSUMER_GROUP 不同、同一個 HEAT_INPUT_TOPIC／HEAT_OUTPUT_TOPIC、不同 state_dir、同名 mock registry），app.run(timeout=25)；③送 90 分鐘暖機資料（每分鐘 3 則、多篇文章）；④等 10 秒再送 surge（80 則／3 分鐘＋1 則收尾，與 replay.surge_events 同形）；⑤以 read_committed 讀輸出 topic。結果：兩個 group 同時在線 3 次嘗試都重複，4 則警示 = 2 個 alert_id 各兩筆（board 85／85、87／87、86／86，post 80／80）；B 在 surge 後才啟動（A 即時、B 從頭讀）2 次嘗試都重複且 value 不同：board 76 與 71、94 與 90，與 UAT 的 62／143 同型（同 alert_id、value 不同）。單一 group 沒有任何重複（1 partition 與 3 partition 各跑一次，另有既有整合測試 test_restart_restores_state_and_does_not_realert 通過：新 state 目錄、只靠 changelog 恢復也不重發）。",
+    "value 不同的原因：輸入 topic 有 3 個 partition，事件順序只在 partition 內固定；兩個 group 讀 partition 的交錯順序與時機不同（即時讀 vs 從頭批次讀），watermark 前進時各分鐘已累計的推文數不同，結算值就不同（結算後才到、仍在寬限內的推文不再重評）。同一個 group 內結算一分鐘只會發生一次。這同時是 F-9「文章警示 value=80 沒出現」的第二個原因：單一 group、3 partition 輸入的探針有一次只收到看板警示 99、沒有文章警示（另一次單 partition 有 board 106 與 post 80 共兩則），文章警示取決於跨 partition 的到達順序（暖機尾端事件晚於 surge 事件時被當遲到丟棄）。與開發規格 7.20「單一 partition 事件順序才固定」的測試備註一致。",
+    "排除的假設：①同一份 state 重算已結算分鐘（advance 只結算 watermark 之後、冷卻擋同一單位；單一 group 重啟與換 state_dir 都不重發）；②exactly-once 的交易回退（read_committed 下單 group 無重複）；③alert_id 設計有誤（相同事件窗口本來就應得同 id，bot 以此去重正是為了這種情況）。",
+    "UAT 當時為什麼會有兩個 group：我沒有 UAT 環境的證據，只能推論：7.20 步驟 3 每輪用 heat-replay-$(date +%s) 換新 group、步驟 7 靠人停掉上一輪的 heat；上一輪若沒真的結束（例如 uv run 包裝程序被 timeout 殺掉後 python 子程序變孤兒，或 UAT 自動化沒殺乾淨），舊 group 仍在讀同一個 replay.cdc.comments 並寫 replay.alerts。UAT 另列的 D-038（遺留 heat-replay-* group 與內部 topic）正好說明這類 group 殘留。建議 manager 向 uat 確認：F-9 第 2 輪時 kafka-consumer-groups 有沒有第 2 個 heat-replay-* group 處於 Stable／有成員。",
+    "建議修法與影響（不改正式 heat）：①文件：7.20 步驟 7 與「沒看到警示時的查法」加一條「重做前用 Kafka UI 或 kafka-consumer-groups 確認沒有其他 heat-replay-* group 仍有成員；有就先停掉」，並註明 replay.alerts 出現同 alert_id 的兩筆代表有兩個 group 同時在算；②可選：replay 工具在 warn_if_replay_topic_dirty 旁偵測 heat-replay-* group 仍有成員時警告（小改動，已在 cli-wording-sha256 的 replay.py 範圍外，需另開單）；③正式環境只有一個 group heat，不受影響；bot 以 alert_id 去重（只推第一筆），影響只在 replay.alerts／alerts 列數，ClickHouse alerts 表若沒有以 alert_id 去重會多算——但正式環境不會發生，不需處理。不建議為此改 alert_id 或 heat 程式。",
+    "【需調查 3 結論（#271）：on_consumer_error 回呼丟例外時 app.run() 會中止，不會被吞掉】讀 quixstreams 3.28.1 原始碼：internal_consumer/consumer.py 的 `except Exception as exc: to_suppress = self._on_error(exc, msg, logger); if to_suppress: return None; raise`——回呼自己丟例外時，例外直接從 except 區塊傳出，不會被捕捉，沿 process_message 傳到 app.run 的 exit_stack，_exception_handler 呼叫 stop(fail=True)、回傳 False，例外往外丟。實際執行：用真的 JsonProducer 並注入 fatal 狀態（_set_fatal）、送 1 則非 Avro 訊息再送 surge，DlqPublisher 於 on_error 內 publish 拋 ProducerFatalError；結果 `app.run RAISED ProducerFatalError producer is in fatal state ... after 0.7 s`，Quix log `Application is stopping due to failure, latest checkpoint will not be committed`（該批不 commit，重啟後重讀，符合 at-least-once 與冪等）。",
+    "需調查 3 的影響：heat 的 DLQ producer 進入 fatal 時，下一則壞訊息會讓 app.run 以 ProducerFatalError 結束，main() 的 @log.catch(level=CRITICAL) 記 CRITICAL 並離開，docker 重啟，與 consumer 類服務一致，不需要改 heat；開發規格 7.30 A 的已知限制可改寫成「已驗證會中止」，不必保留『Quix 自己的 producer 不受影響』的 fallback 寫法。小提醒（非缺陷）：main() 的 finally: producer.flush() 在 producer fatal 時會再丟 ProducerFatalError，若 app.run 本來丟的是別的例外，會被它蓋掉（原例外仍在 __context__）；因為兩者都結束程式，行為相同，可不處理。",
+    "附帶發現（未驗證修法，列 backlog 參考）：回放暖機資料若含非 PTT 格式的 post_id，heat 的 board_of 會 raise ValueError 讓整個 app 結束（我的第一版探針用了錯的檔名而中止）；正式資料來自爬蟲，格式由 parser 保證，風險低。",
+    "交付前檢查清單：本張只調查，無新端點、migration、設定、程式變更；未 commit；repo 無任何檔案變更（git status 乾淨）；容器已 down -v；未碰開發環境（專案 radar）。"
+  ]
+}

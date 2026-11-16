@@ -1,0 +1,30 @@
+{
+  "task_id": "backfill-since-filename",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "補抓終點 `since` 改用 PG 文章 `post_id` 檔名時間的最大值減 10 分鐘，標頭時間是未來時間時補抓不會停掉（#268）",
+  "issue": 299,
+  "branch": "fix/backfill-since-filename",
+  "worktree": ".worktrees/backfill-since-filename",
+  "pr": 302,
+  "qa": {
+    "result": "pass",
+    "sha": "dd33a1fdab160859879cb9f1287f3ef19d7211c4",
+    "by": "qa",
+    "carried_from": "5df217ba1d652719f8c34914525a1f2b7b8a395f"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "dd33a1fdab160859879cb9f1287f3ef19d7211c4",
+    "by": "architect",
+    "carried_from": "5df217ba1d652719f8c34914525a1f2b7b8a395f"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "5d9d6943e3250809a6fdccd609b4bd00216cf8b8",
+    "sha": "dd33a1fdab160859879cb9f1287f3ef19d7211c4",
+    "carried_from": "5df217ba1d652719f8c34914525a1f2b7b8a395f"
+  },
+  "node_at": 1793779775.36309
+}

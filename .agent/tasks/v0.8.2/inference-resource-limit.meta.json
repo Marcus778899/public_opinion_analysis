@@ -1,0 +1,30 @@
+{
+  "task_id": "inference-resource-limit",
+  "kind": "fix",
+  "owner": "backend",
+  "lane": "full",
+  "title": "compose `inference` 加資源上限 `cpus: 2`、`mem_limit: 2g`、`INFERENCE_THREADS: '2'`（#289）",
+  "issue": 303,
+  "branch": "fix/inference-resource-limit",
+  "worktree": ".worktrees/inference-resource-limit",
+  "pr": 304,
+  "qa": {
+    "result": "pass",
+    "sha": "35c02f6dae64b21f7e6a1365efd344db10d22d8f",
+    "by": "qa",
+    "carried_from": "862e62b8061fc0c5fce8c22c281af238b08b2c33"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "35c02f6dae64b21f7e6a1365efd344db10d22d8f",
+    "by": "architect",
+    "carried_from": "862e62b8061fc0c5fce8c22c281af238b08b2c33"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "61b1b8e21dbf5609970d32196a44bdc20c728658",
+    "sha": "35c02f6dae64b21f7e6a1365efd344db10d22d8f",
+    "carried_from": "862e62b8061fc0c5fce8c22c281af238b08b2c33"
+  },
+  "node_at": 1793780281.5653288
+}

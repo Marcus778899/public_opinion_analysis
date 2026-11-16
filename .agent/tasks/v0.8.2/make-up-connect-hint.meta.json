@@ -1,0 +1,25 @@
+{
+  "task_id": "make-up-connect-hint",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "`make up` 的說明寫清楚：只起基礎設施、沒有 init 時 connect 會 unhealthy、`--wait` 會失敗，以及要完整啟動該用哪個指令（#309，UAT v0.8.2 F-2）",
+  "issue": 312,
+  "branch": "chore/make-up-connect-hint",
+  "worktree": ".worktrees/make-up-connect-hint",
+  "pr": 313,
+  "qa": {
+    "result": "pass",
+    "sha": "c75a06318a19e58ce7b3e3d362a33fae3937e936",
+    "by": "qa"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "c75a06318a19e58ce7b3e3d362a33fae3937e936",
+    "by": "architect"
+  },
+  "merged": true,
+  "lane_upgraded": [
+    "碰到受保護路徑 Makefile"
+  ]
+}

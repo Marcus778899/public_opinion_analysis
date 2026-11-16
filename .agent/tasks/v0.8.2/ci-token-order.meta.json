@@ -1,0 +1,30 @@
+{
+  "task_id": "ci-token-order",
+  "kind": "chore",
+  "owner": "backend",
+  "lane": "full",
+  "title": "CI integration job 先跑 `git diff` 再 checkout agent-engineering 工具，token 在 PR 程式執行前就離開程序（#277）；Makefile `setup` 註解改成 `ae check-env setup`（#276）",
+  "issue": 300,
+  "branch": "chore/ci-token-order",
+  "worktree": ".worktrees/ci-token-order",
+  "pr": 301,
+  "qa": {
+    "result": "pass",
+    "sha": "5a38cc67de065b15acbd78568eee2268aa021b82",
+    "by": "qa",
+    "carried_from": "0f86c7ace7b42d5fdc5229f164999da88c430f2b"
+  },
+  "review": {
+    "result": "approve",
+    "sha": "5a38cc67de065b15acbd78568eee2268aa021b82",
+    "by": "architect",
+    "carried_from": "0f86c7ace7b42d5fdc5229f164999da88c430f2b"
+  },
+  "merged": true,
+  "acceptance_lock": {
+    "patch": "0882457d597ccf5d3012963e54fb684f8b8ceaa4",
+    "sha": "5a38cc67de065b15acbd78568eee2268aa021b82",
+    "carried_from": "0f86c7ace7b42d5fdc5229f164999da88c430f2b"
+  },
+  "node_at": 1793779721.269081
+}
