@@ -64,10 +64,11 @@
 
 | 任務 | 負責 | 狀態 | 嘗試 | 驗收證據 |
 |---|---|---|---|---|
+| gitleaks-archive-path | architect | done | 0 | PR #348 |
 
 ## 卡住／待甲方決定
 
-- develop CI 紅：v0.9.0 封存 commit ed18b69 被 gitleaks 擋（.agent/tasks/ 不在 D-018 排除）；修正單 gitleaks-archive-path 進行中，其他單照做到 merge 前
+- （無）
 
 ## 注意事項（踩過的坑）
 
